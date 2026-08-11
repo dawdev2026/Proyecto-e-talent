@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [development, qa, main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate Metricatest
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '7.4'
+          extensions: mbstring, mysqli, pdo_mysql, intl, zip
+          coverage: none
+
+      - name: Validate Composer definition
+        run: composer validate --no-check-publish
+
+      - name: Install PHP dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: Check PHP syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r file; do php -l "$file" >/dev/null; done < <(
+            find . -type f -name '*.php' \
+              -not -path './vendor/*' -not -path './sistema/vendor/*' \
+              -not -path './database/sistema/vendor/*' -not -path './.git/*' | sort
+          )
+
+      - name: Check migration filenames
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r file; do
+            [[ "${file##*/}" =~ ^[0-9]{8}_[a-z0-9][a-z0-9_-]*\.(sql|php)$ ]] || {
+              echo "Invalid migration filename: $file" >&2; exit 1;
+            }
+          done < <(find database/migrations -type f \( -name '*.sql' -o -name '*.php' \) | sort)
+
+      - name: Check whitespace
+        run: git diff --check

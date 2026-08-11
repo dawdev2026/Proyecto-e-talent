@@ -1,0 +1,49 @@
+.DS_Store
+
+# Entorno Docker exclusivamente local; no se publica en GitHub
+docker/
+docker-compose.yml
+
+# Agentes e infraestructura interna exclusivamente local
+AGENTS.md
+.agents/
+.codex/
+config/agent-loop/
+
+# Credenciales y claves locales
+config/database.php
+config/integrations.php
+config/master.key
+config/*.secure
+
+# Dependencias instaladas; se reconstruyen con Composer
+vendor/
+sistema/vendor/
+database/sistema/vendor/
+
+# Datos generados localmente, respaldos y temporales
+backups/
+tmp/*
+!tmp/.gitkeep
+storage/*
+!storage/.gitkeep
+storage/agent-loop/runs/
+
+# Analisis y artefactos locales no necesarios para ejecutar la plataforma
+analisis/*.xlsx
+public/error_log
+public/tmp/*
+!public/tmp/.gitkeep
+database/public/tmp/*
+!database/public/tmp/.gitkeep
+database/tmp/*
+!database/tmp/.gitkeep
+config/ambientes.local.env
+deployment-*.txt
+reports/db-structure/
+
+# Cargas de usuarios; se conservan solo los assets de branding del proyecto
+public/uploads/*
+!public/uploads/.gitkeep
+!public/uploads/branding/
+!public/uploads/branding/**

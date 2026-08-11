@@ -1,0 +1,11 @@
+{
+  "license": "proprietary",
+  "config": {
+    "vendor-dir": "sistema/vendor"
+  },
+  "require": {
+    "phpoffice/phpspreadsheet": "^1.29",
+    "smalot/pdfparser": "^2.12",
+    "thiagoalessio/tesseract_ocr": "^2.13"
+  }
+}

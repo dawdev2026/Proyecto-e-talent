@@ -1,0 +1,181 @@
+.daily-kit-shell {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    width: 100%;
+}
+
+.daily-kit-launcher,
+.daily-kit-state {
+    align-items: center;
+    border: 1px solid #d7dce2;
+    border-radius: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    justify-content: center;
+    min-height: 18rem;
+    padding: 2rem;
+    text-align: center;
+}
+
+.daily-kit-launcher h2,
+.daily-kit-state h2 {
+    font-size: 1.25rem;
+    margin: 0;
+}
+
+.daily-kit-launcher p,
+.daily-kit-state p {
+    color: #5f6875;
+    margin: 0;
+}
+
+.daily-kit-button {
+    align-items: center;
+    background: #1a73e8;
+    border: 1px solid #1a73e8;
+    border-radius: 0.5rem;
+    color: #fff;
+    cursor: pointer;
+    display: inline-flex;
+    font: inherit;
+    font-weight: 700;
+    justify-content: center;
+    min-height: 2.75rem;
+    padding: 0.65rem 1.1rem;
+    text-decoration: none;
+}
+
+.daily-kit-button:hover {
+    background: #155fbe;
+    color: #fff;
+}
+
+.daily-kit-button-secondary {
+    background: #fff;
+    color: #1a73e8;
+}
+
+.daily-kit-button-secondary:hover {
+    background: #eef4ff;
+    color: #155fbe;
+}
+
+.daily-kit-button:disabled {
+    cursor: wait;
+    opacity: 0.65;
+}
+
+.daily-kit-meeting {
+    border: 1px solid #d7dce2;
+    border-radius: 0.75rem;
+    min-height: 40rem;
+    overflow: hidden;
+    width: 100%;
+}
+
+.daily-kit-transcription,
+.daily-kit-pool {
+    align-items: center;
+    border: 1px solid #d7dce2;
+    border-radius: 0.75rem;
+    display: flex;
+    gap: 0.75rem;
+    justify-content: space-between;
+    padding: 0.85rem 1rem;
+}
+
+.daily-kit-transcription-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.daily-kit-pool {
+    align-items: flex-start;
+    flex-direction: column;
+}
+
+.daily-kit-icon {
+    align-items: center;
+    border: 1px solid #d7dce2;
+    border-radius: 999px;
+    display: inline-flex;
+    font-weight: 800;
+    height: 2.5rem;
+    justify-content: center;
+    width: 2.5rem;
+}
+
+.daily-kit-settings {
+    border: 1px solid #d7dce2;
+    border-radius: 0.75rem;
+    padding: 1rem;
+}
+
+.daily-kit-settings-header {
+    margin-bottom: 1rem;
+}
+
+.daily-kit-settings-header h2,
+.daily-kit-settings-header p {
+    margin: 0;
+}
+
+.daily-kit-settings-header p {
+    color: #5f6875;
+    margin-top: 0.25rem;
+}
+
+.daily-kit-settings-grid {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.daily-kit-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.daily-kit-field input[type="text"],
+.daily-kit-field input[type="password"],
+.daily-kit-field input[type="number"] {
+    border: 1px solid #d7dce2;
+    border-radius: 0.5rem;
+    font: inherit;
+    min-height: 2.5rem;
+    padding: 0.5rem 0.7rem;
+}
+
+.daily-kit-field small {
+    color: #5f6875;
+}
+
+.daily-kit-switch {
+    align-items: center;
+    flex-direction: row;
+}
+
+@media (max-width: 575.98px) {
+    .daily-kit-launcher,
+    .daily-kit-state {
+        min-height: 14rem;
+        padding: 1.25rem;
+    }
+
+    .daily-kit-meeting {
+        min-height: 32rem;
+    }
+
+    .daily-kit-transcription {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .daily-kit-settings-grid {
+        grid-template-columns: 1fr;
+    }
+}
