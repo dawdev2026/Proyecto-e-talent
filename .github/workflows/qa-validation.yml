@@ -1,0 +1,43 @@
+name: QA functional and accessibility validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: Public QA URL
+        required: false
+        default: https://metrictest.dawchile.cl
+
+permissions:
+  contents: read
+
+jobs:
+  validate-qa:
+    name: Crawl QA and audit accessibility
+    runs-on: ubuntu-latest
+    environment: qa-validation
+    timeout-minutes: 20
+    steps:
+      - name: Checkout QA commit
+        uses: actions/checkout@v4
+        with:
+          ref: qa
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install browser test dependencies
+        run: npm install --no-save --no-package-lock playwright@1.51.1 @axe-core/playwright@4.10.2
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run functional and accessibility suite
+        env:
+          QA_BASE_URL: ${{ inputs.base_url }}
+          QA_TEST_EMAIL: ${{ secrets.QA_TEST_EMAIL }}
+          QA_TEST_PASSWORD: ${{ secrets.QA_TEST_PASSWORD }}
+          QA_MAX_PAGES: 80
+        run: node .github/qa/qa-platform.spec.mjs
