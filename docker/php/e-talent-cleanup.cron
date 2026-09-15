@@ -1,0 +1,4 @@
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+0 0 * * * www-data /usr/local/bin/php /var/www/html/plataformas/tests/bin/cleanup-report-temporaries.php >> /var/www/html/tmp/report-cleaner.log 2>&1

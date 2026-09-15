@@ -24,12 +24,25 @@ final class CompanyModel
 
     public function active(): array
     {
-        return $this->db->fetchAll('SELECT id, name FROM companies WHERE is_active = 1 ORDER BY name');
+        return $this->db->fetchAll('SELECT id, name, url_prefix FROM companies WHERE is_active = 1 ORDER BY name');
+    }
+
+    public function findByUrlPrefix(string $prefix): ?array
+    {
+        return $this->db->fetch(
+            'SELECT * FROM companies WHERE url_prefix = ? AND is_active = 1 LIMIT 1',
+            [mb_strtolower(trim($prefix))]
+        );
     }
 
     public function find(int $id): ?array
     {
         return $this->db->fetch('SELECT * FROM companies WHERE id = ? LIMIT 1', [$id]);
+    }
+
+    public function setVerificationEnabled(int $id, bool $enabled): void
+    {
+        $this->db->execute('UPDATE companies SET verification_enabled = ? WHERE id = ?', [$enabled ? 1 : 0, $id]);
     }
 
     public function activeAdmins(int $companyId): array
@@ -47,11 +60,12 @@ final class CompanyModel
     {
         return (int) $this->db->transaction(function () use ($data): int {
             $companyId = $this->db->insert('
-                INSERT INTO companies (name, tax_id, is_active)
-                VALUES (?, ?, ?)
+                INSERT INTO companies (name, tax_id, url_prefix, is_active)
+                VALUES (?, ?, ?, ?)
             ', [
                 $data['name'],
                 $data['tax_id'] ?: null,
+                $data['url_prefix'],
                 (int) $data['is_active'],
             ]);
             $profile = $this->db->fetch("SELECT id FROM role_profiles WHERE role_key = 'company_admin' AND is_active = 1 LIMIT 1");
@@ -72,6 +86,8 @@ final class CompanyModel
                 $companyId,
             ]);
 
+            $this->copyBaseUserFields($companyId);
+
             return $companyId;
         });
     }
@@ -80,11 +96,12 @@ final class CompanyModel
     {
         $this->db->execute('
             UPDATE companies
-            SET name = ?, tax_id = ?, is_active = ?
+            SET name = ?, tax_id = ?, url_prefix = ?, is_active = ?
             WHERE id = ?
         ', [
             $data['name'],
             $data['tax_id'] ?: null,
+            $data['url_prefix'],
             (int) $data['is_active'],
             $id,
         ]);
@@ -111,5 +128,22 @@ final class CompanyModel
                 $companyId,
             ]);
         });
+    }
+
+    private function copyBaseUserFields(int $companyId): void
+    {
+        $baseCompany = $this->db->fetch('SELECT MIN(company_id) AS id FROM user_field_definitions WHERE company_id IS NOT NULL');
+        $baseCompanyId = (int) ($baseCompany['id'] ?? 0);
+        if ($companyId <= 0 || $baseCompanyId <= 0 || $baseCompanyId === $companyId) {
+            return;
+        }
+
+        $this->db->execute('
+            INSERT IGNORE INTO user_field_definitions
+                (company_id, scope_type, scope_key, field_key, label, field_type, validation_rule, validation_pattern, validation_message, options, help_text, is_required, show_in_list, sort_order, is_active)
+            SELECT ?, scope_type, scope_key, field_key, label, field_type, validation_rule, validation_pattern, validation_message, options, help_text, is_required, show_in_list, sort_order, is_active
+            FROM user_field_definitions
+            WHERE company_id = ?
+        ', [$companyId, $baseCompanyId]);
     }
 }

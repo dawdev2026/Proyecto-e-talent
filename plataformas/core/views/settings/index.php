@@ -1,30 +1,36 @@
 <?php
-$mail = $integrationsConfig['mail'] ?? [];
+$companyBrandingMode = !empty($companyBrandingMode);
+$mail = !empty($companyBrandingMode) ? ($companyMailSettings ?? []) : ($integrationsConfig['mail'] ?? []);
 $dbConnections = is_array($databaseConfig['connections'] ?? null) ? $databaseConfig['connections'] : [];
 $dbConnectionLabels = [
-    'core' => ['label' => 'Core', 'description' => 'Usuarios, perfiles, empresas, campos de usuario y configuracion transversal.', 'default' => 'metricatest_core'],
-    'tests' => ['label' => 'Tests', 'description' => 'Instrumentos, preguntas, sesiones, respuestas, scoring, baremos y reportes.', 'default' => 'metricatest_tests'],
+    'core' => ['label' => 'Core', 'description' => 'Usuarios, perfiles, empresas, campos de usuario y configuracion transversal.', 'default' => 'e_talent_core'],
+    'tests' => ['label' => 'Tests', 'description' => 'Instrumentos, preguntas, sesiones, respuestas, scoring, baremos y reportes.', 'default' => 'e_talent_tests'],
 ];
+$settingsTab = $settingsTab ?? '';
+$verificationActive = $settingsTab === 'verification';
 ?>
 <section class="page-header">
     <div>
         <p class="text-uppercase text-primary fw-bold small mb-1">Administracion</p>
-        <h1 class="fw-bold mb-1">Configuracion de plataforma</h1>
-        <p class="text-muted mb-0">Administra conexion, correo del sistema y experiencia visual del login.</p>
+        <h1 class="fw-bold mb-1"><?= $companyBrandingMode ? 'Identidad visual de la empresa' : 'Configuracion de plataforma' ?></h1>
+        <p class="text-muted mb-0"><?= $companyBrandingMode ? 'Personaliza el login y la experiencia visual de tu empresa.' : 'Administra conexion, correo del sistema y experiencia visual del login.' ?></p>
     </div>
 </section>
 
 <ul class="nav nav-tabs settings-tabs mb-4" role="tablist">
-    <li class="nav-item" role="presentation"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#settings-login" type="button">Login</button></li>
-    <li class="nav-item" role="presentation"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#settings-design" type="button">Diseño plataforma</button></li>
-    <li class="nav-item" role="presentation"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#settings-mail" type="button">Correo</button></li>
-    <li class="nav-item" role="presentation"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#settings-operational" type="button">Evidencia audiovisual</button></li>
-    <li class="nav-item" role="presentation"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#settings-db" type="button">Base de datos</button></li>
-    <li class="nav-item" role="presentation"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#settings-platforms" type="button">Sub-plataformas</button></li>
+    <li class="nav-item" role="presentation"><button id="settings-login-tab" class="nav-link <?= $verificationActive ? '' : 'active' ?>" role="tab" aria-controls="settings-login" aria-selected="<?= $verificationActive ? 'false' : 'true' ?>" data-bs-toggle="tab" data-bs-target="#settings-login" type="button">Login</button></li>
+    <li class="nav-item" role="presentation"><button id="settings-design-tab" class="nav-link" role="tab" aria-controls="settings-design" aria-selected="false" data-bs-toggle="tab" data-bs-target="#settings-design" type="button">Diseño plataforma</button></li>
+    <li class="nav-item" role="presentation"><button id="settings-mail-tab" class="nav-link" role="tab" aria-controls="settings-mail" aria-selected="false" data-bs-toggle="tab" data-bs-target="#settings-mail" type="button">Correo<?= !empty($companyBrandingMode) ? ' de la empresa' : '' ?></button></li>
+    <?php if (!$companyBrandingMode): ?>
+        <li class="nav-item" role="presentation"><button id="settings-operational-tab" class="nav-link" role="tab" aria-controls="settings-operational" aria-selected="false" data-bs-toggle="tab" data-bs-target="#settings-operational" type="button">Evidencia audiovisual</button></li>
+        <li class="nav-item" role="presentation"><button id="settings-db-tab" class="nav-link" role="tab" aria-controls="settings-db" aria-selected="false" data-bs-toggle="tab" data-bs-target="#settings-db" type="button">Base de datos</button></li>
+        <li class="nav-item" role="presentation"><button id="settings-platforms-tab" class="nav-link" role="tab" aria-controls="settings-platforms" aria-selected="false" data-bs-toggle="tab" data-bs-target="#settings-platforms" type="button">Sub-plataformas</button></li>
+    <?php endif; ?>
+    <?php if ($companyBrandingMode): ?><li class="nav-item" role="presentation"><button id="settings-verification-tab" class="nav-link <?= $verificationActive ? 'active' : '' ?>" role="tab" aria-controls="settings-verification" aria-selected="<?= $verificationActive ? 'true' : 'false' ?>" data-bs-toggle="tab" data-bs-target="#settings-verification" type="button">Verificación de usuarios</button></li><?php endif; ?>
 </ul>
 
 <div class="tab-content">
-    <section id="settings-login" class="tab-pane fade show active content-panel">
+    <section id="settings-login" role="tabpanel" aria-labelledby="settings-login-tab" tabindex="0" class="tab-pane fade <?= $verificationActive ? '' : 'show active' ?> content-panel">
         <form method="post" enctype="multipart/form-data" class="row g-3 align-items-end mb-4 pb-4 border-bottom">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="section" value="login_preset">
@@ -69,6 +75,28 @@ $dbConnectionLabels = [
                             <?php endforeach; ?>
                         </select>
                         <div class="form-text">Define que dato se pedira como usuario en el login.</div>
+                    </div>
+                    <div class="col-12">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" role="switch" id="login_password_recovery_enabled" name="login_password_recovery_enabled" value="1" <?= !empty($loginSettings['login_password_recovery_enabled']) && in_array((string) $loginSettings['login_password_recovery_enabled'], ['1', 'true', 'on', 'yes'], true) ? 'checked' : '' ?>>
+                            <label class="form-check-label fw-semibold" for="login_password_recovery_enabled">Permitir olvidar contraseña</label>
+                        </div>
+                        <div class="form-text">Controla si los usuarios de esta empresa pueden solicitar un enlace para recuperar su clave.</div>
+                    </div>
+                    <div class="col-12">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" role="switch" id="login_two_step_enabled" name="login_two_step_enabled" value="1" <?= !empty($loginSettings['login_two_step_enabled']) && in_array((string) $loginSettings['login_two_step_enabled'], ['1', 'true', 'on', 'yes'], true) ? 'checked' : '' ?>>
+                            <label class="form-check-label fw-semibold" for="login_two_step_enabled">Activar verificación de dos pasos por correo</label>
+                        </div>
+                        <div class="form-text">Después de validar usuario y clave, se enviará un código de 6 dígitos. El código anterior queda invalidado al generar uno nuevo.</div>
+                    </div>
+                    <div class="col-12 col-lg-6">
+                        <label class="form-label" for="login_two_step_expiration_minutes">Vigencia del código (minutos)</label>
+                        <input id="login_two_step_expiration_minutes" class="form-control form-control-lg" type="number" min="2" max="15" name="login_two_step_expiration_minutes" value="<?= e($loginSettings['login_two_step_expiration_minutes']) ?>">
+                    </div>
+                    <div class="col-12 col-lg-6">
+                        <label class="form-label" for="login_two_step_max_attempts">Intentos máximos por código</label>
+                        <input id="login_two_step_max_attempts" class="form-control form-control-lg" type="number" min="3" max="10" name="login_two_step_max_attempts" value="<?= e($loginSettings['login_two_step_max_attempts']) ?>">
                     </div>
                     <div class="col-12 col-lg-6">
                         <label class="form-label" for="login_subtitle_font_size">Tamano bajada</label>
@@ -132,7 +160,33 @@ $dbConnectionLabels = [
         </form>
     </section>
 
-    <section id="settings-operational" class="tab-pane fade content-panel">
+    <?php if ($companyBrandingMode && $company): ?>
+        <section id="settings-verification" role="tabpanel" aria-labelledby="settings-verification-tab" tabindex="0" class="tab-pane fade <?= $verificationActive ? 'show active' : '' ?> content-panel">
+            <form method="post" class="row g-4 needs-validation" novalidate>
+                <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                <input type="hidden" name="section" value="user_verification">
+                <div class="col-12">
+                    <h2 class="h5 fw-bold mb-1">Verificación pública de usuarios</h2>
+                    <p class="text-muted mb-0">Permite consultar, sin iniciar sesión, si un usuario está activo y en qué procesos participa dentro de tu empresa.</p>
+                </div>
+                <div class="col-12">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" role="switch" id="verification_enabled" name="verification_enabled" value="1" <?= (int) ($company['verification_enabled'] ?? 0) === 1 ? 'checked' : '' ?>>
+                        <label class="form-check-label fw-semibold" for="verification_enabled">Activar pantalla de verificación</label>
+                    </div>
+                </div>
+                <div class="col-12 col-lg-8">
+                    <label class="form-label" for="verification_url">URL de acceso</label>
+                    <input id="verification_url" class="form-control" type="text" value="<?= e(app_absolute_url('/' . $company['url_prefix'] . '/verificar-usuario')) ?>" readonly>
+                    <div class="form-text">Comparte este enlace con las personas autorizadas para realizar consultas.</div>
+                </div>
+                <div class="col-12 col-lg-4 d-flex align-items-end"><a class="btn btn-outline-primary w-100" href="<?= e(app_url('/' . $company['url_prefix'] . '/verificar-usuario')) ?>" target="_blank" rel="noopener">Abrir pantalla</a></div>
+                <div class="col-12"><button class="btn btn-primary px-4" type="submit"><i class="bi bi-check2 me-1"></i> Guardar configuración</button></div>
+            </form>
+        </section>
+    <?php endif; ?>
+
+    <?php if (!$companyBrandingMode): ?><section id="settings-operational" role="tabpanel" aria-labelledby="settings-operational-tab" tabindex="0" class="tab-pane fade content-panel">
         <form method="post" class="row g-4 needs-validation" novalidate>
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="section" value="operational">
@@ -154,9 +208,9 @@ $dbConnectionLabels = [
             </div>
             <div class="col-12"><button class="btn btn-primary px-4" type="submit"><i class="bi bi-hdd-stack me-1"></i> Guardar política</button></div>
         </form>
-    </section>
+    </section><?php endif; ?>
 
-    <section id="settings-design" class="tab-pane fade content-panel">
+    <section id="settings-design" role="tabpanel" aria-labelledby="settings-design-tab" tabindex="0" class="tab-pane fade content-panel">
         <form method="post" enctype="multipart/form-data" class="row g-3 align-items-end mb-4 pb-4 border-bottom">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="section" value="design_preset">
@@ -323,27 +377,44 @@ $dbConnectionLabels = [
         </form>
     </section>
 
-    <section id="settings-mail" class="tab-pane fade content-panel">
+    <section id="settings-mail" role="tabpanel" aria-labelledby="settings-mail-tab" tabindex="0" class="tab-pane fade content-panel">
         <form method="post" class="row g-4 needs-validation" novalidate>
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="section" value="mail">
             <div class="col-12">
                 <div class="form-check form-switch">
                     <input id="mail_enabled" class="form-check-input" type="checkbox" name="mail_enabled" <?= !empty($mail['enabled']) ? 'checked' : '' ?>>
-                    <label class="form-check-label" for="mail_enabled">Correo activo</label>
+                    <label class="form-check-label" for="mail_enabled">Correo <?= !empty($companyBrandingMode) ? 'de la empresa' : 'global' ?> activo</label>
                 </div>
+                <?php if (!empty($companyBrandingMode)): ?>
+                    <div class="form-text">Si el correo de la empresa no está configurado o queda desactivado, se utilizará el correo SMTP general.</div>
+                <?php endif; ?>
             </div>
             <div class="col-12 col-lg-6"><label class="form-label" for="mail_host">Servidor SMTP</label><input id="mail_host" class="form-control" name="mail_host" value="<?= e($mail['host'] ?? '') ?>"></div>
             <div class="col-12 col-lg-2"><label class="form-label" for="mail_port">Puerto</label><input id="mail_port" class="form-control" type="number" name="mail_port" value="<?= (int) ($mail['port'] ?? 587) ?>"></div>
+            <div class="col-12 col-lg-4"><label class="form-label" for="mail_encryption">Seguridad SMTP</label><select id="mail_encryption" class="form-select" name="mail_encryption"><option value="none" <?= ($mail['encryption'] ?? 'starttls') === 'none' ? 'selected' : '' ?>>Sin cifrado</option><option value="starttls" <?= ($mail['encryption'] ?? 'starttls') === 'starttls' ? 'selected' : '' ?>>STARTTLS</option><option value="smtps" <?= ($mail['encryption'] ?? 'starttls') === 'smtps' ? 'selected' : '' ?>>SMTPS / SSL</option></select></div>
             <div class="col-12 col-lg-4"><label class="form-label" for="mail_username">Usuario SMTP</label><input id="mail_username" class="form-control" name="mail_username" value="<?= e($mail['username'] ?? '') ?>"></div>
-            <div class="col-12 col-lg-6"><label class="form-label" for="mail_password">Clave SMTP</label><input id="mail_password" class="form-control" type="password" name="mail_password" placeholder="Dejar vacia para mantener"></div>
+            <div class="col-12 col-lg-4"><label class="form-label" for="mail_auth_type">Método de autenticación</label><select id="mail_auth_type" class="form-select" name="mail_auth_type"><option value="">Automático</option><option value="LOGIN">LOGIN</option><option value="PLAIN">PLAIN</option><option value="CRAM-MD5">CRAM-MD5</option></select></div>
+            <div class="col-12 col-lg-6">
+                <label class="form-label" for="mail_password">Clave SMTP</label>
+                <input id="mail_password" class="form-control" type="password" name="mail_password" placeholder="Dejar vacía para mantener">
+                <div class="form-text"><?= !empty($mail['password_configured']) ? 'Clave SMTP configurada y cifrada.' : 'La clave se almacenará cifrada.' ?></div>
+                <?php if (!empty($mail['password_configured'])): ?>
+                    <div class="form-check mt-2">
+                        <input id="mail_clear_password" class="form-check-input" type="checkbox" name="mail_clear_password" value="1">
+                        <label class="form-check-label" for="mail_clear_password">Eliminar la clave SMTP guardada</label>
+                    </div>
+                <?php endif; ?>
+            </div>
+            <div class="col-12 col-lg-3"><label class="form-label" for="mail_timeout">Tiempo de espera (segundos)</label><input id="mail_timeout" class="form-control" type="number" min="5" max="120" name="mail_timeout" value="<?= (int) ($mail['timeout'] ?? 30) ?>"></div>
+            <div class="col-12 col-lg-3"><div class="form-check form-switch mt-lg-4"><input id="mail_smtp_auth" class="form-check-input" type="checkbox" name="mail_smtp_auth" <?= !empty($mail['smtp_auth']) ? 'checked' : '' ?>><label class="form-check-label" for="mail_smtp_auth">Autenticación SMTP</label></div></div>
             <div class="col-12 col-lg-3"><label class="form-label" for="from_email">Correo remitente</label><input id="from_email" class="form-control" type="email" name="from_email" value="<?= e($mail['from_email'] ?? '') ?>"></div>
             <div class="col-12 col-lg-3"><label class="form-label" for="from_name">Nombre remitente</label><input id="from_name" class="form-control" name="from_name" value="<?= e($mail['from_name'] ?? '') ?>"></div>
             <div class="col-12"><button class="btn btn-primary px-4" type="submit"><i class="bi bi-check2 me-1"></i> Guardar correo</button></div>
         </form>
     </section>
 
-    <section id="settings-db" class="tab-pane fade content-panel">
+    <?php if (!$companyBrandingMode): ?><section id="settings-db" role="tabpanel" aria-labelledby="settings-db-tab" tabindex="0" class="tab-pane fade content-panel">
         <form method="post" class="row g-4 needs-validation" novalidate>
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="section" value="database">
@@ -372,16 +443,16 @@ $dbConnectionLabels = [
             <?php endforeach; ?>
             <div class="col-12"><button class="btn btn-primary px-4" type="submit"><i class="bi bi-shield-lock me-1"></i> Guardar cifrado</button></div>
         </form>
-    </section>
+    </section><?php endif; ?>
 
-    <section id="settings-platforms" class="tab-pane fade content-panel">
+    <?php if (!$companyBrandingMode): ?><section id="settings-platforms" role="tabpanel" aria-labelledby="settings-platforms-tab" tabindex="0" class="tab-pane fade content-panel">
         <div class="row g-3">
             <div class="col-12">
                 <h2 class="h5 fw-bold mb-1">Configuracion por sub-plataforma</h2>
                 <p class="text-muted mb-0">Cada sub-plataforma mantiene sus parametros en su propio modulo y base de datos.</p>
             </div>
             <div class="col-md-6 col-xl-4">
-                <div class="metric-card h-100">
+                <div class="card metric-card h-100">
                     <div class="d-flex align-items-start justify-content-between gap-3">
                         <div>
                             <span class="metric-icon mb-3"><i class="bi bi-clipboard2-pulse"></i></span>
@@ -393,5 +464,5 @@ $dbConnectionLabels = [
                 </div>
             </div>
         </div>
-    </section>
+    </section><?php endif; ?>
 </div>

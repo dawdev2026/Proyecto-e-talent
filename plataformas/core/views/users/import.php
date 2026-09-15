@@ -53,7 +53,7 @@ $errorSummary = $preview['error_summary'] ?? [
     </div>
 </section>
 
-<section class="content-panel import-panel">
+<section class="card content-panel import-panel">
     <div class="row g-4 align-items-stretch">
         <div class="col-12 col-xl-5">
             <form method="post" enctype="multipart/form-data" class="import-upload-box needs-validation" novalidate>
@@ -97,7 +97,7 @@ $errorSummary = $preview['error_summary'] ?? [
 </section>
 
 <?php if ($hasPreview): ?>
-    <section class="content-panel import-preview-panel">
+    <section class="card content-panel import-preview-panel">
         <div class="import-preview-header">
             <div>
                 <p class="text-uppercase text-primary fw-bold small mb-1">Previsualizacion editable</p>
@@ -371,6 +371,7 @@ $errorSummary = $preview['error_summary'] ?? [
                                             <select class="form-select <?= isset($fieldErrors['sex']) ? 'is-invalid' : '' ?>" form="userImportCorrectionForm" name="rows[<?= (int) $index ?>][data][sex]">
                                                 <option value="masculino" <?= ($data['sex'] ?? '') === 'masculino' ? 'selected' : '' ?>>Masculino</option>
                                                 <option value="femenino" <?= ($data['sex'] ?? '') === 'femenino' ? 'selected' : '' ?>>Femenino</option>
+                                                <option value="no_informado" <?= ($data['sex'] ?? '') === 'no_informado' ? 'selected' : '' ?>>No informado</option>
                                             </select>
                                             <?php foreach (($fieldErrors['sex'] ?? []) as $error): ?><div class="invalid-feedback d-block"><?= e($error) ?></div><?php endforeach; ?>
                                         </div>
@@ -449,7 +450,7 @@ $errorSummary = $preview['error_summary'] ?? [
         <?php endif; ?>
     </section>
 <?php else: ?>
-    <section class="content-panel import-preview-panel">
+    <section class="card content-panel import-preview-panel">
         <div class="import-empty-state">
             <i class="bi bi-file-earmark-spreadsheet"></i>
             <div>

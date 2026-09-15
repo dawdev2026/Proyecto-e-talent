@@ -5,22 +5,32 @@ final class TestController extends Controller
 {
     private TestInstrumentModel $tests;
     private TestSessionModel $sessions;
+    private TestProcessModel $processes;
     private TestSettingsModel $settings;
     private RiasecRecommendationService $riasecRecommendations;
     private ProgressRankingSummaryService $progressRankingSummary;
     private InterviewProcessModel $interviews;
     private TestMediaEvidenceModel $mediaEvidence;
+    private EvaluationSurveyFormModel $evaluationForms;
+    private EvaluationSurveyAttemptModel $evaluationAttempts;
+    private EvaluationSurveyControlModel $evaluationControl;
+    private EvaluationSurveyMediaEvidenceModel $evaluationMediaEvidence;
 
     public function __construct(?Template $view = null, ?TestInstrumentModel $tests = null, ?TestSessionModel $sessions = null, ?TestSettingsModel $settings = null, ?RiasecRecommendationService $riasecRecommendations = null, ?ProgressRankingSummaryService $progressRankingSummary = null, ?InterviewProcessModel $interviews = null, ?TestMediaEvidenceModel $mediaEvidence = null)
     {
         parent::__construct($view);
         $this->tests = $tests ?: new TestInstrumentModel();
         $this->sessions = $sessions ?: new TestSessionModel();
+        $this->processes = new TestProcessModel();
         $this->settings = $settings ?: new TestSettingsModel();
         $this->riasecRecommendations = $riasecRecommendations ?: new RiasecRecommendationService();
         $this->progressRankingSummary = $progressRankingSummary ?: new ProgressRankingSummaryService();
         $this->interviews = $interviews ?: new InterviewProcessModel();
         $this->mediaEvidence = $mediaEvidence ?: new TestMediaEvidenceModel();
+        $this->evaluationForms = new EvaluationSurveyFormModel();
+        $this->evaluationAttempts = new EvaluationSurveyAttemptModel();
+        $this->evaluationControl = new EvaluationSurveyControlModel();
+        $this->evaluationMediaEvidence = new EvaluationSurveyMediaEvidenceModel();
     }
 
     public function index(): void
@@ -28,7 +38,7 @@ final class TestController extends Controller
         require_permission('manage_tests');
 
         $this->render('tests/index', [
-            'title' => 'Evaluaciones | Metricatest',
+            'title' => 'Evaluaciones | e-talent',
             'currentPage' => 'tests',
             'tests' => $this->tests->all(),
             'categories' => TestInstrumentModel::CATEGORIES,
@@ -36,6 +46,87 @@ final class TestController extends Controller
             'itemTypes' => TestInstrumentModel::ITEM_TYPES,
             'sessions' => $this->sessions->allSessions(),
             'hasFinishedSessions' => $this->sessions->hasFinishedActiveSessions(),
+        ]);
+    }
+
+    public function companyAssignments(): void
+    {
+        require_permission('assign_tests');
+
+        $companies = (new CompanyModel())->active();
+        $companyId = max(0, (int) ($_GET['company_id'] ?? ($companies[0]['id'] ?? 0)));
+        $company = array_values(array_filter($companies, static fn(array $row): bool => (int) $row['id'] === $companyId))[0] ?? null;
+        if (!$company && $companies) {
+            $company = $companies[0];
+            $companyId = (int) $company['id'];
+        }
+
+        $assignments = $companyId > 0 ? (new CompanyTestAssignmentModel())->assignmentsForCompany($companyId) : [];
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            verify_csrf();
+            $companyId = max(0, (int) ($_POST['company_id'] ?? 0));
+            (new CompanyTestAssignmentModel())->saveCompanyAssignments($companyId, is_array($_POST['instruments'] ?? null) ? $_POST['instruments'] : []);
+            flash('success', 'Asignaciones y configuraciones de la empresa actualizadas correctamente.');
+            redirect(route_url('tests.company-assignments') . '?company_id=' . $companyId);
+        }
+
+        $this->render('tests/company_assignments', [
+            'title' => 'Asignar evaluaciones Empresa | e-talent',
+            'currentPage' => 'tests.company-assignments',
+            'companies' => $companies,
+            'company' => $company,
+            'assignments' => $assignments,
+        ]);
+    }
+
+    public function rankingCompanyAssignments(): void
+    {
+        require_permission('manage_ranking_presets');
+
+        $companies = (new CompanyModel())->active();
+        $officialConfig = $this->progressRankingSummary->officialConfig();
+        $presets = $this->settings->rankingPresetOptions($officialConfig);
+        $companyId = max(0, (int) ($_GET['company_id'] ?? ($companies[0]['id'] ?? 0)));
+
+        $companyIds = array_map(static fn(array $company): int => (int) ($company['id'] ?? 0), $companies);
+        if ($companyId > 0 && !in_array($companyId, $companyIds, true)) {
+            $companyId = (int) ($companies[0]['id'] ?? 0);
+        }
+
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            verify_csrf();
+            $companyId = max(0, (int) ($_POST['company_id'] ?? 0));
+            $presetId = max(0, (int) ($_POST['preset_id'] ?? 0));
+            if (!in_array($companyId, $companyIds, true)) {
+                flash('danger', 'La empresa seleccionada no existe o está inactiva.');
+            } else {
+                try {
+                    $this->settings->saveRankingCompanyAssignment(
+                        $companyId,
+                        $presetId > 0 ? $presetId : null,
+                        (int) (current_user()['id'] ?? 0)
+                    );
+                    flash('success', 'Configuración de ranking asignada a la empresa.');
+                } catch (Throwable $exception) {
+                    flash('danger', $exception->getMessage());
+                }
+            }
+            redirect(route_url('tests.ranking-company-assignments') . '?company_id=' . $companyId);
+        }
+
+        $assignmentRows = $this->settings->rankingCompanyAssignments();
+        $assignmentMap = [];
+        foreach ($assignmentRows as $assignment) {
+            $assignmentMap[(int) ($assignment['company_id'] ?? 0)] = $assignment;
+        }
+
+        $this->render('tests/ranking_company_assignments', [
+            'title' => 'Asignar ranking por empresa | e-talent',
+            'currentPage' => 'tests.ranking-company-assignments',
+            'companies' => $companies,
+            'presets' => $presets,
+            'selectedCompanyId' => $companyId,
+            'assignmentMap' => $assignmentMap,
         ]);
     }
 
@@ -58,7 +149,7 @@ final class TestController extends Controller
         ));
 
         $this->render('tests/progress', [
-            'title' => 'Estado Avance | Metricatest',
+            'title' => 'Estado Avance | e-talent',
             'currentPage' => 'tests.progress',
             'tests' => $activeTests,
             'sessions' => $dashboardSessions,
@@ -145,7 +236,7 @@ final class TestController extends Controller
 
     public function progressRanking(): void
     {
-        require_permission('manage_tests');
+        require_permission('manage_ranking_presets');
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             require_permission('manage_ranking_presets');
@@ -196,7 +287,7 @@ final class TestController extends Controller
         );
 
         $this->render('tests/progress_ranking', [
-            'title' => 'Ranking Resumen | Metricatest',
+            'title' => 'Ranking Resumen | e-talent',
             'currentPage' => 'tests.progress',
             'ranking' => $ranking,
             'dashboardFields' => $dashboardFields,
@@ -296,7 +387,7 @@ final class TestController extends Controller
         }
 
         $this->render('tests/assign', [
-            'title' => 'Asignar evaluacion | Metricatest',
+            'title' => 'Asignar evaluacion | e-talent',
             'currentPage' => 'tests.assign',
             'instruments' => $this->sessions->activeInstruments(),
             'users' => $this->sessions->assignableUsersForDemo(),
@@ -308,14 +399,20 @@ final class TestController extends Controller
     {
         require_auth();
         $sessions = $this->sessions->sessionsForUser((int) current_user()['id']);
+        $evaluationAssignments = $this->processes->evaluationAssignmentsForUser((int) current_user()['id']);
+        foreach ($evaluationAssignments as &$assignment) {
+            $assignment['process_availability'] = $this->sessions->availabilityForProcess((int) ($assignment['process_id'] ?? 0));
+        }
+        unset($assignment);
         $pendingAutoStartSession = $this->pendingAutoStartSession($sessions);
         $assignedTestsFinalized = $this->assignedTestsFinalized($sessions);
         $interviewAppointments = $this->interviews->appointmentsForCandidate((int) current_user()['id']);
 
         $this->render('tests/my', [
-            'title' => 'Mis evaluaciones | Metricatest',
+            'title' => 'Mis evaluaciones | e-talent',
             'currentPage' => 'my-tests',
             'sessions' => $sessions,
+            'evaluationAssignments' => $evaluationAssignments,
             'interviewAppointments' => $interviewAppointments,
             'pendingAutoStartSession' => $pendingAutoStartSession,
             'assignedTestsFinalized' => $assignedTestsFinalized,
@@ -356,7 +453,7 @@ final class TestController extends Controller
         }
 
         $this->render('tests/settings', [
-            'title' => 'Configuracion Evaluaciones | Metricatest',
+            'title' => 'Configuracion Evaluaciones | e-talent',
             'currentPage' => 'tests.settings',
             'settings' => $this->settings->evaluationMessages(),
             'defaults' => TestSettingsModel::DEFAULTS,
@@ -462,6 +559,7 @@ final class TestController extends Controller
         }
 
         $originalStatus = (string) $session['status'];
+        $wasReopened = (int) ($session['reopened_duration_minutes'] ?? 0) > 0;
         $this->sessions->start($id, (int) ($session['duration_minutes'] ?? 0));
         $session = $this->sessions->findForUser($id, $userId);
         if (!$session) {
@@ -488,7 +586,7 @@ final class TestController extends Controller
             $remainingSeconds = max(0, strtotime((string) $session['expires_at']) - time());
             if ($remainingSeconds <= 0 && $_SERVER['REQUEST_METHOD'] !== 'POST') {
                 $this->sessions->complete($id, [], 'expired');
-                flash('warning', 'El tiempo de esta evaluacion ha finalizado.');
+            flash('warning', (string) $this->settings->evaluationMessages()['expired_message']);
                 redirect(route_url('my-tests'));
             }
         }
@@ -501,16 +599,22 @@ final class TestController extends Controller
         $requestedBlock = $_GET['block'] ?? $_POST['block'] ?? null;
         $currentBlock = $useBlocks ? max(1, min($totalBlocks, (int) ($requestedBlock ?? 1))) : 1;
         if ($useBlocks && $requestedBlock === null) {
-            $firstMissingBlock = 1;
-            $hasMissingAnswer = false;
-            foreach ($items as $index => $item) {
-                if (trim((string) ($item['answer_value'] ?? '')) === '') {
-                    $firstMissingBlock = (int) floor($index / $blockSize) + 1;
-                    $hasMissingAnswer = true;
-                    break;
+            if ($wasReopened) {
+                // Una reapertura debe permitir revisar todos los bloques,
+                // incluso si la sesión ya tenía todas sus respuestas.
+                $currentBlock = 1;
+            } else {
+                $firstMissingBlock = 1;
+                $hasMissingAnswer = false;
+                foreach ($items as $index => $item) {
+                    if (trim((string) ($item['answer_value'] ?? '')) === '') {
+                        $firstMissingBlock = (int) floor($index / $blockSize) + 1;
+                        $hasMissingAnswer = true;
+                        break;
+                    }
                 }
+                $currentBlock = $hasMissingAnswer ? max(1, min($totalBlocks, $firstMissingBlock)) : $totalBlocks;
             }
-            $currentBlock = $hasMissingAnswer ? max(1, min($totalBlocks, $firstMissingBlock)) : $totalBlocks;
         }
         $blockOffset = ($currentBlock - 1) * $blockSize;
         $blockItems = array_slice($items, $blockOffset, $blockSize);
@@ -559,7 +663,7 @@ final class TestController extends Controller
                     'answer_trace' => $this->buildAnswerTrace($answerTrace, $answers, $saveResult, (string) $action, $currentBlock),
                 ], null, $useBlocks ? $currentBlock : null);
                 $this->sessions->complete($id, [], 'expired');
-                flash('warning', 'El tiempo de esta evaluacion ha finalizado. Se guardaron las respuestas registradas hasta ese momento.');
+                flash('warning', (string) $this->settings->evaluationMessages()['expired_message']);
                 redirect(route_url('my-tests'));
             }
 
@@ -600,7 +704,7 @@ final class TestController extends Controller
                             $missingOffset = ($missingBlock - 1) * $blockSize;
                             $missingItems = array_slice($items, $missingOffset, $blockSize);
                             $html = $this->view->render('tests/take', [
-                                'title' => 'Responder evaluacion | Metricatest',
+                                'title' => 'Responder evaluacion | e-talent',
                                 'currentPage' => 'my-tests',
                                 'session' => $session,
                                 'items' => $missingItems,
@@ -618,7 +722,7 @@ final class TestController extends Controller
                             $this->jsonResponse([
                                 'ok' => false,
                                 'reason' => 'missing_answers_before_finish',
-                                'message' => 'Aun te quedan preguntas sin contestar en la evaluacion. Deseas finalizarla de todas formas?',
+                                'message' => (string) $this->settings->evaluationMessages()['incomplete_confirm_message'],
                                 'missing_count' => count($missing),
                                 'missing_block' => $missingBlock,
                                 'next_block' => $missingBlock,
@@ -662,7 +766,7 @@ final class TestController extends Controller
                     $nextItems = array_slice($items, $nextOffset, $blockSize);
 
                     $html = $this->view->render('tests/take', [
-                        'title' => 'Responder evaluacion | Metricatest',
+                        'title' => 'Responder evaluacion | e-talent',
                         'currentPage' => 'my-tests',
                         'session' => $session,
                         'items' => $nextItems,
@@ -833,7 +937,7 @@ final class TestController extends Controller
         }
 
         $this->render('tests/take', [
-            'title' => 'Responder evaluacion | Metricatest',
+            'title' => 'Responder evaluacion | e-talent',
             'currentPage' => 'my-tests',
             'session' => $session,
             'items' => $useBlocks ? $blockItems : $items,
@@ -897,6 +1001,8 @@ final class TestController extends Controller
         $userId = (int) current_user()['id'];
         $policy = (string) ($_POST['policy'] ?? 'pause');
         $consented = (string) ($_POST['consented'] ?? '0') === '1';
+        $operationalSettings = (new PlatformSettingsModel())->operationalSettings();
+        $this->mediaEvidence->purgeExpiredIfDue($operationalSettings['test_evidence_retention_days'] ?? 365);
         $result = $this->mediaEvidence->setPolicy($id, $userId, $policy, $consented);
         if (!empty($result['ok'])) {
             $this->sessions->logActivity($id, $userId, 'audio_visual_recording_started', ['policy' => $policy]);
@@ -960,17 +1066,47 @@ final class TestController extends Controller
         $severity = (string) ($_POST['severity'] ?? 'attention');
         $confidence = isset($_POST['confidence']) ? (float) $_POST['confidence'] : null;
         $metadata = is_array($_POST['metadata'] ?? null) ? $_POST['metadata'] : [];
+        $metadata['trace_user_id'] = $userId;
+        $metadata['trace_company_id'] = (int) (current_user()['company_id'] ?? 0);
+        $metadata['trace_recorded_at'] = date('Y-m-d H:i:s');
         $evidenceId = max(0, (int) ($_POST['evidence_id'] ?? 0)) ?: null;
         $saved = $this->mediaEvidence->recordRisk($id, $userId, $eventType, $severity, $confidence, $metadata, $evidenceId);
         if ($saved) {
-            $this->sessions->logActivity($id, $userId, 'audio_visual_risk', [
+            $this->sessions->logActivity($id, $userId, $eventType === 'multiple_voice_possible' ? 'multiple_voice_possible' : 'audio_visual_risk', [
                 'event_type' => $eventType,
-                'severity' => $severity,
+                'severity' => $eventType === 'multiple_voice_possible' ? 'attention' : $severity,
                 'confidence' => $confidence,
                 'evidence_id' => $evidenceId,
             ]);
         }
         $this->jsonResponse(['ok' => $saved], $saved ? 200 : 422);
+    }
+
+    public function mediaScreenshot(): void
+    {
+        require_auth(); verify_csrf();
+        $id = request_secure_id('test_session'); $userId = (int) current_user()['id'];
+        $result = $this->mediaEvidence->uploadScreenCapture($id, $userId, max(0, (int) ($_POST['evidence_id'] ?? 0)), (string) ($_POST['capture_source'] ?? ''), max(0, (int) ($_POST['capture_number'] ?? -1)), $_FILES['capture'] ?? [], max(0, (int) ($_POST['item_id'] ?? 0)) ?: null, max(0, (int) ($_POST['block_number'] ?? 0)) ?: null, (string) ($_POST['event_type'] ?? 'periodic'));
+        if (!empty($result['ok'])) $this->sessions->logActivity($id, $userId, 'audio_visual_screen_capture_completed', ['capture_number' => $result['capture_number'], 'source' => $result['source']]);
+        $this->jsonResponse($result, !empty($result['ok']) ? 200 : 422);
+    }
+
+    public function mediaScreenshotFile(): void
+    {
+        require_result_access();
+        $id = request_secure_id('test_session'); $captureId = max(0, (int) ($_GET['capture_id'] ?? 0));
+        $file = $this->mediaEvidence->screenCaptureFile($id, $captureId); if (!$file) { platform_error(404, 'Captura no disponible.'); }
+        $this->mediaEvidence->auditScreenCaptureAccess($id, $captureId, (int) current_user()['id']);
+        header('Content-Type: ' . $file['mime_type']); header('Content-Length: ' . (string) $file['size']); header('Content-Disposition: inline; filename="captura-' . $captureId . '.jpg"'); header('Cache-Control: private, no-store'); readfile($file['path']); exit;
+    }
+
+    public function mediaFailure(): void
+    {
+        require_auth();
+        verify_csrf();
+        $id = request_secure_id('test_session');
+        $saved = $this->mediaEvidence->markChunkUploadFailure($id, (int) current_user()['id'], max(0, (int) ($_POST['evidence_id'] ?? 0)), max(0, (int) ($_POST['chunk_number'] ?? -1)), (string) ($_POST['reason'] ?? ''));
+        $this->jsonResponse(['ok' => $saved, 'status' => $saved ? 'failed' : 'invalid_media_session'], $saved ? 200 : 422);
     }
 
     public function mediaEvidence(): void
@@ -981,7 +1117,8 @@ final class TestController extends Controller
             platform_error(404, 'Evidencia audiovisual no disponible.');
         }
         $this->mediaEvidence->auditAdminAccess($id, (int) (current_user()['id'] ?? 0), 'video_viewed');
-        $file = $this->mediaEvidence->evidenceFileForAdmin($id);
+        $evidenceId = max(0, (int) ($_GET['evidence_id'] ?? 0));
+        $file = $evidenceId > 0 ? $this->mediaEvidence->evidenceFileForEvidence($id, $evidenceId) : $this->mediaEvidence->evidenceFileForAdmin($id);
         if (!$file) {
             platform_error(404, 'Evidencia audiovisual no disponible.');
         }
@@ -991,6 +1128,15 @@ final class TestController extends Controller
         header('Cache-Control: private, no-store');
         readfile($file['path']);
         exit;
+    }
+
+    public function mediaPartial(): void
+    {
+        require_result_access();
+        verify_csrf();
+        $id = request_secure_id('test_session');
+        $this->mediaEvidence->assemblePartial($id, (int) current_user()['id']);
+        redirect(route_url('test-session.result', $id));
     }
 
     public function draft(): void
@@ -1087,8 +1233,8 @@ final class TestController extends Controller
             ]);
         }
 
-        if ($isOwnSession && (int) ($session['user_can_view_results'] ?? 1) !== 1) {
-            flash('warning', 'El resultado de esta evaluacion no esta disponible para el usuario.');
+        if ($isOwnSession && !has_result_access()) {
+            flash('warning', 'Los resultados de las evaluaciones están disponibles solo para administradores autorizados.');
             redirect(route_url('dashboard'));
         }
 
@@ -1106,7 +1252,7 @@ final class TestController extends Controller
         }
 
         $this->render('tests/result', [
-            'title' => 'Resultado evaluacion | Metricatest',
+            'title' => 'Resultado evaluacion | e-talent',
             'currentPage' => has_result_access() ? 'tests' : 'my-tests',
             'session' => $session,
             'summary' => $summary,
@@ -1115,7 +1261,9 @@ final class TestController extends Controller
             'answeredItems' => $this->sessions->resultAnswerItemsForSession($id),
             'activityEvents' => has_result_access() ? $this->sessions->activityForSession($id) : [],
             'mediaEvidence' => has_result_access() && !$isOwnSession ? $this->mediaEvidence->evidenceForSession($id) : null,
+            'mediaEvidences' => has_result_access() && !$isOwnSession ? $this->mediaEvidence->evidencesForSession($id) : [],
             'audioVisualRisks' => has_result_access() && !$isOwnSession ? $this->mediaEvidence->risksForSession($id) : [],
+            'screenCaptures' => has_result_access() && !$isOwnSession ? $this->mediaEvidence->screenCapturesForSession($id) : [],
         ]);
     }
 
@@ -1124,9 +1272,24 @@ final class TestController extends Controller
         require_result_access();
 
         $userId = request_secure_id('user');
-        $sessions = $this->sessions->finishedSessionsForUserResults($userId);
-        if (!$sessions) {
-            platform_error(404, 'No hay resultados terminados para este usuario.', [
+        $processId = 0;
+        if (!empty($_GET['process_sid'])) {
+            try {
+                $processId = secure_url_id((string) $_GET['process_sid'], 'test_process');
+            } catch (RuntimeException $exception) {
+                platform_error(410, 'El enlace seguro expiro o no es valido.');
+            }
+            if ($processId <= 0 || !$this->processes->can(current_user() ?: [], $processId, 'view_process_results')) {
+                platform_error(403, 'No tienes permisos para ver los resultados de este proceso.', [
+                    'chips' => ['Resultados', 'Proceso'],
+                ]);
+            }
+        }
+
+        $sessions = $this->sessions->finishedSessionsForUserResults($userId, $processId);
+        $evaluationResults = $this->evaluationResultsForUserProcess($userId, $processId);
+        if (!$sessions && !$evaluationResults) {
+            platform_error(404, 'No hay respuestas guardadas para este usuario.', [
                 'chips' => ['Resultados', 'Usuario'],
             ]);
         }
@@ -1146,23 +1309,67 @@ final class TestController extends Controller
                 'answeredItems' => $this->sessions->resultAnswerItemsForSession($sessionId),
                 'activityEvents' => $this->sessions->activityForSession($sessionId),
                 'mediaEvidence' => $this->mediaEvidence->evidenceForSession($sessionId),
+                'mediaEvidences' => $this->mediaEvidence->evidencesForSession($sessionId),
                 'audioVisualRisks' => $this->mediaEvidence->risksForSession($sessionId),
+                'screenCaptures' => $this->mediaEvidence->screenCapturesForSession($sessionId),
             ];
         }
 
-        $user = $sessions[0];
+        $user = $sessions[0] ?? ($evaluationResults[0]['attempt'] ?? []);
         $this->render('tests/user_results', [
-            'title' => 'Resultados usuario | Metricatest',
+            'title' => 'Resultados usuario | e-talent',
             'currentPage' => 'tests',
             'userResult' => [
                 'id' => $userId,
-                'name' => $user['user_name'] ?? '',
+                'name' => $user['user_name'] ?? $user['name'] ?? '',
                 'email' => $user['user_email'] ?? '',
                 'company_name' => $user['company_name'] ?? '',
                 'age' => $user['age'] ?? '',
             ],
             'results' => $results,
+            'evaluationResults' => $evaluationResults,
+            'process' => $processId > 0 ? $this->processes->find($processId) : null,
         ]);
+    }
+
+    private function evaluationResultsForUserProcess(int $userId, int $processId = 0): array
+    {
+        $assignments = $this->processes->evaluationAssignmentsForUser($userId);
+        $results = [];
+        foreach ($assignments as $assignment) {
+            if ($processId > 0 && (int) ($assignment['process_id'] ?? 0) !== $processId) {
+                continue;
+            }
+            if (!in_array((string) ($assignment['status'] ?? ''), ['completed', 'in_progress', 'expired'], true)
+                || (int) ($assignment['answers_count'] ?? 0) <= 0) {
+                continue;
+            }
+
+            $attemptId = (int) ($assignment['attempt_id'] ?? 0);
+            if ($attemptId <= 0) {
+                continue;
+            }
+            $attempt = $this->evaluationAttempts->findAttempt($attemptId);
+            if (!$attempt) {
+                continue;
+            }
+            $form = $this->evaluationForms->findForm((int) ($attempt['form_id'] ?? 0));
+            $results[] = [
+                'attempt' => array_merge($assignment, $attempt),
+                'form' => $form ?: [],
+                'questions' => $form ? $this->evaluationAttempts->questionsForAnsweredAttempt($form, $attemptId) : [],
+                'answers' => $this->evaluationAttempts->answersForAttempt($attemptId),
+                'activityEvents' => $this->evaluationControl->eventsForAttempt($attemptId),
+                'mediaEvidence' => $this->evaluationMediaEvidence->evidencesForAttempt($attemptId),
+                'audioVisualRisks' => $this->evaluationMediaEvidence->risksForAttempt($attemptId),
+                'screenCaptures' => $this->evaluationMediaEvidence->screenCapturesForAttempt($attemptId),
+            ];
+        }
+
+        usort($results, static function (array $a, array $b): int {
+            return strcmp((string) ($b['attempt']['completed_at'] ?? ''), (string) ($a['attempt']['completed_at'] ?? ''));
+        });
+        return $results;
     }
 
     public function resultExport(): void
@@ -1211,7 +1418,7 @@ final class TestController extends Controller
         ];
 
         $this->render('tests/form', [
-            'title' => ($id ? 'Editar evaluacion' : 'Nueva evaluacion') . ' | Metricatest',
+            'title' => ($id ? 'Editar evaluacion' : 'Nueva evaluacion') . ' | e-talent',
             'currentPage' => 'tests',
             'id' => $id,
             'categories' => TestInstrumentModel::CATEGORIES,
@@ -1266,7 +1473,7 @@ final class TestController extends Controller
         $rulesByItem = $this->tests->scoreRulesForItems($id, array_column($items, 'id'));
 
         $this->render('tests/content', [
-            'title' => 'Contenido evaluacion | Metricatest',
+            'title' => 'Contenido evaluacion | e-talent',
             'currentPage' => 'tests',
             'instrument' => $instrument,
             'scales' => $this->tests->scalesForInstrument($id),

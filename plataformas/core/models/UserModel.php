@@ -4,6 +4,7 @@ declare(strict_types=1);
 final class UserModel
 {
     public const ALLOWED_ROLES = ['admin', 'agente', 'usuario', 'company_admin'];
+    public const ALLOWED_SEXES = ['masculino', 'femenino', 'no_informado'];
 
     private Database $db;
 
@@ -185,33 +186,61 @@ final class UserModel
         ", array_merge([self::formatRut($rut)], $this->companyScopeParams()));
     }
 
+    /** @return array<int, array<string, mixed>> */
+    public function findUsersByRutsAndEmails(array $ruts, array $emails): array
+    {
+        $ruts = array_values(array_unique(array_filter(array_map([self::class, 'formatRut'], $ruts))));
+        $emails = array_values(array_unique(array_filter(array_map(static fn($email): string => mb_strtolower(trim((string) $email)), $emails))));
+        if (!$ruts && !$emails) {
+            return [];
+        }
+        $conditions = [];
+        $params = [];
+        if ($ruts) {
+            $conditions[] = 'u.rut IN (' . implode(',', array_fill(0, count($ruts), '?')) . ')';
+            array_push($params, ...$ruts);
+        }
+        if ($emails) {
+            $conditions[] = 'LOWER(u.email) IN (' . implode(',', array_fill(0, count($emails), '?')) . ')';
+            array_push($params, ...$emails);
+        }
+        return $this->db->fetchAll(
+            'SELECT u.id, u.rut, u.first_names, u.last_names, u.sex, u.birth_date, u.age, u.name, u.email, u.role, u.profile_id, u.company_id, u.is_active, c.name AS company_name
+             FROM users u LEFT JOIN companies c ON c.id = u.company_id
+             WHERE (' . implode(' OR ', $conditions) . ') AND ' . $this->companyScopeSql('u'),
+            array_merge($params, $this->companyScopeParams())
+        );
+    }
+
     public function emailExists(string $email, ?int $excludeId = null): bool
     {
         $params = [$email];
-        $sql = 'SELECT id FROM users WHERE LOWER(email) = LOWER(?) AND ' . $this->companyScopeSql();
+        $sql = 'SELECT u.id FROM users u WHERE LOWER(u.email) = LOWER(?) AND ' . $this->companyScopeSql();
+        $params = array_merge($params, $this->companyScopeParams());
         if ($excludeId !== null) {
             $sql .= ' AND id <> ?';
             $params[] = $excludeId;
         }
 
-        return (bool) $this->db->fetch($sql . ' LIMIT 1', array_merge($params, $this->companyScopeParams()));
+        return (bool) $this->db->fetch($sql . ' LIMIT 1', $params);
     }
 
     public function rutExists(string $rut, ?int $excludeId = null): bool
     {
         $params = [self::formatRut($rut)];
-        $sql = 'SELECT id FROM users WHERE rut = ? AND ' . $this->companyScopeSql();
+        $sql = 'SELECT u.id FROM users u WHERE u.rut = ? AND ' . $this->companyScopeSql();
+        $params = array_merge($params, $this->companyScopeParams());
         if ($excludeId !== null) {
             $sql .= ' AND id <> ?';
             $params[] = $excludeId;
         }
 
-        return (bool) $this->db->fetch($sql . ' LIMIT 1', array_merge($params, $this->companyScopeParams()));
+        return (bool) $this->db->fetch($sql . ' LIMIT 1', $params);
     }
 
     public function assignable(): array
     {
-        return $this->db->fetchAll("SELECT id, name FROM users WHERE role IN ('admin', 'agente', 'company_admin') AND is_active = 1 AND " . $this->companyScopeSql() . " ORDER BY name", $this->companyScopeParams());
+        return $this->db->fetchAll("SELECT u.id, u.name FROM users u WHERE u.role IN ('admin', 'agente', 'company_admin') AND u.is_active = 1 AND " . $this->companyScopeSql() . " ORDER BY u.name", $this->companyScopeParams());
     }
 
     public function companies(): array
@@ -439,12 +468,12 @@ final class UserModel
             $updateUser = $pdo->prepare('
                 UPDATE users
                 SET rut = ?, first_names = ?, last_names = ?, sex = ?, birth_date = ?, age = ?, name = ?, email = ?, role = ?, profile_id = ?, company_id = ?, is_active = ?
-                WHERE id = ? AND ' . $this->companyScopeSql() . '
+                WHERE id = ? AND ' . $this->companyScopeSql('') . '
             ');
             $updateUserWithPassword = $pdo->prepare('
                 UPDATE users
                 SET rut = ?, first_names = ?, last_names = ?, sex = ?, birth_date = ?, age = ?, name = ?, email = ?, role = ?, profile_id = ?, company_id = ?, is_active = ?, password_hash = ?
-                WHERE id = ? AND ' . $this->companyScopeSql() . '
+                WHERE id = ? AND ' . $this->companyScopeSql('') . '
             ');
             $upsertFieldValue = $pdo->prepare('
                 INSERT INTO user_field_values (user_id, field_id, value)
@@ -557,7 +586,8 @@ final class UserModel
         }
 
         if (has_permission('manage_company_users') && (int) ($user['company_id'] ?? 0) > 0) {
-            return $alias . '.company_id = ?';
+            $column = $alias !== '' ? $alias . '.company_id' : 'company_id';
+            return $column . ' = ?';
         }
 
         return '1 = 0';

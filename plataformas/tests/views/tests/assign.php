@@ -33,7 +33,7 @@ unset($values);
 
 <form class="bulk-assignment-demo" method="post" data-bulk-assignment-demo>
     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-    <section class="content-panel">
+    <section class="card content-panel">
         <div class="assignment-demo-alert">
             <div>
                 <strong>Asignacion masiva</strong>
@@ -73,7 +73,7 @@ unset($values);
     </section>
 
     <section class="assignment-demo-layout mt-4">
-        <aside class="content-panel assignment-filter-panel">
+        <aside class="card content-panel assignment-filter-panel">
             <div class="d-flex align-items-center justify-content-between gap-2 mb-3">
                 <div>
                     <h2 class="h5 fw-bold mb-1">Filtros</h2>
@@ -120,7 +120,7 @@ unset($values);
             </div>
         </aside>
 
-        <section class="content-panel assignment-user-panel">
+        <section class="card content-panel assignment-user-panel">
             <div class="assignment-panel-toolbar">
                 <div>
                     <h2 class="h5 fw-bold mb-1">Usuarios disponibles</h2>
@@ -137,7 +137,7 @@ unset($values);
             </div>
 
             <div class="table-responsive">
-                <table class="table align-middle app-table assignment-user-table">
+                <table class="table table-hover align-middle app-table assignment-user-table">
                     <thead>
                         <tr>
                             <th class="no-sort no-export">
@@ -197,7 +197,7 @@ unset($values);
             </div>
         </section>
 
-        <aside class="content-panel assignment-summary-panel">
+        <aside class="card content-panel assignment-summary-panel">
             <h2 class="h5 fw-bold mb-3">Resumen</h2>
             <div class="assignment-summary-metrics">
                 <div><span>Seleccionados</span><strong data-demo-summary-selected>0</strong></div>

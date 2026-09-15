@@ -18,7 +18,7 @@ $progressWidth = max(0, min(100, (int) ($dailyPool['committed_percent'] ?? 0)));
 <form method="post">
     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
 
-    <section class="content-panel mb-4">
+    <section class="card content-panel mb-4">
         <p class="text-muted mb-4">Daily requiere una cuenta activa con metodo de pago para habilitar salas embebidas y transcripcion. Las claves se guardan cifradas y solo se usan desde backend.</p>
 
         <div class="row g-3 align-items-end">
@@ -87,7 +87,7 @@ $progressWidth = max(0, min(100, (int) ($dailyPool['committed_percent'] ?? 0)));
         </div>
     </section>
 
-    <section class="content-panel mb-4">
+    <section class="card content-panel mb-4">
         <div class="border-bottom pb-3 mb-4">
             <h2 class="h4 fw-bold mb-1">Control de bolsa Daily</h2>
             <p class="text-muted mb-0">Compara minutos contratados, consumo real consultado a Daily y entrevistas futuras ya agendadas.</p>
@@ -152,7 +152,7 @@ $progressWidth = max(0, min(100, (int) ($dailyPool['committed_percent'] ?? 0)));
                 </div>
             </div>
 
-            <div class="interview-pool-meter mt-3" aria-label="Uso proyectado de bolsa Daily">
+            <div class="interview-pool-meter mt-3" role="progressbar" aria-label="Uso proyectado de bolsa Daily" aria-valuenow="<?= $progressWidth ?>" aria-valuemin="0" aria-valuemax="100">
                 <span style="width: <?= $progressWidth ?>%"></span>
             </div>
             <div class="d-flex justify-content-between small text-muted mt-2">
@@ -162,7 +162,7 @@ $progressWidth = max(0, min(100, (int) ($dailyPool['committed_percent'] ?? 0)));
         </div>
     </section>
 
-    <section class="content-panel mb-4">
+    <section class="card content-panel mb-4">
         <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-3">
             <div>
                 <h2 class="h4 fw-bold mb-1">IA entrevistas</h2>

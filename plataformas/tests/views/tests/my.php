@@ -4,6 +4,7 @@ $pendingAutoStartSession = is_array($pendingAutoStartSession ?? null) ? $pending
 $pendingAutoStartSessionId = $pendingAutoStartSession ? (int) ($pendingAutoStartSession['id'] ?? 0) : 0;
 $assignedTestsFinalized = (bool) ($assignedTestsFinalized ?? false);
 $interviewAppointments = is_array($interviewAppointments ?? null) ? $interviewAppointments : [];
+$evaluationAssignments = is_array($evaluationAssignments ?? null) ? $evaluationAssignments : [];
 $statusLabels = [
     'assigned' => 'Asignada',
     'in_progress' => 'En curso',
@@ -53,7 +54,7 @@ if (!function_exists('test_entry_instructions_html')) {
         data-test-entry-target="#auto-start-test-entry-<?= (int) $pendingAutoStartSessionId ?>"
         hidden
     ></div>
-    <section class="content-panel">
+    <section class="card content-panel">
         <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
             <div>
                 <p class="text-uppercase text-primary fw-bold small mb-1">Evaluacion obligatoria</p>
@@ -85,7 +86,7 @@ if (!function_exists('test_entry_instructions_html')) {
 <?php endif; ?>
 
 <?php if ($interviewAppointments): ?>
-    <section class="content-panel">
+    <section class="card content-panel">
         <div class="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-3">
             <div>
                 <p class="text-uppercase text-primary fw-bold small mb-1">Entrevistas seleccion</p>
@@ -94,7 +95,7 @@ if (!function_exists('test_entry_instructions_html')) {
             </div>
         </div>
         <div class="table-responsive">
-            <table class="table align-middle app-table app-data-table" data-export-title="Mis entrevistas" data-export-excel="false" data-export-pdf="false" data-page-length="5">
+            <table class="table table-hover align-middle app-table app-data-table" data-export-title="Mis entrevistas" data-export-excel="false" data-export-pdf="false" data-page-length="5">
                 <thead>
                     <tr>
                         <th>Proceso</th>
@@ -158,7 +159,7 @@ if (!function_exists('test_entry_instructions_html')) {
 <?php endif; ?>
 
 <section
-    class="content-panel"
+    class="card content-panel"
     data-my-tests-panel
     data-my-tests-status-url="<?= e(app_url('my-tests/status')) ?>"
     data-assigned-tests-finalized="<?= $assignedTestsFinalized ? '1' : '0' ?>"
@@ -173,7 +174,7 @@ if (!function_exists('test_entry_instructions_html')) {
         <strong>Has finalizado los Test asignados, ahora podrás salir de plataforma.</strong>
     </div>
     <div class="table-responsive">
-        <table class="table align-middle app-table app-data-table" data-export-title="Mis evaluaciones" data-export-excel="false" data-export-pdf="false">
+        <table class="table table-hover align-middle app-table app-data-table" data-export-title="Mis evaluaciones" data-export-excel="false" data-export-pdf="false">
             <thead>
                 <tr>
                     <th>Evaluacion</th>
@@ -186,7 +187,12 @@ if (!function_exists('test_entry_instructions_html')) {
             </thead>
             <tbody>
                 <?php foreach ($sessions as $session): ?>
-                    <?php $statusLabel = $statusLabels[(string) $session['status']] ?? labelize((string) $session['status']); ?>
+                    <?php
+                    $statusKey = (string) $session['status'];
+                    $answersCount = max(0, (int) ($session['answers_count'] ?? 0));
+                    $hasAnswers = $answersCount > 0;
+                    $statusLabel = $hasAnswers ? 'Completada: ' . $answersCount . ' respuestas enviadas' : ($statusLabels[$statusKey] ?? labelize($statusKey));
+                    ?>
                     <?php $blockedByAutoStart = $pendingAutoStartSessionId > 0 && (int) ($session['id'] ?? 0) !== $pendingAutoStartSessionId && !in_array((string) ($session['status'] ?? ''), ['completed', 'expired', 'cancelled'], true); ?>
                     <tr>
                         <td>
@@ -228,12 +234,10 @@ if (!function_exists('test_entry_instructions_html')) {
                                 <div class="text-muted small mt-1"><?= e((string) $session['process_name']) ?></div>
                             <?php endif; ?>
                         </td>
-                        <td><span class="badge <?= $session['status'] === 'completed' ? 'text-bg-success' : ($session['status'] === 'in_progress' ? 'text-bg-warning' : (in_array($session['status'], ['cancelled', 'expired'], true) ? 'text-bg-secondary' : 'text-bg-primary')) ?>"><?= e($statusLabel) ?></span></td>
+                        <td><span class="badge <?= $hasAnswers ? 'text-bg-success' : ($statusKey === 'in_progress' ? 'text-bg-warning' : (in_array($statusKey, ['cancelled', 'expired'], true) ? 'text-bg-secondary' : 'text-bg-primary')) ?>"><?= e($statusLabel) ?></span></td>
                         <td class="text-end">
-                            <?php if (in_array($session['status'], ['completed', 'expired'], true) && (int) ($session['user_can_view_results'] ?? 1) === 1): ?>
-                                <a class="btn btn-sm btn-outline-primary" href="<?= e(route_url('test-session.result', (int) $session['id'])) ?>"><i class="bi bi-bar-chart me-1"></i> Resultado</a>
-                            <?php elseif (in_array($session['status'], ['completed', 'expired'], true)): ?>
-                                <span class="text-muted small">Resultado no disponible</span>
+                            <?php if (in_array($session['status'], ['completed', 'expired'], true)): ?>
+                                <span class="text-muted small">Resultado no disponible para usuarios</span>
                             <?php elseif ($session['status'] === 'cancelled'): ?>
                                 <span class="text-muted small">No disponible</span>
                             <?php elseif ($blockedByAutoStart): ?>
@@ -269,6 +273,43 @@ if (!function_exists('test_entry_instructions_html')) {
                                 <template id="test-entry-instructions-<?= (int) $session['id'] ?>">
                                     <?= test_entry_instructions_html((string) ($session['instructions'] ?? '')) ?>
                                 </template>
+                            <?php endif; ?>
+                        </td>
+                    </tr>
+                <?php endforeach; ?>
+                <?php foreach ($evaluationAssignments as $assignment): ?>
+                    <?php
+                    $assignmentStatus = (string) ($assignment['status'] ?? 'assigned');
+                    $assignmentAnswersCount = max(0, (int) ($assignment['answers_count'] ?? 0));
+                    $assignmentHasAnswers = $assignmentAnswersCount > 0;
+                    $assignmentStatusLabel = $assignmentHasAnswers ? 'Completada: ' . $assignmentAnswersCount . ' respuestas enviadas' : ($statusLabels[$assignmentStatus] ?? labelize($assignmentStatus));
+                    $canAnswerAssignment = in_array($assignmentStatus, ['assigned', 'in_progress'], true);
+                    $assignmentAvailability = is_array($assignment['process_availability'] ?? null) ? $assignment['process_availability'] : ['allowed' => true, 'label' => 'Disponible'];
+                    $assignmentCanAnswer = $canAnswerAssignment && !empty($assignmentAvailability['allowed']);
+                    ?>
+                    <tr>
+                        <td>
+                            <div class="fw-semibold"><?= e((string) ($assignment['form_title'] ?? 'Evaluación')) ?></div>
+                            <div class="text-muted small"><?= e(($assignment['form_type'] ?? 'assessment') === 'survey' ? 'Encuesta' : 'Evaluación con nota') ?></div>
+                        </td>
+                        <td><?= (int) ($assignment['items_count'] ?? 0) ?></td>
+                        <td><?= (int) ($assignment['duration_minutes'] ?? 0) > 0 ? (int) $assignment['duration_minutes'] . ' min' : 'Sin límite' ?></td>
+                        <td>
+                            <span class="badge <?= !empty($assignmentAvailability['allowed']) ? 'text-bg-info' : 'text-bg-secondary' ?>"><?= e((string) ($assignmentAvailability['label'] ?? 'Según proceso')) ?></span>
+                            <?php if (!empty($assignment['process_name'])): ?>
+                                <div class="text-muted small mt-1"><?= e((string) $assignment['process_name']) ?></div>
+                            <?php endif; ?>
+                        </td>
+                        <td><span class="badge <?= $assignmentHasAnswers ? 'text-bg-success' : ($assignmentStatus === 'in_progress' ? 'text-bg-warning' : (in_array($assignmentStatus, ['expired', 'cancelled'], true) ? 'text-bg-secondary' : 'text-bg-primary')) ?>"><?= e($assignmentStatusLabel) ?></span></td>
+                        <td class="text-end">
+                            <?php if ($assignmentCanAnswer): ?>
+                                <a class="btn btn-sm btn-primary" href="<?= e(route_url('evaluation-surveys.form.take', (int) $assignment['form_id']) . '?process_id=' . (int) ($assignment['process_id'] ?? 0)) ?>"><i class="bi bi-play-circle me-1"></i> Responder</a>
+                            <?php elseif ($canAnswerAssignment && empty($assignmentAvailability['allowed'])): ?>
+                                <button class="btn btn-sm btn-outline-secondary" type="button" disabled title="<?= e((string) ($assignmentAvailability['message'] ?? $assignmentAvailability['label'] ?? 'No disponible')) ?>"><i class="bi bi-lock me-1"></i> No disponible</button>
+                            <?php elseif ($assignmentStatus === 'completed'): ?>
+                                <span class="text-muted small">Resultado no disponible para usuarios</span>
+                            <?php else: ?>
+                                <span class="text-muted small">No disponible</span>
                             <?php endif; ?>
                         </td>
                     </tr>

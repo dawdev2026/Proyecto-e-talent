@@ -14,7 +14,7 @@
 </section>
 
 <div class="interview-room-grid">
-    <section class="content-panel">
+    <section class="card content-panel">
         <?php if ($roomBlocked): ?>
             <div class="interview-preflight-card" data-interview-preflight>
                 <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-4">
@@ -47,7 +47,7 @@
 
     <?php if ($isModerator): ?>
         <aside class="interview-panel-stack">
-            <section class="content-panel interview-tabs-panel">
+            <section class="card content-panel interview-tabs-panel">
                 <div class="interview-tabs-scroll">
                     <ul class="nav nav-tabs interview-room-tabs" id="interviewRoomTabs" role="tablist">
                         <li class="nav-item" role="presentation">

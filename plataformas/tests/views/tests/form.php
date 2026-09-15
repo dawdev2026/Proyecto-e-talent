@@ -6,7 +6,7 @@
     </div>
 </section>
 
-<section class="content-panel">
+<section class="card content-panel">
     <form method="post" class="row g-4 needs-validation" novalidate data-test-instrument-form>
         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
         <div class="col-12 col-lg-4">
@@ -127,7 +127,7 @@
                             'off' => 'No se almacenan eventos de actividad de la evaluacion. Se mantiene solo el control tecnico de presencia necesario para el funcionamiento de la sesion.',
                             'activity' => 'Registra apertura, inicio, reapertura, dispositivo, respuestas guardadas o modificadas, borradores, bloques, pausas, envio, expiracion, pestaña visible u oculta, perdida o recuperacion de foco e inactividad.',
                             'supervised' => 'Incluye todo el registro de actividad y agrega pantalla completa, entradas y salidas de pantalla completa, intentos de copiar, cortar, pegar, imprimir, abrir el menu contextual, arrastrar contenido y señales de riesgo. Si pantalla completa no funciona, la persona puede continuar con la advertencia registrada.',
-                            'supervised_audio_visual' => 'Incluye todo lo anterior y solicita camara y microfono para grabar evidencia audiovisual completa. Registra interrupciones, posibles multiples voces y fallas de carga. El usuario selecciona que hacer ante una interrupcion.',
+                            'supervised_audio_visual' => 'Incluye todo lo anterior y solicita camara, microfono y captura visual para la rendicion. Registra interrupciones, posibles multiples voces y fallas de carga. La accion ante cada incidencia usa la configuracion vigente.',
                         ];
                         ?>
                         <div class="d-flex align-items-center gap-2">
@@ -155,7 +155,7 @@
                             <p class="fw-semibold mb-3">Reglas del control audio visual para esta evaluacion</p>
                             <div class="row g-3">
                                 <div class="col-12 col-lg-4">
-                                    <label class="form-label" for="audio_visual_interruption_policy">1. Interrupcion de camara o microfono <button class="btn btn-link btn-sm p-0 activity-help-toggle" type="button" aria-label="Ayuda sobre interrupciones" data-bs-toggle="popover" data-bs-trigger="focus" data-bs-title="Interrupcion audiovisual" data-bs-content="Define si la persona puede continuar cuando la camara o el microfono se interrumpen. El evento siempre queda registrado como Control audio visual."><i class="bi bi-info-circle" aria-hidden="true"></i></button></label>
+                                    <label class="form-label" for="audio_visual_interruption_policy">1. Interrupción de cámara, micrófono o captura de pantalla <button class="btn btn-link btn-sm p-0 activity-help-toggle" type="button" aria-label="Ayuda sobre interrupciones" data-bs-toggle="popover" data-bs-trigger="focus" data-bs-title="Interrupción audiovisual" data-bs-content="Define si la persona puede continuar cuando la cámara, el micrófono o la captura de pantalla se interrumpen. El evento siempre queda registrado como Control audio visual."><i class="bi bi-info-circle" aria-hidden="true"></i></button></label>
                                     <select id="audio_visual_interruption_policy" class="form-select" name="audio_visual_interruption_policy">
                                         <option value="continue" <?= $av('audio_visual_interruption_policy', 'pause') === 'continue' ? 'selected' : '' ?>>Registrar y continuar</option>
                                         <option value="pause" <?= $av('audio_visual_interruption_policy', 'pause') === 'pause' ? 'selected' : '' ?>>Registrar y pausar</option>
@@ -217,10 +217,10 @@
                     <?php endif; ?>
                 </div>
                 <div class="row g-3">
-                    <div class="col-6 col-lg-3"><div class="metric-card"><span>Escalas</span><strong><?= (int) ($contentStats['scales_count'] ?? 0) ?></strong></div></div>
-                    <div class="col-6 col-lg-3"><div class="metric-card"><span>Items</span><strong><?= (int) ($contentStats['items_count'] ?? 0) ?></strong></div></div>
-                    <div class="col-6 col-lg-3"><div class="metric-card"><span>Reglas</span><strong><?= (int) ($contentStats['score_rules_count'] ?? 0) ?></strong></div></div>
-                    <div class="col-6 col-lg-3"><div class="metric-card"><span>Baremos</span><strong><?= (int) ($contentStats['norms_count'] ?? 0) ?></strong></div></div>
+                    <div class="col-6 col-lg-3"><div class="card metric-card"><span>Escalas</span><strong><?= (int) ($contentStats['scales_count'] ?? 0) ?></strong></div></div>
+                    <div class="col-6 col-lg-3"><div class="card metric-card"><span>Items</span><strong><?= (int) ($contentStats['items_count'] ?? 0) ?></strong></div></div>
+                    <div class="col-6 col-lg-3"><div class="card metric-card"><span>Reglas</span><strong><?= (int) ($contentStats['score_rules_count'] ?? 0) ?></strong></div></div>
+                    <div class="col-6 col-lg-3"><div class="card metric-card"><span>Baremos</span><strong><?= (int) ($contentStats['norms_count'] ?? 0) ?></strong></div></div>
                 </div>
             </section>
         </div>

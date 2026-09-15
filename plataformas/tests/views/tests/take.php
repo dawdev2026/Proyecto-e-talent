@@ -193,6 +193,8 @@ if (!function_exists('test_choice_marker')) {
             data-media-chunk-url="<?= e(route_url('test-session.media-chunk', (int) $session['id'])) ?>"
             data-media-finalize-url="<?= e(route_url('test-session.media-finalize', (int) $session['id'])) ?>"
             data-media-risk-url="<?= e(route_url('test-session.media-risk', (int) $session['id'])) ?>"
+            data-media-failure-url="<?= e(route_url('test-session.media-failure', (int) $session['id'])) ?>"
+            data-media-screenshot-url="<?= e(route_url('test-session.media-screenshot', (int) $session['id'])) ?>"
             data-draft-url="<?= e(route_url('test-session.draft', (int) $session['id'])) ?>"
             data-process-availability-url="<?= e(route_url('test-session.availability', (int) $session['id'])) ?>"
             data-current-block="<?= (int) $currentBlock ?>"
@@ -202,6 +204,11 @@ if (!function_exists('test_choice_marker')) {
             data-test-exit-message="<?= e($evaluationMessages['exit_confirm_message']) ?>"
             data-test-exit-continue-button="<?= e($evaluationMessages['exit_continue_button']) ?>"
             data-test-exit-save-button="<?= e($evaluationMessages['exit_save_exit_button']) ?>"
+            data-incomplete-confirm-title="<?= e($evaluationMessages['incomplete_confirm_title']) ?>"
+            data-incomplete-confirm-message="<?= e($evaluationMessages['incomplete_confirm_message']) ?>"
+            data-incomplete-confirm-button="<?= e($evaluationMessages['incomplete_confirm_button']) ?>"
+            data-incomplete-cancel-button="<?= e($evaluationMessages['incomplete_cancel_button']) ?>"
+            data-expired-message="<?= e($evaluationMessages['expired_message']) ?>"
         >
         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
         <?php if ($supervisedMode): ?>
@@ -218,12 +225,21 @@ if (!function_exists('test_choice_marker')) {
                             <div class="form-text mb-2"><?php
                                 echo e(['continue' => 'Registrar y continuar', 'pause' => 'Registrar y pausar', 'block' => 'Registrar y bloquear'][$audioVisualInterruptionPolicy] ?? 'Registrar y pausar');
                             ?></div>
-                            <div class="alert alert-secondary py-2 mb-2 d-none" role="status" aria-live="polite" data-audio-visual-status></div>
-                            <div class="form-check">
-                                <input id="audio_visual_consent" class="form-check-input" type="checkbox" data-audio-visual-consent>
-                                <label class="form-check-label small" for="audio_visual_consent">Acepto la captura de camara y microfono durante la evaluacion y su revision por administradores autorizados.</label>
+                            <div class="row g-2 mb-2" data-audio-visual-checks>
+                                <div class="col-12 col-md-4"><div class="border rounded p-2 small" data-audio-visual-check="camera"><i class="bi bi-hourglass-split me-1" data-audio-visual-check-icon aria-hidden="true"></i><span data-audio-visual-check-label>Cámara: pendiente</span><span class="d-block text-muted" data-audio-visual-check-message></span></div></div>
+                                <div class="col-12 col-md-4"><div class="border rounded p-2 small" data-audio-visual-check="microphone"><i class="bi bi-hourglass-split me-1" data-audio-visual-check-icon aria-hidden="true"></i><span data-audio-visual-check-label>Micrófono: pendiente</span><span class="d-block text-muted" data-audio-visual-check-message></span></div></div>
+                                <div class="col-12 col-md-4"><div class="border rounded p-2 small" data-audio-visual-check="screen"><i class="bi bi-hourglass-split me-1" data-audio-visual-check-icon aria-hidden="true"></i><span data-audio-visual-check-label>Captura: pendiente</span><span class="d-block text-muted" data-audio-visual-check-message></span></div></div>
                             </div>
-                            <div class="form-text">La camara y el microfono dependen de los permisos del navegador y del dispositivo. Toda interrupcion quedara registrada.</div>
+                            <video class="w-100 rounded border d-none mb-2 audio-visual-camera-preview" muted playsinline autoplay data-audio-visual-preview aria-label="Vista previa de cámara"></video>
+                            <div class="alert alert-secondary py-2 mb-2 d-none" role="status" aria-live="polite" data-audio-visual-status></div>
+                            <div class="audio-visual-consent-box" role="group" aria-labelledby="audioVisualConsentTitle">
+                                <div id="audioVisualConsentTitle" class="audio-visual-consent-title"><i class="bi bi-hand-index-thumb me-1" aria-hidden="true"></i>Paso 1: acepta para continuar</div>
+                                <div class="form-check">
+                                    <input id="audio_visual_consent" class="form-check-input" type="checkbox" data-audio-visual-consent>
+                                    <label class="form-check-label small" for="audio_visual_consent">Acepto la captura de camara, microfono y pantalla o contenido visible durante la evaluacion y su revision por administradores autorizados.</label>
+                                </div>
+                            </div>
+                            <div class="form-text">La camara, el microfono y la captura visual dependen de los permisos del navegador y del dispositivo. Toda interrupcion quedara registrada.</div>
                         </div>
                     <?php endif; ?>
                     <button class="btn btn-primary" type="button" data-supervised-start>
@@ -259,6 +275,7 @@ if (!function_exists('test_choice_marker')) {
                         <span class="supervised-gate-icon"><i class="bi bi-camera-video-off"></i></span>
                         <h2 id="audioVisualReconnectTitle">Control audiovisual interrumpido</h2>
                         <p>La evaluación está pausada y las preguntas permanecen ocultas. Permite nuevamente la cámara y el micrófono para continuar.</p>
+                        <div class="alert alert-danger text-start small" data-inline-alert data-audio-visual-reconnect-indicator><i class="bi bi-exclamation-circle-fill me-1" data-audio-visual-reconnect-icon aria-hidden="true"></i><span data-audio-visual-reconnect-component>Componente audiovisual no disponible</span></div>
                         <div class="small text-muted" data-audio-visual-reconnect-status>La acción quedará registrada.</div>
                         <button class="btn btn-primary" type="button" data-audio-visual-reconnect>Reintentar conexión audiovisual</button>
                     </div>
@@ -366,7 +383,7 @@ if (!function_exists('test_choice_marker')) {
                     <?php if ($currentBlock < $totalBlocks): ?>
                         <button class="btn btn-primary px-4" type="submit" name="test_action" value="save_block_next"><i class="bi bi-arrow-right-circle me-1"></i> Guardar y Continuar</button>
                     <?php else: ?>
-                        <button class="btn btn-primary px-4" type="submit" name="test_action" value="save_block_finish"><i class="bi bi-arrow-right-circle me-1"></i> Guardar y Continuar</button>
+                        <button class="btn btn-primary px-4" type="submit" name="test_action" value="save_block_finish"><i class="bi bi-check2-circle me-1"></i> Guardar y Finalizar</button>
                     <?php endif; ?>
                 <?php else: ?>
                     <button class="btn btn-primary px-4" type="submit" name="test_action" value="complete"><i class="bi bi-check2-circle me-1"></i> Guardar y Finalizar</button>

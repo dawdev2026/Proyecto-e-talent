@@ -21,7 +21,7 @@ $currentScope = ($values['scope_type'] ?? 'core') . ':' . ($values['scope_key'] 
     </div>
 </section>
 
-<section class="content-panel user-field-builder">
+<section class="card content-panel user-field-builder">
     <form method="post" class="needs-validation" novalidate>
         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
         <input id="field_key" type="hidden" name="field_key" value="<?= e($values['field_key']) ?>">

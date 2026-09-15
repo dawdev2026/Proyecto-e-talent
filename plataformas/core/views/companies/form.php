@@ -9,7 +9,7 @@
 <form method="post" class="user-form-layout needs-validation" novalidate>
     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
 
-    <section class="content-panel user-form-main">
+    <section class="card content-panel user-form-main">
         <div class="user-form-section">
             <div class="user-form-section-head">
                 <span><i class="bi bi-buildings"></i></span>
@@ -30,6 +30,13 @@
                         <input id="tax_id" class="form-control form-control-lg" name="tax_id" value="<?= e($values['tax_id'] ?? '') ?>" maxlength="60" placeholder="RUT / Identificador">
                         <label for="tax_id">RUT / Identificador</label>
                     </div>
+                </div>
+                <div class="col-12 col-lg-5">
+                    <div class="form-floating">
+                        <input id="url_prefix" class="form-control form-control-lg" name="url_prefix" value="<?= e($values['url_prefix'] ?? '') ?>" maxlength="80" pattern="[a-z0-9]+(?:-[a-z0-9]+)*" placeholder="Prefijo de URL" required>
+                        <label for="url_prefix">Prefijo de URL</label>
+                    </div>
+                    <small class="form-text text-muted">Ejemplo: <code>dt</code> → <code>/dt</code>. Usa letras, números y guiones.</small>
                 </div>
                 <div class="col-12 col-lg-5">
                     <label class="user-form-switch">
@@ -87,7 +94,7 @@
         </div>
     </section>
 
-    <aside class="content-panel user-form-aside">
+    <aside class="card content-panel user-form-aside">
         <div class="user-form-aside-header">
             <span><i class="bi bi-building-check"></i></span>
             <div>
@@ -103,6 +110,10 @@
             <div>
                 <span>Identificador</span>
                 <strong><?= e($values['tax_id'] ?: 'Pendiente') ?></strong>
+            </div>
+            <div>
+                <span>Ruta base</span>
+                <strong>/<?= e($values['url_prefix'] ?? 'pendiente') ?></strong>
             </div>
         </div>
         <div class="user-form-guidance">

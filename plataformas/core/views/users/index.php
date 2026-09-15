@@ -10,10 +10,10 @@
     </div>
 </section>
 
-<section class="content-panel">
+<section class="card content-panel">
     <div class="table-responsive">
         <table
-            class="table align-middle app-table app-data-table"
+            class="table table-hover align-middle app-table app-data-table"
             data-export-title="Usuarios"
             data-server-url="<?= e(app_url('users/data')) ?>"
             data-page-length="25"

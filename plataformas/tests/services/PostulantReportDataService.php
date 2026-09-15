@@ -35,7 +35,11 @@ final class PostulantReportDataService
         $sessions = $this->processes->processDashboardSessionsForUser($processId, $userId);
         $selectedInstrumentIds = $this->processes->selectedInstrumentIds($processId);
         $rankingSessions = $this->rankingSessions([$processUser], $sessions, $this->processes->activeInstruments(), $selectedInstrumentIds);
-        $rankingConfig = $this->ranking->activeConfig($this->settings->rankingConfig());
+        $officialRankingConfig = $this->ranking->officialConfig();
+        $rankingConfig = $this->ranking->activeConfig($this->settings->rankingConfigForCompany(
+            (int) ($process['company_id'] ?? ($processUser['company_id'] ?? 0)),
+            $officialRankingConfig
+        ));
         $ranking = $this->ranking->build($rankingSessions, function (int $sessionId, array $session): array {
             return $this->sessionSummary($sessionId, $session);
         }, $rankingConfig);
@@ -58,6 +62,7 @@ final class PostulantReportDataService
                 'id' => $processId,
                 'name' => (string) ($process['name'] ?? 'Proceso'),
                 'code' => (string) ($process['code'] ?? ''),
+                'company_id' => (int) ($process['company_id'] ?? 0),
             ],
             'candidate' => [
                 'id' => $userId,
@@ -66,6 +71,7 @@ final class PostulantReportDataService
                 'email' => (string) ($processUser['email'] ?? ''),
                 'age' => (string) ($processUser['age'] ?? ''),
                 'company' => (string) ($processUser['company_name'] ?? ''),
+                'company_id' => (int) ($processUser['company_id'] ?? 0),
             ],
             'ranking_row' => $row,
             'ipip_factors' => $scaleMap->mappedSummary($summariesByCode['ipip_16pf'] ?? []),
@@ -179,6 +185,9 @@ final class PostulantReportDataService
     private function summariesByCode(array $sessions): array
     {
         $summaries = [];
+        $sessionIds = [];
+        $sessionCodes = [];
+        $sessionsById = [];
         foreach ($sessions as $session) {
             $sessionId = (int) ($session['id'] ?? 0);
             $code = (string) ($session['instrument_code'] ?? '');
@@ -188,7 +197,17 @@ final class PostulantReportDataService
             if (!in_array($code, ['ipip_16pf', 'cag_wonderlic', 'cag', 'ticl_barratt', 'riasec'], true)) {
                 continue;
             }
-            $summary = $this->sessionSummary($sessionId, $session);
+            $sessionIds[] = $sessionId;
+            $sessionCodes[$sessionId] = $code;
+            $sessionsById[$sessionId] = $session;
+        }
+
+        $summaryRows = $this->sessions->summariesForSessions($sessionIds);
+        foreach ($sessionCodes as $sessionId => $code) {
+            $summary = $summaryRows[$sessionId] ?? [];
+            if (!$summary && isset($sessionsById[$sessionId])) {
+                $summary = $this->sessionSummary($sessionId, $sessionsById[$sessionId]);
+            }
             if ($summary) {
                 $summaries[$code] = $summary;
             }

@@ -77,7 +77,7 @@ uasort($sessionUsers, static fn(array $a, array $b): int => strcmp($a['name'], $
     </div>
 </section>
 
-<section class="content-panel evaluation-dashboard mb-4">
+<section class="card content-panel evaluation-dashboard mb-4">
     <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
         <div>
             <h2 class="h5 fw-bold mb-1">Filtros</h2>
@@ -121,7 +121,7 @@ uasort($sessionUsers, static fn(array $a, array $b): int => strcmp($a['name'], $
     </form>
 </section>
 
-<section class="content-panel mt-4">
+<section class="card content-panel mt-4">
     <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
         <div>
             <h2 class="h5 fw-bold mb-1">Asignaciones y resultados recientes</h2>
@@ -149,7 +149,7 @@ uasort($sessionUsers, static fn(array $a, array $b): int => strcmp($a['name'], $
     </div>
     <div class="table-responsive">
         <table
-            class="table align-middle app-table app-data-table assignment-matrix-table"
+            class="table table-hover align-middle app-table app-data-table assignment-matrix-table"
             data-export-title="Estado Avance"
         >
             <thead>

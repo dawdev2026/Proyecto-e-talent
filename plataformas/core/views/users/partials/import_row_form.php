@@ -45,6 +45,7 @@ $data = $row['data'] ?? [];
             <select class="form-select <?= isset($fieldErrors['sex']) ? 'is-invalid' : '' ?>" name="data[sex]">
                 <option value="masculino" <?= ($data['sex'] ?? '') === 'masculino' ? 'selected' : '' ?>>Masculino</option>
                 <option value="femenino" <?= ($data['sex'] ?? '') === 'femenino' ? 'selected' : '' ?>>Femenino</option>
+                <option value="no_informado" <?= ($data['sex'] ?? '') === 'no_informado' ? 'selected' : '' ?>>No informado</option>
             </select>
             <?php foreach (($fieldErrors['sex'] ?? []) as $error): ?><div class="invalid-feedback d-block"><?= e($error) ?></div><?php endforeach; ?>
         </div>

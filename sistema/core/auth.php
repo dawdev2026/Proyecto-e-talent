@@ -18,6 +18,7 @@ function current_user(): ?array
     $stmt = db()->prepare('
         SELECT u.id, u.name, u.email, u.role, u.profile_id, u.company_id, u.is_active, ' . $lastLoginSelect . ',
                c.name AS company_name,
+               c.url_prefix AS company_url_prefix,
                p.name AS profile_name,
                p.role_key AS profile_key,
                p.permissions AS profile_permissions,
@@ -97,13 +98,23 @@ function current_permissions(): array
 
     $permissions = json_decode($user['profile_permissions'] ?? '[]', true);
     if (is_array($permissions) && $permissions) {
+        if ((string) ($user['role'] ?? '') === 'company_admin') {
+            $permissions = array_values(array_diff($permissions, [
+                'manage_company_interviews',
+                'conduct_selection_interviews',
+                'view_interview_reports',
+            ]));
+        }
+        if ((string) ($user['role'] ?? '') === 'company_admin' && !in_array('manage_company_branding', $permissions, true)) {
+            $permissions[] = 'manage_company_branding';
+        }
         return $permissions;
     }
 
     $fallback = [
         'admin' => ['manage_profiles', 'manage_platform_settings', 'manage_user_fields', 'manage_users', 'manage_companies'],
         'agente' => ['manage_users', 'manage_companies'],
-        'company_admin' => ['manage_company_users', 'manage_company_processes', 'manage_company_interviews', 'view_company_results'],
+        'company_admin' => ['manage_company_users', 'manage_company_processes', 'view_company_results', 'manage_company_branding', 'view_evaluation_dashboard'],
         'usuario' => [],
     ];
 
@@ -113,6 +124,17 @@ function current_permissions(): array
 function has_permission(string $permission): bool
 {
     return in_array($permission, current_permissions(), true);
+}
+
+function is_general_admin(?array $user = null): bool
+{
+    $user = $user ?: current_user();
+    if (!$user) {
+        return false;
+    }
+
+    return (string) ($user['role'] ?? '') === 'admin'
+        || (string) ($user['profile_key'] ?? '') === 'admin';
 }
 
 function has_result_access(): bool
@@ -152,6 +174,16 @@ function require_company_user_management(): void
     }
 }
 
+function require_company_user_field_management(): void
+{
+    require_auth();
+    if (!has_permission('manage_user_fields') && !has_permission('manage_company_user_fields')) {
+        platform_error(403, 'No tienes permisos para gestionar campos de usuario.', [
+            'detailRows' => ['Permiso requerido' => 'manage_user_fields o manage_company_user_fields'],
+        ]);
+    }
+}
+
 function require_company_interview_management(): void
 {
     require_auth();
@@ -162,31 +194,43 @@ function require_company_interview_management(): void
     }
 }
 
-function login(string $identifier, string $password, string $identifierType = 'email'): bool
+function authenticate_user(string $identifier, string $password, string $identifierType = 'email'): ?array
 {
     $identifierType = $identifierType === 'rut' ? 'rut' : 'email';
     $identifier = trim($identifier);
 
+    $companyId = function_exists('current_company_context_id') ? current_company_context_id() : 0;
+
     if ($identifierType === 'rut') {
         $identifier = UserModel::formatRut($identifier);
         if (!UserModel::isValidRut($identifier)) {
-            return false;
+            return null;
         }
-        $stmt = db()->prepare('SELECT * FROM users WHERE rut = ? AND is_active = 1 LIMIT 1');
+        $stmt = db()->prepare('SELECT * FROM users WHERE rut = ? AND is_active = 1' . ($companyId > 0 ? ' AND company_id = ?' : '') . ' LIMIT 1');
     } else {
         $identifier = mb_strtolower($identifier);
         if (!filter_var($identifier, FILTER_VALIDATE_EMAIL)) {
-            return false;
+            return null;
         }
-        $stmt = db()->prepare('SELECT * FROM users WHERE email = ? AND is_active = 1 LIMIT 1');
+        $stmt = db()->prepare('SELECT * FROM users WHERE email = ? AND is_active = 1' . ($companyId > 0 ? ' AND company_id = ?' : '') . ' LIMIT 1');
     }
 
-    $stmt->execute([$identifier]);
+    $params = [$identifier];
+    if ($companyId > 0) {
+        $params[] = $companyId;
+    }
+    $stmt->execute($params);
     $user = $stmt->fetch();
 
     if (!$user || !password_verify($password, $user['password_hash'])) {
-        return false;
+        return null;
     }
+
+    return $user;
+}
+
+function complete_login(array $user): void
+{
 
     session_regenerate_id(true);
     $_SESSION['user_id'] = (int) $user['id'];
@@ -206,6 +250,16 @@ function login(string $identifier, string $password, string $identifierType = 'e
         // Older local databases may not have the login audit objects until migrations are applied.
     }
 
+}
+
+function login(string $identifier, string $password, string $identifierType = 'email'): bool
+{
+    $user = authenticate_user($identifier, $password, $identifierType);
+    if (!$user) {
+        return false;
+    }
+
+    complete_login($user);
     return true;
 }
 

@@ -8,7 +8,7 @@
         <?php if (!empty($canViewDashboard)): ?>
             <a class="btn btn-outline-primary" href="<?= e(route_url('test-process.dashboard')) ?>"><i class="bi bi-bar-chart-line me-1"></i> Dashboard Avance</a>
         <?php endif; ?>
-        <?php if (has_permission('manage_tests') || has_permission('manage_test_processes')): ?>
+        <?php if (has_permission('manage_tests') || has_permission('manage_test_processes') || has_permission('manage_company_processes')): ?>
             <a class="btn btn-primary" href="<?= e(route_url('test-process.new')) ?>"><i class="bi bi-plus-lg me-1"></i> Nuevo proceso</a>
         <?php endif; ?>
     </div>
@@ -21,7 +21,7 @@ $totalProcesses = (int) ($totalProcesses ?? count($processes ?? []));
 $selectedGroup = $selectedDateGroup !== '' ? ($dateGroups[$selectedDateGroup] ?? null) : null;
 ?>
 
-<section class="content-panel">
+<section class="card content-panel">
     <?php if (!$processes): ?>
         <?php if ($totalProcesses > 0): ?>
             <div class="d-flex flex-wrap align-items-end justify-content-between gap-3">
@@ -70,7 +70,7 @@ $selectedGroup = $selectedDateGroup !== '' ? ($dateGroups[$selectedDateGroup] ??
             </div>
         </div>
         <div class="table-responsive">
-            <table class="table align-middle app-table app-data-table" data-export-title="Procesos">
+            <table class="table table-hover align-middle app-table app-data-table" data-export-title="Procesos">
                 <thead>
                     <tr>
                         <th>Proceso</th>
@@ -100,21 +100,23 @@ $selectedGroup = $selectedDateGroup !== '' ? ($dateGroups[$selectedDateGroup] ??
                 <tbody>
                     <?php foreach ($processes as $processIndex => $process): ?>
                         <?php
-                        $sessionsCount = (int) ($process['sessions_count'] ?? 0);
-                        $completedSessions = (int) ($process['completed_sessions'] ?? 0);
+                        $sessionsCount = (int) ($process['sessions_count'] ?? 0) + (int) ($process['evaluation_assignments_count'] ?? 0);
+                        $completedSessions = (int) ($process['completed_sessions'] ?? 0) + (int) ($process['completed_evaluation_assignments'] ?? 0);
                         $percent = $sessionsCount > 0 ? round(($completedSessions / $sessionsCount) * 100) : 0;
                         $processCode = trim((string) ($process['code'] ?? ''));
                         $processNumber = preg_match('/^p0*(\d+)$/i', $processCode, $processCodeMatches)
                             ? (int) $processCodeMatches[1]
                             : ((int) $processIndex + 1);
+                        $processName = trim((string) ($process['name'] ?? ''));
+                        $processLabel = $processName !== '' ? $processName : 'Proceso ' . $processNumber;
                         ?>
                         <tr>
                             <td>
-                                <div class="fw-semibold"><?= e('Porceso ' . $processNumber) ?></div>
+                                <div class="fw-semibold"><?= e($processLabel) ?></div>
                                 <div class="text-muted small"><code><?= e((string) $process['code']) ?></code></div>
                             </td>
                             <td><span class="badge text-bg-light border"><?= e($statuses[$process['status']] ?? labelize((string) $process['status'])) ?></span></td>
-                            <td><?= (int) ($process['instruments_count'] ?? 0) ?></td>
+                            <td><?= (int) ($process['evaluations_count'] ?? $process['instruments_count'] ?? 0) ?></td>
                             <td><?= (int) ($process['users_count'] ?? 0) ?></td>
                             <td>
                                 <?php $onlineUsers = (int) ($process['online_users_count'] ?? 0); ?>
@@ -125,7 +127,7 @@ $selectedGroup = $selectedDateGroup !== '' ? ($dateGroups[$selectedDateGroup] ??
                             </td>
                             <td>
                                 <div class="d-flex align-items-center gap-2">
-                                    <div class="progress flex-grow-1" role="progressbar" aria-valuenow="<?= (int) $percent ?>" aria-valuemin="0" aria-valuemax="100" style="height: .6rem; min-width: 120px;">
+                                    <div class="progress flex-grow-1" role="progressbar" aria-label="Avance del proceso" aria-valuenow="<?= (int) $percent ?>" aria-valuemin="0" aria-valuemax="100" style="height: .6rem; min-width: 120px;">
                                         <div class="progress-bar" style="width: <?= (int) $percent ?>%;"></div>
                                     </div>
                                     <span class="small text-muted"><?= (int) $completedSessions ?> / <?= (int) $sessionsCount ?></span>

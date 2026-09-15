@@ -2,14 +2,32 @@
 $processUsers = $processUsers ?? [];
 $sessions = $sessions ?? [];
 $instruments = $instruments ?? [];
+$evaluationAssignments = $evaluationAssignments ?? [];
+$evaluationForms = $evaluationForms ?? [];
 $fields = $fields ?? [];
 $availableUserFilters = $availableUserFilters ?? ['companies' => [], 'fields' => []];
 $processId = (int) ($process['id'] ?? 0);
 $processToken = secure_url_token($processId, 'test_process');
 $availableUsersUrl = app_url('tests/processes/' . $processToken . '/available-users');
 $selectedInstrumentSet = array_flip(array_map('intval', $selectedInstrumentIds ?? []));
+$evaluationAssignmentsByUser = [];
+foreach ($evaluationAssignments as $assignment) {
+    $evaluationAssignmentsByUser[(int) ($assignment['user_id'] ?? 0)][(int) ($assignment['form_id'] ?? 0)] = $assignment;
+}
+$evaluationFormIds = array_values(array_unique(array_merge(
+    array_map(static fn(array $form): int => (int) ($form['id'] ?? 0), $evaluationForms),
+    array_map(static fn(array $assignment): int => (int) ($assignment['form_id'] ?? 0), $evaluationAssignments)
+)));
+$evaluationFormTitles = [];
+foreach ($evaluationForms as $form) {
+    $evaluationFormTitles[(int) ($form['id'] ?? 0)] = (string) ($form['title'] ?? 'Evaluación');
+}
+foreach ($evaluationAssignments as $assignment) {
+    $evaluationFormTitles[(int) ($assignment['form_id'] ?? 0)] = (string) ($assignment['form_title'] ?? 'Evaluación');
+}
 $sessionsByUserInstrument = [];
-$finishedSessionsByUser = [];
+$answeredSessionsByUser = [];
+$answeredEvaluationByUser = [];
 foreach ($sessions as $session) {
     $sessionUserId = (int) $session['user_id'];
     $sessionInstrumentId = (int) $session['instrument_id'];
@@ -17,8 +35,14 @@ foreach ($sessions as $session) {
     if (!$currentSession || (int) ($session['answers_count'] ?? 0) > (int) ($currentSession['answers_count'] ?? 0)) {
         $sessionsByUserInstrument[$sessionUserId][$sessionInstrumentId] = $session;
     }
-    if (in_array((string) ($session['status'] ?? ''), ['completed', 'expired'], true)) {
-        $finishedSessionsByUser[$sessionUserId] = ($finishedSessionsByUser[$sessionUserId] ?? 0) + 1;
+    if ((int) ($session['answers_count'] ?? 0) > 0) {
+        $answeredSessionsByUser[$sessionUserId] = ($answeredSessionsByUser[$sessionUserId] ?? 0) + 1;
+    }
+}
+foreach ($evaluationAssignments as $assignment) {
+    if ((int) ($assignment['answers_count'] ?? 0) > 0) {
+        $evaluationUserId = (int) ($assignment['user_id'] ?? 0);
+        $answeredEvaluationByUser[$evaluationUserId] = ($answeredEvaluationByUser[$evaluationUserId] ?? 0) + 1;
     }
 }
 $statusLabels = [
@@ -37,7 +61,8 @@ $fieldClientDefinitions = array_map(static function (array $field): array {
     ];
 }, $fields);
 $allowExpiredReopen = (int) ($process['allow_expired_reopen'] ?? 0) === 1;
-$showProcessUserActions = $canManageUsers || $canViewResults || $canEditProcessUserData;
+$canManageSessionActions = !empty($canManageSessionActions);
+$showProcessUserActions = $canManageUsers || $canManageSessionActions || $canViewResults || $canEditProcessUserData;
 $processHasResults = !empty($processHasResults);
 $availabilityStatus = (string) ($process['availability_status'] ?? 'scheduled');
 $availabilityLabels = [
@@ -50,6 +75,8 @@ $assignedProcessUsers = array_values(array_filter(
     static fn(array $user): bool => (string) ($user['status'] ?? '') !== 'cancelled'
 ));
 $selectedInstrumentCount = count($selectedInstrumentSet);
+$selectedEvaluationCount = count($evaluationFormIds);
+$selectedEvaluationTotal = $selectedInstrumentCount + $selectedEvaluationCount;
 $generalSummary = [
     'assigned_total' => count($assignedProcessUsers),
     'platform_attendance_total' => 0,
@@ -58,10 +85,10 @@ $generalSummary = [
     'partial_completed_total' => 0,
 ];
 $generalSummaryHelp = [
-    'attendance' => 'Usuarios con login registrado en la ventana del proceso o con evidencia de test iniciado.',
+    'attendance' => 'Usuarios con login registrado en la ventana del proceso o con evidencia de una evaluación iniciada.',
     'completed_all' => 'Usuarios que tienen todas las evaluaciones del proceso en estado Completada, Expirada o En curso.',
     'not_started' => 'Usuarios que tienen todas las evaluaciones del proceso en estado Asignada.',
-    'partial' => 'Usuarios que tienen al menos una evaluacion en estado Completada, Expirada o En curso, pero aun no cumplen con todos los test del proceso.',
+    'partial' => 'Usuarios que tienen al menos una evaluación en estado Completada, Expirada o En curso, pero aún no cumplen con todas las evaluaciones del proceso.',
 ];
 $selectedInstruments = [];
 foreach ($instruments as $instrument) {
@@ -84,6 +111,48 @@ foreach ($selectedInstruments as $instrumentId => $instrument) {
         'percent_samples' => 0,
         'users_total' => count($assignedProcessUsers),
     ];
+}
+$evaluationFormsById = [];
+foreach ($evaluationForms as $form) {
+    $formId = (int) ($form['id'] ?? 0);
+    if ($formId > 0) {
+        $evaluationFormsById[$formId] = $form;
+    }
+}
+foreach ($evaluationAssignments as $assignment) {
+    $formId = (int) ($assignment['form_id'] ?? 0);
+    if ($formId > 0 && !isset($evaluationFormsById[$formId])) {
+        $evaluationFormsById[$formId] = $assignment;
+    }
+}
+$evaluationSummaryRows = [];
+foreach ($evaluationFormIds as $formId) {
+    $form = $evaluationFormsById[(int) $formId] ?? [];
+    $evaluationSummaryRows[(int) $formId] = [
+        'instrument_name' => (string) ($form['title'] ?? 'Evaluación'),
+        'instrument_code' => strtoupper((string) ($form['form_type'] ?? 'evaluación')),
+        'items_count' => max(0, (int) ($form['question_count'] ?? 0)),
+        'advanced_total' => 0,
+        'expired_total' => 0,
+        'assigned_total' => 0,
+        'answered_percent_sum' => 0.0,
+        'unanswered_percent_sum' => 0.0,
+        'percent_samples' => 0,
+        'users_total' => count($assignedProcessUsers),
+        'kind' => 'evaluation',
+    ];
+}
+$evaluationAssignmentsByUserForm = [];
+foreach ($evaluationAssignments as $assignment) {
+    $evaluationAssignmentsByUserForm[(int) ($assignment['user_id'] ?? 0)][(int) ($assignment['form_id'] ?? 0)] = $assignment;
+}
+$summaryRows = [];
+foreach ($testSummaryRows as $instrumentId => $row) {
+    $row['kind'] = 'test';
+    $summaryRows['test_' . $instrumentId] = $row;
+}
+foreach ($evaluationSummaryRows as $formId => $row) {
+    $summaryRows['evaluation_' . $formId] = $row;
 }
 $processStartsAtTs = trim((string) ($process['starts_at'] ?? '')) !== '' ? strtotime((string) $process['starts_at']) : null;
 $platformAttendanceWindowStart = $processStartsAtTs !== null && $processStartsAtTs !== false ? $processStartsAtTs - 1800 : null;
@@ -144,6 +213,46 @@ foreach ($assignedProcessUsers as $user) {
         }
     }
 
+    foreach ($evaluationFormIds as $formId) {
+        $formId = (int) $formId;
+        $assignment = $evaluationAssignmentsByUserForm[$userId][$formId] ?? null;
+        $rowKey = 'evaluation_' . $formId;
+        $status = (string) ($assignment['evaluation_status'] ?? 'assigned');
+        if (!$assignment) {
+            $assignedCount++;
+            if (isset($summaryRows[$rowKey])) {
+                $summaryRows[$rowKey]['assigned_total']++;
+            }
+            continue;
+        }
+
+        $itemsCount = max(0, (int) ($assignment['question_count'] ?? 0));
+        if (isset($summaryRows[$rowKey]) && $itemsCount > 0 && (int) $summaryRows[$rowKey]['items_count'] <= 0) {
+            $summaryRows[$rowKey]['items_count'] = $itemsCount;
+        }
+        if (in_array($status, ['completed', 'expired', 'in_progress'], true)) {
+            $advancedCount++;
+            if (isset($summaryRows[$rowKey])) {
+                $summaryRows[$rowKey]['advanced_total']++;
+                if ($status === 'expired') {
+                    $summaryRows[$rowKey]['expired_total']++;
+                }
+                $answersCount = max(0, (int) ($assignment['answers_count'] ?? 0));
+                if ($itemsCount > 0) {
+                    $answeredPercent = min(100, ($answersCount / $itemsCount) * 100);
+                    $summaryRows[$rowKey]['answered_percent_sum'] += $answeredPercent;
+                    $summaryRows[$rowKey]['unanswered_percent_sum'] += max(0, 100 - $answeredPercent);
+                    $summaryRows[$rowKey]['percent_samples']++;
+                }
+            }
+        } elseif ($status === 'assigned') {
+            $assignedCount++;
+            if (isset($summaryRows[$rowKey])) {
+                $summaryRows[$rowKey]['assigned_total']++;
+            }
+        }
+    }
+
     $hasLoginEvidence = $lastLoginTs !== false
         && ($platformAttendanceWindowStart === null || $lastLoginTs >= $platformAttendanceWindowStart)
         && ($platformAttendanceWindowEnd === null || $lastLoginTs <= $platformAttendanceWindowEnd);
@@ -152,23 +261,23 @@ foreach ($assignedProcessUsers as $user) {
         $generalSummary['platform_attendance_total']++;
     }
 
-    if ($selectedInstrumentCount > 0 && $advancedCount >= $selectedInstrumentCount) {
+    if ($selectedEvaluationTotal > 0 && $advancedCount >= $selectedEvaluationTotal) {
         $generalSummary['completed_all_total']++;
-    } elseif ($selectedInstrumentCount > 0 && $assignedCount >= $selectedInstrumentCount) {
+    } elseif ($selectedEvaluationTotal > 0 && $assignedCount >= $selectedEvaluationTotal) {
         $generalSummary['not_started_total']++;
     } elseif ($advancedCount > 0) {
         $generalSummary['partial_completed_total']++;
     }
 }
-foreach ($testSummaryRows as &$testSummaryRow) {
-    $samples = (int) ($testSummaryRow['percent_samples'] ?? 0);
-    $testSummaryRow['answered_percent_avg'] = $samples > 0 ? round(((float) $testSummaryRow['answered_percent_sum']) / $samples, 1) : null;
-    $testSummaryRow['unanswered_percent_avg'] = $samples > 0 ? round(((float) $testSummaryRow['unanswered_percent_sum']) / $samples, 1) : null;
+foreach ($summaryRows as &$summaryRow) {
+    $samples = (int) ($summaryRow['percent_samples'] ?? 0);
+    $summaryRow['answered_percent_avg'] = $samples > 0 ? round(((float) $summaryRow['answered_percent_sum']) / $samples, 1) : null;
+    $summaryRow['unanswered_percent_avg'] = $samples > 0 ? round(((float) $summaryRow['unanswered_percent_sum']) / $samples, 1) : null;
 }
-unset($testSummaryRow);
+unset($summaryRow);
 ?>
 
-<section class="content-panel page-header process-detail-header" data-page-back-url="<?= e(route_url('test-processes')) ?>">
+<section class="card content-panel page-header process-detail-header" data-page-back-url="<?= e(route_url('test-processes')) ?>">
     <div class="process-detail-heading">
         <div class="process-detail-eyebrow">
             <span>Proceso</span>
@@ -622,7 +731,7 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 </script>
 
-<section class="content-panel">
+<section class="card content-panel">
     <div class="row g-3">
         <div class="col"><div class="result-metric"><span class="result-metric-label">Usuarios</span><strong><?= (int) ($summary['users_total'] ?? 0) ?></strong></div></div>
         <div class="col"><div class="result-metric"><span class="result-metric-label">Evaluaciones</span><strong><?= (int) ($summary['instruments_total'] ?? 0) ?></strong></div></div>
@@ -688,11 +797,11 @@ document.addEventListener('DOMContentLoaded', function () {
             aria-labelledby="process-summary-tab"
             tabindex="0"
         >
-            <section class="content-panel">
+            <section class="card content-panel">
                 <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-3">
                     <div>
                         <h2 class="h5 fw-bold mb-1">Resumen general</h2>
-                        <p class="text-muted mb-0"><?= (int) $generalSummary['assigned_total'] ?> personas asignadas · <?= (int) $selectedInstrumentCount ?> test del proceso</p>
+                        <p class="text-muted mb-0"><?= (int) $generalSummary['assigned_total'] ?> personas asignadas · <?= (int) $selectedEvaluationTotal ?> evaluaciones del proceso</p>
                     </div>
                 </div>
                 <div class="row g-3">
@@ -711,8 +820,8 @@ document.addEventListener('DOMContentLoaded', function () {
                     <div class="col-md-6 col-xl-3">
                         <div class="result-metric h-100">
                             <span class="result-metric-label d-inline-flex align-items-center gap-1">
-                                Terminaron todos los test
-                                <button class="btn btn-sm btn-link p-0 text-muted" type="button" data-bs-toggle="popover" data-bs-trigger="focus" data-bs-placement="bottom" data-bs-title="Terminaron todos los test" data-bs-content="<?= e($generalSummaryHelp['completed_all']) ?>" aria-label="Ver explicacion de Terminaron todos los test">
+                                Terminaron todas las evaluaciones
+                                <button class="btn btn-sm btn-link p-0 text-muted" type="button" data-bs-toggle="popover" data-bs-trigger="focus" data-bs-placement="bottom" data-bs-title="Terminaron todas las evaluaciones" data-bs-content="<?= e($generalSummaryHelp['completed_all']) ?>" aria-label="Ver explicación de Terminaron todas las evaluaciones">
                                     <i class="bi bi-info-circle"></i>
                                 </button>
                             </span>
@@ -723,8 +832,8 @@ document.addEventListener('DOMContentLoaded', function () {
                     <div class="col-md-6 col-xl-3">
                         <div class="result-metric h-100">
                             <span class="result-metric-label d-inline-flex align-items-center gap-1">
-                                No iniciaron ningun test
-                                <button class="btn btn-sm btn-link p-0 text-muted" type="button" data-bs-toggle="popover" data-bs-trigger="focus" data-bs-placement="bottom" data-bs-title="No iniciaron ningun test" data-bs-content="<?= e($generalSummaryHelp['not_started']) ?>" aria-label="Ver explicacion de No iniciaron ningun test">
+                                No iniciaron ninguna evaluación
+                                <button class="btn btn-sm btn-link p-0 text-muted" type="button" data-bs-toggle="popover" data-bs-trigger="focus" data-bs-placement="bottom" data-bs-title="No iniciaron ninguna evaluación" data-bs-content="<?= e($generalSummaryHelp['not_started']) ?>" aria-label="Ver explicación de No iniciaron ninguna evaluación">
                                     <i class="bi bi-info-circle"></i>
                                 </button>
                             </span>
@@ -736,7 +845,7 @@ document.addEventListener('DOMContentLoaded', function () {
                         <div class="result-metric h-100">
                             <span class="result-metric-label d-inline-flex align-items-center gap-1">
                                 Completaron parcialmente
-                                <button class="btn btn-sm btn-link p-0 text-muted" type="button" data-bs-toggle="popover" data-bs-trigger="focus" data-bs-placement="bottom" data-bs-title="Completaron parcialmente" data-bs-content="<?= e($generalSummaryHelp['partial']) ?>" aria-label="Ver explicacion de Completaron parcialmente">
+                                <button class="btn btn-sm btn-link p-0 text-muted" type="button" data-bs-toggle="popover" data-bs-trigger="focus" data-bs-placement="bottom" data-bs-title="Completaron parcialmente" data-bs-content="<?= e($generalSummaryHelp['partial']) ?>" aria-label="Ver explicación de Completaron parcialmente">
                                     <i class="bi bi-info-circle"></i>
                                 </button>
                             </span>
@@ -748,15 +857,15 @@ document.addEventListener('DOMContentLoaded', function () {
                 <div class="mt-4">
                     <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
                         <div>
-                            <h3 class="h6 fw-bold mb-1">Resumen por test</h3>
-                            <p class="text-muted small mb-0">Conteo de usuarios por estado operativo de cada evaluacion.</p>
+                            <h3 class="h6 fw-bold mb-1">Resumen por evaluación</h3>
+                            <p class="text-muted small mb-0">Conteo de usuarios por estado operativo de cada evaluación del proceso.</p>
                         </div>
                     </div>
                     <div class="table-responsive">
                         <table class="table table-hover align-middle mb-0">
                             <thead>
                                 <tr>
-                                    <th>Test</th>
+                                    <th>Evaluación</th>
                                     <th class="text-end">Preguntas</th>
                                     <th class="text-end">Terminadas / en curso</th>
                                     <th class="text-end">Expiradas</th>
@@ -768,10 +877,10 @@ document.addEventListener('DOMContentLoaded', function () {
                             <tbody>
                                 <?php if (!$testSummaryRows): ?>
                                     <tr>
-                                        <td colspan="7" class="text-center text-muted py-4">No hay test configurados para este proceso.</td>
+                                        <td colspan="7" class="text-center text-muted py-4">No hay evaluaciones configuradas para este proceso.</td>
                                     </tr>
                                 <?php else: ?>
-                                    <?php foreach ($testSummaryRows as $row): ?>
+                                    <?php foreach ($summaryRows as $row): ?>
                                         <tr>
                                             <td>
                                                 <div class="fw-semibold"><?= e((string) $row['instrument_name']) ?></div>
@@ -829,7 +938,7 @@ document.addEventListener('DOMContentLoaded', function () {
         >
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="selected_user_ids_json" value="[]" data-demo-selected-inputs>
-            <section class="content-panel">
+            <section class="card content-panel">
                 <div class="assignment-demo-alert">
                     <div>
                         <strong>Agregar usuarios al proceso</strong>
@@ -840,7 +949,7 @@ document.addEventListener('DOMContentLoaded', function () {
             </section>
 
             <section class="assignment-demo-layout mt-4">
-                <aside class="content-panel assignment-filter-panel">
+                <aside class="card content-panel assignment-filter-panel">
                     <div class="d-flex align-items-center justify-content-between gap-2 mb-3">
                         <div>
                             <h2 class="h5 fw-bold mb-1">Filtros</h2>
@@ -887,7 +996,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     </div>
                 </aside>
 
-                <section class="content-panel assignment-user-panel">
+                <section class="card content-panel assignment-user-panel">
                     <div class="assignment-panel-toolbar">
                         <div>
                             <h2 class="h5 fw-bold mb-1">Usuarios disponibles</h2>
@@ -919,7 +1028,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     </div>
 
                     <div class="table-responsive">
-                        <table class="table align-middle app-table assignment-user-table">
+                        <table class="table table-hover align-middle app-table assignment-user-table">
                             <thead>
                                 <tr>
                                     <th class="no-sort no-export">
@@ -942,7 +1051,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     </div>
                 </section>
 
-                <aside class="content-panel assignment-summary-panel">
+                <aside class="card content-panel assignment-summary-panel">
                     <h2 class="h5 fw-bold mb-3">Resumen</h2>
                     <div class="assignment-summary-metrics">
                         <div><span>Seleccionados</span><strong data-demo-summary-selected>0</strong></div>
@@ -976,7 +1085,7 @@ document.addEventListener('DOMContentLoaded', function () {
     aria-labelledby="process-progress-tab"
     tabindex="0"
 >
-<section class="content-panel">
+<section class="card content-panel">
     <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-3">
         <div>
             <h2 class="h5 fw-bold mb-1">Avance del proceso</h2>
@@ -984,7 +1093,7 @@ document.addEventListener('DOMContentLoaded', function () {
         </div>
         <div class="d-flex flex-wrap align-items-center gap-2">
             <span class="badge text-bg-light border"><?= count($processUsers) ?> usuarios</span>
-            <?php if ($canManageAssignments && $processUsers): ?>
+            <?php if (($canManageAssignments || $canManageSessionActions) && $processUsers): ?>
                 <form
                     class="d-flex flex-wrap align-items-center gap-2"
                     method="post"
@@ -1008,7 +1117,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     <?php endif; ?>
                 </form>
             <?php endif; ?>
-            <?php if ($canManageUsers && $processUsers): ?>
+            <?php if (($canManageUsers || $canManageSessionActions) && $processUsers): ?>
                 <form
                     method="post"
                     action="<?= e(app_url('tests/processes/' . $processToken . '/remove-all-users')) ?>"
@@ -1025,7 +1134,7 @@ document.addEventListener('DOMContentLoaded', function () {
         <div class="alert alert-light border mb-0">Aun no hay usuarios en este proceso.</div>
     <?php else: ?>
         <div class="table-responsive">
-            <table class="table align-middle app-table app-data-table" data-page-length="25" data-export-title="Avance <?= e((string) $process['name']) ?>">
+            <table class="table table-hover align-middle app-table app-data-table" data-page-length="25" data-export-title="Avance <?= e((string) $process['name']) ?>">
                 <thead>
                     <tr>
                         <th>Usuario</th>
@@ -1034,6 +1143,9 @@ document.addEventListener('DOMContentLoaded', function () {
                             <?php if (isset($selectedInstrumentSet[(int) $instrument['id']])): ?>
                                 <th><?= e((string) $instrument['name']) ?></th>
                             <?php endif; ?>
+                        <?php endforeach; ?>
+                        <?php foreach ($evaluationFormIds as $evaluationFormId): ?>
+                            <th><?= e($evaluationFormTitles[$evaluationFormId] ?? 'Evaluación') ?></th>
                         <?php endforeach; ?>
                         <?php if ($showProcessUserActions): ?>
                             <th class="no-sort no-export">Acciones</th>
@@ -1063,7 +1175,7 @@ document.addEventListener('DOMContentLoaded', function () {
                                         <div class="process-session-card">
                                             <div class="process-session-topline">
                                                 <span class="badge text-bg-light border"><?= e($statusLabels[$session['status']] ?? labelize((string) $session['status'])) ?></span>
-                                                <?php if ($canManageAssignments && in_array((string) $session['status'], ['assigned', 'in_progress'], true)): ?>
+                                                <?php if (($canManageAssignments || $canManageSessionActions) && in_array((string) $session['status'], ['assigned', 'in_progress'], true)): ?>
                                                     <form method="post" action="<?= e(app_url('tests/processes/' . $processToken . '/cancel-session')) ?>" class="process-session-inline-form">
                                                         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                                                         <input type="hidden" name="session_id" value="<?= (int) $session['id'] ?>">
@@ -1071,7 +1183,7 @@ document.addEventListener('DOMContentLoaded', function () {
                                                     </form>
                                                 <?php endif; ?>
                                             </div>
-                                            <?php if ($canManageAssignments && in_array((string) $session['status'], ['completed', 'expired'], true)): ?>
+                                            <?php if (($canManageAssignments || $canManageSessionActions) && in_array((string) $session['status'], ['completed', 'expired'], true)): ?>
                                                 <form
                                                     method="post"
                                                     action="<?= e(app_url('tests/processes/' . $processToken . '/reset-session')) ?>"
@@ -1083,12 +1195,12 @@ document.addEventListener('DOMContentLoaded', function () {
                                                     <button class="btn btn-sm btn-outline-danger process-session-reset" type="submit">Eliminar respuestas</button>
                                                 </form>
                                             <?php endif; ?>
-                                            <?php if ($canManageAssignments && $allowExpiredReopen && (string) ($session['status'] ?? '') === 'expired'): ?>
+                                            <?php if (($canManageAssignments || $canManageSessionActions) && $allowExpiredReopen && in_array((string) ($session['status'] ?? ''), ['completed', 'in_progress', 'expired'], true)): ?>
                                                 <form
                                                     method="post"
                                                     action="<?= e(app_url('tests/processes/' . $processToken . '/reopen-session')) ?>"
                                                     class="process-session-reopen-form"
-                                                    data-confirm-submit="Esta accion reabrira la evaluacion expirada con el nuevo tiempo indicado. El resultado anterior se recalculara cuando el usuario finalice. Deseas continuar?"
+                                                    data-confirm-submit="Esta accion reabrira la evaluacion con el nuevo tiempo indicado, conservara sus respuestas y recalculara el resultado cuando finalice. Deseas continuar?"
                                                 >
                                                     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
                                                     <input type="hidden" name="session_id" value="<?= (int) $session['id'] ?>">
@@ -1099,7 +1211,7 @@ document.addEventListener('DOMContentLoaded', function () {
                                                     <button class="btn btn-sm btn-outline-primary process-session-action" type="submit">Reabrir</button>
                                                 </form>
                                             <?php endif; ?>
-                                            <?php if ($canViewResults && (int) ($session['activity_events_total'] ?? 0) > 0): ?>
+                                            <?php if (($canViewResults || $canManageSessionActions) && (int) ($session['activity_events_total'] ?? 0) > 0): ?>
                                                 <div class="supervised-process-summary">
                                                     <span class="badge text-bg-light border">Eventos: <?= (int) $session['activity_events_total'] ?></span>
                                                     <?php if ((int) ($session['activity_attention_total'] ?? 0) > 0): ?>
@@ -1110,21 +1222,72 @@ document.addEventListener('DOMContentLoaded', function () {
                                                     <?php endif; ?>
                                                 </div>
                                             <?php endif; ?>
-                                            <?php if ($canViewResults && !empty($session['last_activity_event_at'])): ?>
+                                            <?php if (($canViewResults || $canManageSessionActions) && !empty($session['last_activity_event_at'])): ?>
                                                 <div class="process-session-last">Ultimo: <?= e((string) $session['last_activity_event_at']) ?></div>
                                             <?php endif; ?>
                                         </div>
                                     <?php endif; ?>
                                 </td>
                             <?php endforeach; ?>
+                            <?php foreach ($evaluationFormIds as $evaluationFormId): ?>
+                                <?php $evaluationAssignment = $evaluationAssignmentsByUser[(int) $user['user_id']][$evaluationFormId] ?? null; ?>
+                                <td>
+                                    <div class="process-session-card <?= $evaluationAssignment ? '' : 'is-empty' ?>">
+                                        <?php if (!$evaluationAssignment): ?>
+                                            <span class="text-muted small">Sin asignar</span>
+                                        <?php else: ?>
+                                            <div class="process-session-topline">
+                                                <span class="badge text-bg-light border"><?= e($statusLabels[$evaluationAssignment['evaluation_status']] ?? labelize((string) $evaluationAssignment['evaluation_status'])) ?></span>
+                                                <?php if (($canManageAssignments || $canManageSessionActions) && in_array((string) ($evaluationAssignment['evaluation_status'] ?? ''), ['assigned', 'in_progress'], true)): ?>
+                                                    <form method="post" action="<?= e(app_url('tests/processes/' . $processToken . '/cancel-evaluation-assignment')) ?>" class="process-session-inline-form">
+                                                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                                        <input type="hidden" name="form_id" value="<?= (int) $evaluationFormId ?>">
+                                                        <input type="hidden" name="user_id" value="<?= (int) $user['user_id'] ?>">
+                                                        <button class="btn btn-sm btn-outline-danger process-session-action" type="submit">Cancelar</button>
+                                                    </form>
+                                                <?php endif; ?>
+                                            </div>
+                                            <?php if (($canManageAssignments || $canManageSessionActions) && in_array((string) ($evaluationAssignment['evaluation_status'] ?? ''), ['completed', 'expired'], true)): ?>
+                                                <form method="post" action="<?= e(app_url('tests/processes/' . $processToken . '/reset-evaluation-assignment')) ?>" class="process-session-danger-form" data-confirm-submit="Esta accion eliminara las respuestas, puntaje, actividad y resultado de esta evaluacion. El usuario podra responderla nuevamente. Deseas continuar?">
+                                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                                    <input type="hidden" name="form_id" value="<?= (int) $evaluationFormId ?>">
+                                                    <input type="hidden" name="user_id" value="<?= (int) $user['user_id'] ?>">
+                                                    <button class="btn btn-sm btn-outline-danger process-session-reset" type="submit">Eliminar respuestas</button>
+                                                </form>
+                                            <?php endif; ?>
+                                            <?php if (($canManageAssignments || $canManageSessionActions) && $allowExpiredReopen && in_array((string) ($evaluationAssignment['evaluation_status'] ?? ''), ['completed', 'in_progress', 'expired'], true)): ?>
+                                                <form method="post" action="<?= e(app_url('tests/processes/' . $processToken . '/reopen-expired-evaluation-assignment')) ?>" class="process-session-reopen-form" data-confirm-submit="Esta accion reabrira la evaluacion, conservara sus respuestas y asignara un nuevo tiempo. Deseas continuar?">
+                                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                                    <input type="hidden" name="form_id" value="<?= (int) $evaluationFormId ?>">
+                                                    <input type="hidden" name="user_id" value="<?= (int) $user['user_id'] ?>">
+                                                    <label class="process-session-reopen-field">
+                                                        <span>Nuevo tiempo</span>
+                                                        <input class="form-control form-control-sm" type="number" name="duration_minutes" min="1" max="1440" value="30" required>
+                                                    </label>
+                                                    <button class="btn btn-sm btn-outline-primary process-session-action" type="submit">Reabrir</button>
+                                                </form>
+                                            <?php endif; ?>
+                                            <?php if (($canViewResults || $canManageSessionActions) && (int) ($evaluationAssignment['activity_events_total'] ?? 0) > 0): ?>
+                                                <div class="supervised-process-summary">
+                                                    <span class="badge text-bg-light border">Eventos: <?= (int) $evaluationAssignment['activity_events_total'] ?></span>
+                                                    <?php if ((int) ($evaluationAssignment['activity_attention_total'] ?? 0) > 0): ?><span class="badge text-bg-warning">Atencion: <?= (int) $evaluationAssignment['activity_attention_total'] ?></span><?php endif; ?>
+                                                    <?php if ((int) ($evaluationAssignment['activity_risk_total'] ?? 0) > 0): ?><span class="badge text-bg-danger">Riesgo: <?= (int) $evaluationAssignment['activity_risk_total'] ?></span><?php endif; ?>
+                                                </div>
+                                            <?php endif; ?>
+                                            <?php if (($canViewResults || $canManageSessionActions) && !empty($evaluationAssignment['last_activity_event_at'])): ?><div class="process-session-last">Ultimo: <?= e((string) $evaluationAssignment['last_activity_event_at']) ?></div><?php endif; ?>
+                                        <?php endif; ?>
+                                    </div>
+                                </td>
+                            <?php endforeach; ?>
                             <?php if ($showProcessUserActions): ?>
                                 <?php
                                 $processUserId = (int) ($user['user_id'] ?? 0);
-                                $finishedSessionCount = (int) ($finishedSessionsByUser[$processUserId] ?? 0);
+                                $answeredCount = (int) ($answeredSessionsByUser[$processUserId] ?? 0) + (int) ($answeredEvaluationByUser[$processUserId] ?? 0);
+                                $resultsUrl = route_url('test-user.results', $processUserId) . '?process_sid=' . rawurlencode(secure_url_token($processId, 'test_process'));
                                 ?>
                                 <td class="process-user-actions">
-                                    <?php if ($canViewResults && $finishedSessionCount > 0): ?>
-                                        <a class="btn btn-sm btn-outline-primary process-session-action" href="<?= e(route_url('test-user.results', $processUserId)) ?>">
+                                    <?php if ($canViewResults && $answeredCount > 0): ?>
+                                        <a class="btn btn-sm btn-outline-primary process-session-action" href="<?= e($resultsUrl) ?>">
                                             <i class="bi bi-bar-chart me-1"></i> Resultados
                                         </a>
                                     <?php endif; ?>
@@ -1140,7 +1303,7 @@ document.addEventListener('DOMContentLoaded', function () {
                                             <i class="bi bi-pencil me-1"></i> Editar datos
                                         </a>
                                     <?php endif; ?>
-                                    <?php if ($canManageUsers && ($user['status'] ?? '') !== 'cancelled'): ?>
+                                    <?php if (($canManageUsers || $canManageSessionActions) && ($user['status'] ?? '') !== 'cancelled'): ?>
                                         <form
                                             method="post"
                                             action="<?= e(app_url('tests/processes/' . $processToken . '/remove-user')) ?>"
@@ -1150,10 +1313,10 @@ document.addEventListener('DOMContentLoaded', function () {
                                             <input type="hidden" name="user_id" value="<?= (int) $user['user_id'] ?>">
                                             <button class="btn btn-sm btn-outline-danger process-session-action" type="submit">Remover</button>
                                         </form>
-                                    <?php elseif ($canManageUsers): ?>
+                                    <?php elseif ($canManageUsers || $canManageSessionActions): ?>
                                         <span class="text-muted small">Removido</span>
                                     <?php endif; ?>
-                                    <?php if ((!$canViewResults || $finishedSessionCount <= 0) && !$canManageUsers): ?>
+                                    <?php if ((!$canViewResults || $answeredCount <= 0) && !$canManageUsers && !$canManageSessionActions): ?>
                                         <span class="text-muted small">No disponible</span>
                                     <?php endif; ?>
                                 </td>

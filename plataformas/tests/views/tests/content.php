@@ -25,7 +25,7 @@ if (!function_exists('test_short_text')) {
     <a class="btn btn-outline-secondary" data-page-back="1" href="<?= e(route_url('tests')) ?>">Volver</a>
 </section>
 
-<section class="content-panel">
+<section class="card content-panel">
     <div class="test-config-summary">
         <div>
             <h2 class="h5 fw-bold mb-2">Guia de configuracion del test</h2>
@@ -39,7 +39,7 @@ if (!function_exists('test_short_text')) {
     </div>
 </section>
 
-<section class="content-panel mt-4">
+<section class="card content-panel mt-4">
     <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
         <div>
             <h2 class="h5 fw-bold mb-1">Escalas</h2>
@@ -51,7 +51,7 @@ if (!function_exists('test_short_text')) {
     </div>
 
     <div class="table-responsive">
-        <table class="table align-middle app-table app-data-table" data-export-title="Escalas <?= e($instrument['name']) ?>" data-page-length="10">
+        <table class="table table-hover align-middle app-table app-data-table" data-export-title="Escalas <?= e($instrument['name']) ?>" data-page-length="10">
             <thead>
                 <tr>
                     <th>Clave</th>
@@ -94,7 +94,7 @@ if (!function_exists('test_short_text')) {
     </div>
 </section>
 
-<section class="content-panel mt-4">
+<section class="card content-panel mt-4">
     <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
         <div>
             <h2 class="h5 fw-bold mb-1">Preguntas y valorizaciones</h2>
@@ -108,7 +108,7 @@ if (!function_exists('test_short_text')) {
     </div>
 
     <div class="table-responsive">
-        <table class="table align-middle app-table app-data-table" data-export-title="Preguntas <?= e($instrument['name']) ?>" data-page-length="25">
+        <table class="table table-hover align-middle app-table app-data-table" data-export-title="Preguntas <?= e($instrument['name']) ?>" data-page-length="25">
             <thead>
                 <tr>
                     <th>Pregunta</th>
