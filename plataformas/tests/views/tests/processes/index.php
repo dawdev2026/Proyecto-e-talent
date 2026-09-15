@@ -21,7 +21,7 @@ $totalProcesses = (int) ($totalProcesses ?? count($processes ?? []));
 $selectedGroup = $selectedDateGroup !== '' ? ($dateGroups[$selectedDateGroup] ?? null) : null;
 ?>
 
-<section class="content-panel">
+<section class="card content-panel">
     <?php if (!$processes): ?>
         <?php if ($totalProcesses > 0): ?>
             <div class="d-flex flex-wrap align-items-end justify-content-between gap-3">
@@ -70,7 +70,7 @@ $selectedGroup = $selectedDateGroup !== '' ? ($dateGroups[$selectedDateGroup] ??
             </div>
         </div>
         <div class="table-responsive">
-            <table class="table align-middle app-table app-data-table" data-export-title="Procesos">
+            <table class="table table-hover align-middle app-table app-data-table" data-export-title="Procesos">
                 <thead>
                     <tr>
                         <th>Proceso</th>

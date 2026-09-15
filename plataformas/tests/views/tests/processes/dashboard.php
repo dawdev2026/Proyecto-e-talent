@@ -150,7 +150,7 @@ if (!function_exists('process_dashboard_help_label')) {
     </div>
 </section>
 
-<section class="content-panel mb-4" data-process-dashboard-loading>
+<section class="card content-panel mb-4" data-process-dashboard-loading>
     <div class="d-flex align-items-start gap-3">
         <div class="spinner-border text-primary flex-shrink-0" role="status" aria-hidden="true"></div>
         <div>
@@ -160,7 +160,7 @@ if (!function_exists('process_dashboard_help_label')) {
     </div>
 </section>
 
-<section class="content-panel process-dashboard-filters mb-4" data-dashboard-selection-panel>
+<section class="card content-panel process-dashboard-filters mb-4" data-dashboard-selection-panel>
     <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-3">
         <div>
             <h2 class="h5 fw-bold mb-1">Selecciona qué quieres visualizar</h2>
@@ -207,7 +207,7 @@ if (!function_exists('process_dashboard_help_label')) {
         <p class="text-muted mb-0">Marca los procesos que quieres incluir en el cálculo.</p>
     </div>
     <div class="table-responsive">
-        <table class="table align-middle app-table app-data-table" data-export-excel="false" data-export-pdf="false" data-page-length="10" data-searching="true">
+        <table class="table table-hover align-middle app-table app-data-table" data-export-excel="false" data-export-pdf="false" data-page-length="10" data-searching="true">
             <thead><tr><th class="no-sort" style="width: 94px;"><span class="d-inline-flex align-items-center gap-2"><input class="form-check-input mt-0" type="checkbox" data-dashboard-process-select-all aria-label="Seleccionar todos los procesos"><span>Incluir</span></span></th><th>Proceso</th><th>Código</th><th>Estado</th></tr></thead>
             <tbody>
             <?php foreach ($dashboardAvailableProcesses as $process): ?>
@@ -266,7 +266,7 @@ if (!function_exists('process_dashboard_help_label')) {
 <?php endif; ?>
 
 <?php if ($canConfigureRanking): ?>
-<section class="content-panel process-dashboard-filters mb-4">
+<section class="card content-panel process-dashboard-filters mb-4">
     <form method="get" action="<?= e(route_url('test-process.dashboard')) ?>" class="row g-3 align-items-end">
         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>" disabled data-ranking-preset-post-field>
         <input type="hidden" name="redirect_to" value="<?= e($rankingPresetRedirectTo) ?>" disabled data-ranking-preset-post-field>
@@ -499,7 +499,7 @@ if (!function_exists('process_dashboard_help_label')) {
     </form>
 </section>
 <?php else: ?>
-<section class="content-panel process-dashboard-filters mb-4">
+<section class="card content-panel process-dashboard-filters mb-4">
     <div class="d-flex flex-wrap align-items-start justify-content-between gap-3">
         <div>
             <h2 class="h5 fw-bold mb-1">Configuración del ranking</h2>
@@ -563,7 +563,7 @@ if (!function_exists('process_dashboard_help_label')) {
     </div>
 </section>
 
-<section class="content-panel mb-4">
+<section class="card content-panel mb-4">
     <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
         <div>
             <h2 class="h5 fw-bold mb-1">Resultados generales por procesos</h2>
@@ -621,7 +621,7 @@ if (!function_exists('process_dashboard_help_label')) {
 </section>
 
 <section class="process-dashboard-layout mb-4">
-    <div class="content-panel process-dashboard-main-chart">
+    <div class="card content-panel process-dashboard-main-chart">
         <div class="d-flex flex-wrap align-items-start justify-content-between gap-2 mb-3">
             <div>
                 <h2 class="h5 fw-bold mb-1">Avance por proceso</h2>
@@ -638,7 +638,7 @@ if (!function_exists('process_dashboard_help_label')) {
         <?php endif; ?>
     </div>
 
-    <aside class="content-panel process-dashboard-donut-panel">
+    <aside class="card content-panel process-dashboard-donut-panel">
         <h2 class="h5 fw-bold mb-1">Distribucion general</h2>
         <p class="text-muted mb-3">Estado de personas asignadas en procesos visibles.</p>
         <div class="process-dashboard-chart process-dashboard-chart-donut">
@@ -652,7 +652,7 @@ if (!function_exists('process_dashboard_help_label')) {
     </aside>
 </section>
 
-<section class="content-panel mb-4">
+<section class="card content-panel mb-4">
     <div class="d-flex flex-wrap align-items-start justify-content-between gap-2 mb-3">
         <div>
             <h2 class="h5 fw-bold mb-1">Evolucion de evaluaciones finalizadas</h2>
@@ -664,7 +664,7 @@ if (!function_exists('process_dashboard_help_label')) {
     </div>
 </section>
 
-<section class="content-panel">
+<section class="card content-panel">
     <div class="d-flex flex-wrap align-items-start justify-content-between gap-2 mb-3">
         <div>
             <h2 class="h5 fw-bold mb-1">Procesos con mayor pendiente</h2>
@@ -678,7 +678,7 @@ if (!function_exists('process_dashboard_help_label')) {
         </div>
     </div>
     <div class="table-responsive">
-        <table class="table align-middle app-table app-data-table" data-export-title="Dashboard Avance Procesos">
+        <table class="table table-hover align-middle app-table app-data-table" data-export-title="Dashboard Avance Procesos">
             <thead>
                 <tr>
                     <th>Proceso</th>

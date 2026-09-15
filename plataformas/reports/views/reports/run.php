@@ -7,7 +7,7 @@
     <a class="btn btn-outline-secondary" href="<?= e(route_url('reports.generate')) ?>">Volver</a>
 </section>
 
-<section class="content-panel">
+<section class="card content-panel">
     <form method="get" action="<?= e(route_url('reports.run', (int) $report['id'])) ?>" class="row g-3">
         <div class="col-12 col-md-4">
             <label class="form-label" for="company_id">Empresa</label>

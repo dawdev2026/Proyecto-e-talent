@@ -23,9 +23,9 @@ $sessionStatusLabels = [
     </div>
 </section>
 
-<section class="content-panel">
+<section class="card content-panel">
     <div class="table-responsive">
-        <table class="table align-middle app-table app-data-table" data-export-title="Evaluaciones">
+        <table class="table table-hover align-middle app-table app-data-table" data-export-title="Evaluaciones">
             <thead>
                 <tr>
                     <th>Instrumento</th>
@@ -71,7 +71,7 @@ $sessionStatusLabels = [
     </div>
 </section>
 
-<section class="content-panel mt-4">
+<section class="card content-panel mt-4">
     <?php $hasCancelableSessions = (bool) array_filter($sessions, static fn(array $session): bool => in_array($session['status'], ['assigned', 'in_progress'], true)); ?>
     <?php $hasFinishedSessions = (bool) ($hasFinishedSessions ?? false); ?>
     <?php
@@ -141,7 +141,7 @@ $sessionStatusLabels = [
         </div>
     </div>
     <div class="table-responsive">
-        <table class="table align-middle app-table app-data-table assignment-matrix-table" data-export-title="Asignaciones">
+        <table class="table table-hover align-middle app-table app-data-table assignment-matrix-table" data-export-title="Asignaciones">
             <thead>
                 <tr>
                     <th>Usuario</th>

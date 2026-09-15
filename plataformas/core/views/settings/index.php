@@ -452,7 +452,7 @@ $verificationActive = $settingsTab === 'verification';
                 <p class="text-muted mb-0">Cada sub-plataforma mantiene sus parametros en su propio modulo y base de datos.</p>
             </div>
             <div class="col-md-6 col-xl-4">
-                <div class="metric-card h-100">
+                <div class="card metric-card h-100">
                     <div class="d-flex align-items-start justify-content-between gap-3">
                         <div>
                             <span class="metric-icon mb-3"><i class="bi bi-clipboard2-pulse"></i></span>

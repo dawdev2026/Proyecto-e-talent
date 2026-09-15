@@ -45,7 +45,7 @@ $formatDateTime = static function ($value): string {
     </div>
 </section>
 
-<section class="content-panel">
+<section class="card content-panel">
     <form class="row g-3 align-items-end" method="get" action="<?= e(route_url('test-process.review-assignment')) ?>">
         <div class="col-12 col-md-5 col-lg-4">
             <label class="form-label" for="assignment_review_rut">RUT usuario</label>
@@ -69,7 +69,7 @@ $formatDateTime = static function ($value): string {
 
 <?php if (is_array($review)): ?>
     <?php if (!$user): ?>
-        <section class="content-panel">
+        <section class="card content-panel">
             <div class="alert alert-light border mb-0">
                 <?= $companyScoped
                     ? 'No se encontro un usuario de ' . e($companyName !== '' ? $companyName : 'tu empresa') . ' con el RUT indicado.'
@@ -77,7 +77,7 @@ $formatDateTime = static function ($value): string {
             </div>
         </section>
     <?php else: ?>
-        <section class="content-panel">
+        <section class="card content-panel">
             <div class="d-flex flex-wrap justify-content-between gap-3">
                 <div>
                     <p class="text-uppercase text-primary fw-bold small mb-1">Usuario</p>
@@ -93,7 +93,7 @@ $formatDateTime = static function ($value): string {
             </div>
         </section>
 
-        <section class="content-panel">
+        <section class="card content-panel">
             <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
                 <div>
                     <h2 class="h5 fw-bold mb-1">Asignaciones actuales</h2>
@@ -130,7 +130,7 @@ $formatDateTime = static function ($value): string {
 
                             <?php if (!empty($assignment['sessions'])): ?>
                                 <div class="table-responsive mt-3">
-                                    <table class="table align-middle app-table mb-0">
+                                    <table class="table table-hover align-middle app-table mb-0">
                                         <thead>
                                             <tr>
                                                 <th>Test</th>
@@ -194,7 +194,7 @@ $formatDateTime = static function ($value): string {
             <?php endif; ?>
         </section>
 
-        <section class="content-panel">
+        <section class="card content-panel">
             <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
                 <div>
                     <h2 class="h5 fw-bold mb-1">Procesos del dia</h2>
@@ -207,7 +207,7 @@ $formatDateTime = static function ($value): string {
                 <div class="alert alert-light border mb-0">No existen procesos activos del dia con evaluaciones configuradas.</div>
             <?php else: ?>
                 <div class="table-responsive">
-                    <table class="table align-middle app-table mb-0">
+                    <table class="table table-hover align-middle app-table mb-0">
                         <thead>
                             <tr>
                                 <th>Proceso</th>

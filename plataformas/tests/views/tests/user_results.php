@@ -712,7 +712,7 @@ if (!function_exists('test_user_results_activity_rows')) {
     <a class="btn btn-back" data-page-back="1" href="<?= e(back_url(has_permission('manage_tests') ? 'tests' : 'dashboard')) ?>"><i class="bi bi-arrow-left me-1"></i> Volver</a>
 </section>
 
-<section class="content-panel">
+<section class="card content-panel">
     <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
         <div>
             <h2 class="h5 fw-bold mb-1">Evaluaciones terminadas</h2>
@@ -793,7 +793,7 @@ if (!function_exists('test_user_results_activity_rows')) {
                 </div>
 
                 <div class="table-responsive">
-                    <table class="table align-middle app-table">
+                    <table class="table table-hover align-middle app-table">
                         <thead>
                             <tr>
                                 <th>Primer evento</th>
@@ -894,7 +894,7 @@ if (!function_exists('test_user_results_activity_rows')) {
                         <p class="text-muted mb-0">Sin actividad registrada para esta evaluacion.</p>
                     <?php else: ?>
                         <div class="table-responsive mt-3">
-                            <table class="table align-middle app-table">
+                            <table class="table table-hover align-middle app-table">
                                 <thead>
                                     <tr>
                                         <th>Evento</th>
@@ -966,7 +966,7 @@ if (!function_exists('test_user_results_activity_rows')) {
 
                 <?php if ($summary && $usesScaleColumns): ?>
                     <div class="table-responsive">
-                        <table class="table align-middle app-table">
+                        <table class="table table-hover align-middle app-table">
                             <thead>
                                 <tr>
                                     <?php foreach ($summary as $row): ?>
@@ -991,7 +991,7 @@ if (!function_exists('test_user_results_activity_rows')) {
                     </div>
                 <?php elseif ($summary): ?>
                     <div class="table-responsive">
-                        <table class="table align-middle app-table">
+                        <table class="table table-hover align-middle app-table">
                             <thead>
                                 <tr>
                                     <th>Escala</th>
@@ -1091,12 +1091,12 @@ if (!function_exists('test_user_results_activity_rows')) {
                         </div>
 
                         <div class="table-responsive">
-                            <table class="table align-middle app-table"><thead><tr><th>Primer evento</th><th>Último evento</th><th>Eventos por tipo <span class="text-muted small fw-normal">(nombre y cantidad)</span></th><th>Acciones</th></tr></thead>
+                            <table class="table table-hover align-middle app-table"><thead><tr><th>Primer evento</th><th>Último evento</th><th>Eventos por tipo <span class="text-muted small fw-normal">(nombre y cantidad)</span></th><th>Acciones</th></tr></thead>
                                 <tbody><tr><td><?= e((string) ($activitySummary['first_at'] ?: '-')) ?></td><td><?= e((string) ($activitySummary['last_at'] ?: '-')) ?></td><td><?php if (!$activitySummary['by_event']): ?>-<?php else: ?><?php foreach (array_slice($activitySummary['by_event'], 0, 5, true) as $eventType => $count): ?><span class="badge text-bg-light border me-1 mb-1"><?= e(test_activity_label((string) $eventType)) ?>: <?= (int) $count ?><?= test_activity_help_button((string) $eventType) ?></span><?php endforeach; ?><?php endif; ?></td><td><div class="d-flex flex-wrap gap-2"><button class="btn btn-sm btn-outline-primary" type="button" data-import-row-drawer="#<?= e($activityDrawerId) ?>" data-import-row-title="Detalle de actividades - <?= e($evaluationName) ?>"><i class="bi bi-list-check me-1"></i> Ver detalle</button><button class="btn btn-sm btn-outline-primary" type="button" data-import-row-drawer="#<?= e($answerDrawerId) ?>" data-import-row-title="Respuestas - <?= e($evaluationName) ?>"><i class="bi bi-ui-checks-grid me-1"></i> Ver respuestas</button><?php if ($media || $screenCaptures): ?><button class="btn btn-sm btn-outline-primary" type="button" data-import-row-drawer="#<?= e($videoDrawerId) ?>" data-import-row-title="Evidencia audiovisual - <?= e($evaluationName) ?>"><i class="bi bi-camera-video me-1"></i> Ver evidencia</button><?php endif; ?></div></td></tr></tbody>
                             </table>
                         </div>
 
-                        <template id="<?= e($activityDrawerId) ?>"><div class="drawer-detail-heading"><p class="text-uppercase text-primary fw-bold small mb-1">Registro de actividades</p><h3 class="h5 fw-bold mb-1">Detalle de acciones</h3><p class="text-muted mb-0"><?= e($evaluationName) ?></p></div><?php if (!$activityRows): ?><p class="text-muted mt-3 mb-0">Sin actividad registrada para esta evaluación.</p><?php else: ?><div class="table-responsive mt-3"><table class="table align-middle app-table"><thead><tr><th>Evento</th><th>Fecha</th><th>Detalle</th><th>IP</th></tr></thead><tbody><?php foreach ($activityRows as $event): ?><?php $metadata = test_activity_metadata_label($event['metadata'] ?? null); ?><tr><td class="fw-semibold"><?= e(test_activity_label((string) ($event['event_type'] ?? 'Evento'))) ?><?= test_activity_help_button((string) ($event['event_type'] ?? 'Evento')) ?></td><td><?= e((string) ($event['created_at'] ?? '')) ?></td><td><?= $metadata !== '' ? e($metadata) : '-' ?></td><td><?= e((string) ($event['ip_address'] ?? '-')) ?></td></tr><?php endforeach; ?></tbody></table></div><?php endif; ?><div class="import-drawer-actions"><button class="btn btn-outline-secondary" type="button" data-app-drawer-close>Cerrar</button></div></template>
+                        <template id="<?= e($activityDrawerId) ?>"><div class="drawer-detail-heading"><p class="text-uppercase text-primary fw-bold small mb-1">Registro de actividades</p><h3 class="h5 fw-bold mb-1">Detalle de acciones</h3><p class="text-muted mb-0"><?= e($evaluationName) ?></p></div><?php if (!$activityRows): ?><p class="text-muted mt-3 mb-0">Sin actividad registrada para esta evaluación.</p><?php else: ?><div class="table-responsive mt-3"><table class="table table-hover align-middle app-table"><thead><tr><th>Evento</th><th>Fecha</th><th>Detalle</th><th>IP</th></tr></thead><tbody><?php foreach ($activityRows as $event): ?><?php $metadata = test_activity_metadata_label($event['metadata'] ?? null); ?><tr><td class="fw-semibold"><?= e(test_activity_label((string) ($event['event_type'] ?? 'Evento'))) ?><?= test_activity_help_button((string) ($event['event_type'] ?? 'Evento')) ?></td><td><?= e((string) ($event['created_at'] ?? '')) ?></td><td><?= $metadata !== '' ? e($metadata) : '-' ?></td><td><?= e((string) ($event['ip_address'] ?? '-')) ?></td></tr><?php endforeach; ?></tbody></table></div><?php endif; ?><div class="import-drawer-actions"><button class="btn btn-outline-secondary" type="button" data-app-drawer-close>Cerrar</button></div></template>
 
                         <template id="<?= e($answerDrawerId) ?>">
                             <div class="drawer-detail-heading">
@@ -1108,7 +1108,7 @@ if (!function_exists('test_user_results_activity_rows')) {
                             <div class="import-drawer-actions"><button class="btn btn-outline-secondary" type="button" data-app-drawer-close>Cerrar</button></div>
                         </template>
 
-                        <?php if ($media || $screenCaptures): ?><template id="<?= e($videoDrawerId) ?>"><div class="drawer-detail-heading"><p class="text-uppercase text-primary fw-bold small mb-1">Evidencia audiovisual</p><h3 class="h5 fw-bold mb-1"><?= e($evaluationName) ?></h3><p class="text-muted mb-0">Registro de video y capturas obtenidas durante la evaluación.</p></div><?php foreach ($media as $mediaSegment): ?><?php if (in_array((string) ($mediaSegment['status'] ?? ''), ['saved', 'partial'], true)): ?><div class="border rounded p-3 mt-3"><h4 class="h6 fw-bold mb-2">Grabación <?= (int) ($mediaSegment['segment_number'] ?? 1) ?></h4><video class="w-100 rounded border" controls preload="metadata" src="<?= e(route_url('evaluation-surveys.attempt.media.evidence', $attemptId) . '?evidence_id=' . (int) $mediaSegment['id']) ?>"></video><p class="text-muted small mt-2 mb-0">Duración: <?= (int) ($mediaSegment['duration_seconds'] ?? 0) ?> segundos.</p><?php if (($mediaSegment['status'] ?? '') === 'partial'): ?><div class="alert alert-warning mt-2 mb-0">Evidencia parcial.</div><?php endif; ?><?php $segmentCaptures = array_values(array_filter($screenCaptures, static fn(array $capture): bool => (int) ($capture['evidence_id'] ?? 0) === (int) ($mediaSegment['id'] ?? 0))); ?><?php if ($segmentCaptures): ?><h5 class="h6 fw-bold mt-3">Capturas de pantalla (<?= count($segmentCaptures) ?>)</h5><div class="row g-2"><?php foreach ($segmentCaptures as $capture): $captureUrl = route_url('evaluation-surveys.attempt.media.screenshot-file', $attemptId) . '?capture_id=' . (int) $capture['id']; ?><div class="col-6"><a href="<?= e($captureUrl) ?>" data-screen-capture-view><img class="img-fluid rounded border" loading="lazy" src="<?= e($captureUrl) ?>" alt="Captura <?= (int) $capture['capture_number'] ?>"></a></div><?php endforeach; ?></div><?php endif; ?></div><?php endif; ?><?php endforeach; ?><?php if ($risks): ?><div class="table-responsive mt-3"><table class="table table-sm align-middle app-table"><thead><tr><th>Señal<?= test_activity_help_button('audio_visual_risk', 'Señal audiovisual') ?></th><th>Severidad</th><th>Fecha</th></tr></thead><tbody><?php foreach ($risks as $risk): ?><tr><td><?= e(test_audio_visual_risk_label($risk['event_type'] ?? null)) ?></td><td><?= e((string) ($risk['severity'] ?? '')) ?></td><td><?= e((string) ($risk['created_at'] ?? '')) ?></td></tr><?php endforeach; ?></tbody></table></div><?php endif; ?><div class="import-drawer-actions"><button class="btn btn-outline-secondary" type="button" data-app-drawer-close>Cerrar</button></div></template><?php endif; ?>
+                        <?php if ($media || $screenCaptures): ?><template id="<?= e($videoDrawerId) ?>"><div class="drawer-detail-heading"><p class="text-uppercase text-primary fw-bold small mb-1">Evidencia audiovisual</p><h3 class="h5 fw-bold mb-1"><?= e($evaluationName) ?></h3><p class="text-muted mb-0">Registro de video y capturas obtenidas durante la evaluación.</p></div><?php foreach ($media as $mediaSegment): ?><?php if (in_array((string) ($mediaSegment['status'] ?? ''), ['saved', 'partial'], true)): ?><div class="border rounded p-3 mt-3"><h4 class="h6 fw-bold mb-2">Grabación <?= (int) ($mediaSegment['segment_number'] ?? 1) ?></h4><video class="w-100 rounded border" controls preload="metadata" src="<?= e(route_url('evaluation-surveys.attempt.media.evidence', $attemptId) . '?evidence_id=' . (int) $mediaSegment['id']) ?>"></video><p class="text-muted small mt-2 mb-0">Duración: <?= (int) ($mediaSegment['duration_seconds'] ?? 0) ?> segundos.</p><?php if (($mediaSegment['status'] ?? '') === 'partial'): ?><div class="alert alert-warning mt-2 mb-0">Evidencia parcial.</div><?php endif; ?><?php $segmentCaptures = array_values(array_filter($screenCaptures, static fn(array $capture): bool => (int) ($capture['evidence_id'] ?? 0) === (int) ($mediaSegment['id'] ?? 0))); ?><?php if ($segmentCaptures): ?><h5 class="h6 fw-bold mt-3">Capturas de pantalla (<?= count($segmentCaptures) ?>)</h5><div class="row g-2"><?php foreach ($segmentCaptures as $capture): $captureUrl = route_url('evaluation-surveys.attempt.media.screenshot-file', $attemptId) . '?capture_id=' . (int) $capture['id']; ?><div class="col-6"><a href="<?= e($captureUrl) ?>" data-screen-capture-view><img class="img-fluid rounded border" loading="lazy" src="<?= e($captureUrl) ?>" alt="Captura <?= (int) $capture['capture_number'] ?>"></a></div><?php endforeach; ?></div><?php endif; ?></div><?php endif; ?><?php endforeach; ?><?php if ($risks): ?><div class="table-responsive mt-3"><table class="table table-sm table-hover align-middle app-table"><thead><tr><th>Señal<?= test_activity_help_button('audio_visual_risk', 'Señal audiovisual') ?></th><th>Severidad</th><th>Fecha</th></tr></thead><tbody><?php foreach ($risks as $risk): ?><tr><td><?= e(test_audio_visual_risk_label($risk['event_type'] ?? null)) ?></td><td><?= e((string) ($risk['severity'] ?? '')) ?></td><td><?= e((string) ($risk['created_at'] ?? '')) ?></td></tr><?php endforeach; ?></tbody></table></div><?php endif; ?><div class="import-drawer-actions"><button class="btn btn-outline-secondary" type="button" data-app-drawer-close>Cerrar</button></div></template><?php endif; ?>
                     </article>
                 <?php endforeach; ?>
             </div>

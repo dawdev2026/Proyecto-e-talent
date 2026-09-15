@@ -21,7 +21,8 @@ $authStyle = sprintf(
 );
 ?>
 <div class="auth-branding auth-position-<?= e($loginSettings['login_form_position']) ?><?= e($companyClass) ?>" style="<?= $authStyle ?><?= $loginSettings['login_background_path'] ? '--login-bg-image:url(' . e(url($loginSettings['login_background_path'])) . ');' : '' ?>">
-<div class="auth-card mx-auto shadow-sm">
+<div class="card auth-card mx-auto shadow-sm border-0">
+    <div class="card-body p-0">
     <div class="text-center mb-4">
         <?php if ($loginSettings['login_logo_path']): ?>
             <img class="auth-logo-image mx-auto mb-3" src="<?= e(url($loginSettings['login_logo_path'])) ?>" alt="">
@@ -119,5 +120,6 @@ $authStyle = sprintf(
     ><i class="bi bi-key me-1" aria-hidden="true"></i>¿Olvidaste tu clave?</a>
     </div>
     <?php endif; ?>
+</div>
 </div>
 </div>

@@ -6,7 +6,7 @@
     </div>
 </section>
 
-<section class="content-panel">
+<section class="card content-panel">
     <form method="get" class="row g-3 align-items-end mb-4">
         <div class="col-md-6 col-lg-4">
             <label class="form-label" for="company_id">Empresa</label>

@@ -277,7 +277,7 @@ foreach ($summaryRows as &$summaryRow) {
 unset($summaryRow);
 ?>
 
-<section class="content-panel page-header process-detail-header" data-page-back-url="<?= e(route_url('test-processes')) ?>">
+<section class="card content-panel page-header process-detail-header" data-page-back-url="<?= e(route_url('test-processes')) ?>">
     <div class="process-detail-heading">
         <div class="process-detail-eyebrow">
             <span>Proceso</span>
@@ -731,7 +731,7 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 </script>
 
-<section class="content-panel">
+<section class="card content-panel">
     <div class="row g-3">
         <div class="col"><div class="result-metric"><span class="result-metric-label">Usuarios</span><strong><?= (int) ($summary['users_total'] ?? 0) ?></strong></div></div>
         <div class="col"><div class="result-metric"><span class="result-metric-label">Evaluaciones</span><strong><?= (int) ($summary['instruments_total'] ?? 0) ?></strong></div></div>
@@ -797,7 +797,7 @@ document.addEventListener('DOMContentLoaded', function () {
             aria-labelledby="process-summary-tab"
             tabindex="0"
         >
-            <section class="content-panel">
+            <section class="card content-panel">
                 <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-3">
                     <div>
                         <h2 class="h5 fw-bold mb-1">Resumen general</h2>
@@ -938,7 +938,7 @@ document.addEventListener('DOMContentLoaded', function () {
         >
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="selected_user_ids_json" value="[]" data-demo-selected-inputs>
-            <section class="content-panel">
+            <section class="card content-panel">
                 <div class="assignment-demo-alert">
                     <div>
                         <strong>Agregar usuarios al proceso</strong>
@@ -949,7 +949,7 @@ document.addEventListener('DOMContentLoaded', function () {
             </section>
 
             <section class="assignment-demo-layout mt-4">
-                <aside class="content-panel assignment-filter-panel">
+                <aside class="card content-panel assignment-filter-panel">
                     <div class="d-flex align-items-center justify-content-between gap-2 mb-3">
                         <div>
                             <h2 class="h5 fw-bold mb-1">Filtros</h2>
@@ -996,7 +996,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     </div>
                 </aside>
 
-                <section class="content-panel assignment-user-panel">
+                <section class="card content-panel assignment-user-panel">
                     <div class="assignment-panel-toolbar">
                         <div>
                             <h2 class="h5 fw-bold mb-1">Usuarios disponibles</h2>
@@ -1028,7 +1028,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     </div>
 
                     <div class="table-responsive">
-                        <table class="table align-middle app-table assignment-user-table">
+                        <table class="table table-hover align-middle app-table assignment-user-table">
                             <thead>
                                 <tr>
                                     <th class="no-sort no-export">
@@ -1051,7 +1051,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     </div>
                 </section>
 
-                <aside class="content-panel assignment-summary-panel">
+                <aside class="card content-panel assignment-summary-panel">
                     <h2 class="h5 fw-bold mb-3">Resumen</h2>
                     <div class="assignment-summary-metrics">
                         <div><span>Seleccionados</span><strong data-demo-summary-selected>0</strong></div>
@@ -1085,7 +1085,7 @@ document.addEventListener('DOMContentLoaded', function () {
     aria-labelledby="process-progress-tab"
     tabindex="0"
 >
-<section class="content-panel">
+<section class="card content-panel">
     <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-3">
         <div>
             <h2 class="h5 fw-bold mb-1">Avance del proceso</h2>
@@ -1134,7 +1134,7 @@ document.addEventListener('DOMContentLoaded', function () {
         <div class="alert alert-light border mb-0">Aun no hay usuarios en este proceso.</div>
     <?php else: ?>
         <div class="table-responsive">
-            <table class="table align-middle app-table app-data-table" data-page-length="25" data-export-title="Avance <?= e((string) $process['name']) ?>">
+            <table class="table table-hover align-middle app-table app-data-table" data-page-length="25" data-export-title="Avance <?= e((string) $process['name']) ?>">
                 <thead>
                     <tr>
                         <th>Usuario</th>

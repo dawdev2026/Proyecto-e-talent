@@ -10,9 +10,9 @@
     <a class="btn btn-primary" href="<?= e(route_url('user-field.new')) ?>"><i class="bi bi-ui-checks-grid me-1"></i> Nuevo campo</a>
 </section>
 
-<section class="content-panel">
+<section class="card content-panel">
     <div class="table-responsive">
-        <table class="table align-middle app-table app-data-table" data-export-title="Campos de usuario">
+        <table class="table table-hover align-middle app-table app-data-table" data-export-title="Campos de usuario">
             <thead>
                 <tr>
                     <th>Dato</th>

@@ -22,7 +22,7 @@ $dashboardBackUrl = route_url('test-process.dashboard') . ($dashboardQueryString
     </div>
 </section>
 
-<section class="content-panel mb-4">
+<section class="card content-panel mb-4">
     <div class="row g-3">
         <div class="col-12 col-md-4">
             <div class="border rounded p-3 h-100">
@@ -48,7 +48,7 @@ $dashboardBackUrl = route_url('test-process.dashboard') . ($dashboardQueryString
     </div>
 </section>
 
-<section class="content-panel">
+<section class="card content-panel">
     <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
         <div>
             <h2 class="h5 fw-bold mb-1">Detalle de personas en advertencia</h2>
@@ -58,7 +58,7 @@ $dashboardBackUrl = route_url('test-process.dashboard') . ($dashboardQueryString
     </div>
 
     <div class="table-responsive">
-        <table class="table align-middle app-table app-data-table" data-export-title="Advertencias ranking">
+        <table class="table table-hover align-middle app-table app-data-table" data-export-title="Advertencias ranking">
             <thead>
                 <tr>
                     <th>Proceso</th>

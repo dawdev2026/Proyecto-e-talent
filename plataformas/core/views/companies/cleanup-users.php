@@ -7,7 +7,7 @@
     <a class="btn btn-outline-secondary" href="<?= e(route_url('companies')) ?>">Volver</a>
 </section>
 
-<section class="content-panel">
+<section class="card content-panel">
     <div class="alert alert-warning">
         Esta operación es permanente. Eliminará solo los usuarios con rol <code>usuario</code> de esta empresa y toda la información relacionada con ellos: pruebas, respuestas, resultados, sesiones, evidencias, intentos de evaluación, asignaciones, entrevistas, citas, reportes asociados, campos personalizados y códigos de acceso. No elimina administradores ni la empresa.
     </div>

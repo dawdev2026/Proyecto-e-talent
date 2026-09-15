@@ -95,7 +95,7 @@ $item = $item ?: [
         <div class="col-12">
             <label class="form-label">Reglas de valorizacion</label>
             <div class="table-responsive">
-                <table class="table table-sm align-middle app-table">
+                <table class="table table-sm table-hover align-middle app-table">
                     <thead>
                         <tr>
                             <th>Escala</th>

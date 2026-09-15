@@ -6,7 +6,7 @@
     </div>
 </section>
 
-<form method="post" enctype="multipart/form-data" class="content-panel needs-validation" novalidate>
+<form method="post" enctype="multipart/form-data" class="card content-panel needs-validation" novalidate>
     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
     <div class="row g-3">
         <div class="col-12 col-lg-6"><label class="form-label" for="name">Nombre del informe</label><input class="form-control" id="name" name="name" maxlength="160" value="<?= e($report['name']) ?>" required></div>

@@ -6,7 +6,7 @@
     </div>
 </section>
 
-<section class="content-panel">
+<section class="card content-panel">
     <form method="post" class="row g-4 needs-validation" novalidate data-test-instrument-form>
         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
         <div class="col-12 col-lg-4">
@@ -217,10 +217,10 @@
                     <?php endif; ?>
                 </div>
                 <div class="row g-3">
-                    <div class="col-6 col-lg-3"><div class="metric-card"><span>Escalas</span><strong><?= (int) ($contentStats['scales_count'] ?? 0) ?></strong></div></div>
-                    <div class="col-6 col-lg-3"><div class="metric-card"><span>Items</span><strong><?= (int) ($contentStats['items_count'] ?? 0) ?></strong></div></div>
-                    <div class="col-6 col-lg-3"><div class="metric-card"><span>Reglas</span><strong><?= (int) ($contentStats['score_rules_count'] ?? 0) ?></strong></div></div>
-                    <div class="col-6 col-lg-3"><div class="metric-card"><span>Baremos</span><strong><?= (int) ($contentStats['norms_count'] ?? 0) ?></strong></div></div>
+                    <div class="col-6 col-lg-3"><div class="card metric-card"><span>Escalas</span><strong><?= (int) ($contentStats['scales_count'] ?? 0) ?></strong></div></div>
+                    <div class="col-6 col-lg-3"><div class="card metric-card"><span>Items</span><strong><?= (int) ($contentStats['items_count'] ?? 0) ?></strong></div></div>
+                    <div class="col-6 col-lg-3"><div class="card metric-card"><span>Reglas</span><strong><?= (int) ($contentStats['score_rules_count'] ?? 0) ?></strong></div></div>
+                    <div class="col-6 col-lg-3"><div class="card metric-card"><span>Baremos</span><strong><?= (int) ($contentStats['norms_count'] ?? 0) ?></strong></div></div>
                 </div>
             </section>
         </div>

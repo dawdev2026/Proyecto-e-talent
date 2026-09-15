@@ -53,7 +53,7 @@ $rankingHeaders = [
     require dirname(__DIR__) . '/partials/ranking_config_form.php';
     ?>
 <?php else: ?>
-    <section class="content-panel mb-4">
+    <section class="card content-panel mb-4">
         <div class="d-flex flex-wrap align-items-start justify-content-between gap-3">
             <div>
                 <h2 class="h5 fw-bold mb-1">Configuración del ranking</h2>
@@ -66,25 +66,25 @@ $rankingHeaders = [
 
 <section class="row g-3 mb-4">
     <div class="col-12 col-md-3">
-        <div class="content-panel h-100">
+        <div class="card content-panel h-100">
             <p class="text-muted small fw-bold text-uppercase mb-1">Usuarios proceso</p>
             <p class="display-6 fw-bold mb-0"><?= $usersTotal ?></p>
         </div>
     </div>
     <div class="col-12 col-md-3">
-        <div class="content-panel h-100">
+        <div class="card content-panel h-100">
             <p class="text-muted small fw-bold text-uppercase mb-1">Sesiones generadas</p>
             <p class="display-6 fw-bold mb-0"><?= $sessionsTotal ?></p>
         </div>
     </div>
     <div class="col-12 col-md-3">
-        <div class="content-panel h-100">
+        <div class="card content-panel h-100">
             <p class="text-muted small fw-bold text-uppercase mb-1">Ranqueados</p>
             <p class="display-6 fw-bold mb-0"><?= count($rows) ?></p>
         </div>
     </div>
     <div class="col-12 col-md-3">
-        <div class="content-panel h-100">
+        <div class="card content-panel h-100">
             <p class="text-muted small fw-bold text-uppercase mb-1">Advertencias</p>
             <p class="display-6 fw-bold mb-0"><?= count($warnings) ?></p>
         </div>
@@ -93,19 +93,19 @@ $rankingHeaders = [
 
 <section class="row g-3 mb-4">
     <div class="col-12 col-md-4">
-        <div class="content-panel h-100">
+        <div class="card content-panel h-100">
             <p class="text-muted small fw-bold text-uppercase mb-1">Recomendado</p>
             <p class="h2 fw-bold mb-0"><?= (int) ($classificationCounts['R'] ?? 0) ?></p>
         </div>
     </div>
     <div class="col-12 col-md-4">
-        <div class="content-panel h-100">
+        <div class="card content-panel h-100">
             <p class="text-muted small fw-bold text-uppercase mb-1">Observacion</p>
             <p class="h2 fw-bold mb-0"><?= (int) ($classificationCounts['RO'] ?? 0) ?></p>
         </div>
     </div>
     <div class="col-12 col-md-4">
-        <div class="content-panel h-100">
+        <div class="card content-panel h-100">
             <p class="text-muted small fw-bold text-uppercase mb-1">No Recomendado</p>
             <p class="h2 fw-bold mb-0"><?= (int) ($classificationCounts['NR'] ?? 0) ?></p>
         </div>
@@ -118,7 +118,7 @@ $rankingHeaders = [
     </div>
 <?php endif; ?>
 
-<section class="content-panel">
+<section class="card content-panel">
     <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
         <div>
             <h2 class="h5 fw-bold mb-1">Ranking Resumen del proceso</h2>
@@ -129,7 +129,7 @@ $rankingHeaders = [
 
     <?php if ($rows): ?>
         <div class="table-responsive">
-            <table class="table align-middle app-table app-data-table" data-export-title="Ranking Resumen <?= e((string) ($process['name'] ?? 'Proceso')) ?>">
+            <table class="table table-hover align-middle app-table app-data-table" data-export-title="Ranking Resumen <?= e((string) ($process['name'] ?? 'Proceso')) ?>">
                 <thead>
                     <tr>
                         <?php foreach ($rankingHeaders as $header): ?>
@@ -208,7 +208,7 @@ $rankingHeaders = [
 </section>
 
 <?php if ($warnings): ?>
-    <section class="content-panel mt-4">
+    <section class="card content-panel mt-4">
         <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
             <div>
                 <h2 class="h5 fw-bold mb-1">Advertencias</h2>
@@ -217,7 +217,7 @@ $rankingHeaders = [
             <span class="badge text-bg-warning"><?= count($warnings) ?> advertencias</span>
         </div>
         <div class="table-responsive">
-            <table class="table align-middle app-table app-data-table" data-export-title="Advertencias Ranking Proceso">
+            <table class="table table-hover align-middle app-table app-data-table" data-export-title="Advertencias Ranking Proceso">
                 <thead>
                     <tr>
                         <th>RUT</th>

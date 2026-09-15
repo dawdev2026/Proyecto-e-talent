@@ -43,7 +43,7 @@ if (!in_array($availabilityStatus, ['scheduled', 'open_now', 'closed_now'], true
 <form method="post">
     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
 
-    <section class="content-panel">
+    <section class="card content-panel">
         <div class="row g-3">
             <div class="col-md-4">
                 <label class="form-label" for="process_name">Nombre</label>
@@ -93,7 +93,7 @@ if (!in_array($availabilityStatus, ['scheduled', 'open_now', 'closed_now'], true
         </div>
     </section>
 
-    <section class="content-panel mt-4">
+    <section class="card content-panel mt-4">
         <h2 class="h5 fw-bold mb-3"><?= $isCompanyAdmin ? 'Evaluaciones Psicométricas Asignadas' : 'Evaluaciones del proceso' ?></h2>
         <div class="assignment-evaluation-grid">
             <?php foreach ($instruments as $instrument): ?>
@@ -108,7 +108,7 @@ if (!in_array($availabilityStatus, ['scheduled', 'open_now', 'closed_now'], true
         </div>
     </section>
 
-    <section class="content-panel mt-4">
+    <section class="card content-panel mt-4">
         <h2 class="h5 fw-bold mb-1">Evaluaciones y Encuestas</h2>
         <p class="text-muted mb-3">Selecciona las evaluaciones con nota y encuestas disponibles para este proceso.</p>
         <?php if (!$evaluationForms): ?>
@@ -129,7 +129,7 @@ if (!in_array($availabilityStatus, ['scheduled', 'open_now', 'closed_now'], true
     </section>
 
     <?php if (false): ?>
-    <section class="content-panel mt-4">
+    <section class="card content-panel mt-4">
         <h2 class="h5 fw-bold mb-1">Modo de acceso administrativo</h2>
         <p class="text-muted mb-3">Elige como se asignaran los permisos para revisar este proceso.</p>
         <div class="row g-3">
@@ -169,7 +169,7 @@ if (!in_array($availabilityStatus, ['scheduled', 'open_now', 'closed_now'], true
     </section>
     <?php endif; ?>
 
-    <section class="content-panel mt-4" data-process-admin-mode-panel="user">
+    <section class="card content-panel mt-4" data-process-admin-mode-panel="user">
         <h2 class="h5 fw-bold mb-1">Supervisores con acceso al proceso</h2>
         <p class="text-muted mb-3">Asigna usuarios concretos para que puedan ver solo este proceso. El Supervisor no puede ver resultados ni modificar información.</p>
         <?php if (!$adminUsers): ?>
@@ -177,7 +177,7 @@ if (!in_array($availabilityStatus, ['scheduled', 'open_now', 'closed_now'], true
         <?php else: ?>
             <div class="process-admin-table-wrap">
                 <table
-                    class="table align-middle app-table app-data-table process-admin-permissions-table"
+                    class="table table-hover align-middle app-table app-data-table process-admin-permissions-table"
                     data-page-length="10"
                     data-export-excel="false"
                     data-export-pdf="false"
@@ -233,12 +233,12 @@ if (!in_array($availabilityStatus, ['scheduled', 'open_now', 'closed_now'], true
     </section>
 
     <?php if (false): ?>
-    <section class="content-panel mt-4" data-process-admin-mode-panel="profile">
+    <section class="card content-panel mt-4" data-process-admin-mode-panel="profile">
         <h2 class="h5 fw-bold mb-3">Administradores por perfil</h2>
         <p class="text-muted mb-3">Usa esta seccion solo para permisos amplios. Si marcas un perfil como Supervisor sede aqui, todos los usuarios con ese perfil podran acceder a este proceso.</p>
         <div class="process-admin-table-wrap">
             <table
-                class="table align-middle app-table app-data-table process-admin-permissions-table"
+                class="table table-hover align-middle app-table app-data-table process-admin-permissions-table"
                 data-page-length="10"
                 data-export-excel="false"
                 data-export-pdf="false"

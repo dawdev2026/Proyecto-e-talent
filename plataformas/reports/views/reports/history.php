@@ -6,7 +6,7 @@
     </div>
 </section>
 
-<section class="content-panel">
+<section class="card content-panel">
     <div class="table-responsive">
         <table class="table align-middle mb-0">
             <thead><tr><th>Fecha</th><th>Informe</th><th>Empresa</th><th>Usuario</th><th>Formato</th><th>Estado</th><th>Duración</th></tr></thead>

@@ -9,9 +9,9 @@
     <?php endif; ?>
 </section>
 
-<section class="content-panel">
+<section class="card content-panel">
     <div class="table-responsive">
-        <table class="table align-middle app-table app-data-table" data-export-title="Agenda entrevistas">
+        <table class="table table-hover align-middle app-table app-data-table" data-export-title="Agenda entrevistas">
             <thead>
                 <tr>
                     <th>Horario</th>

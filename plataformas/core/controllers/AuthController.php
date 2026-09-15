@@ -64,7 +64,7 @@ final class AuthController extends Controller
                     'title' => 'Ingresar | e-talent',
                     'error' => $error,
                     'loginSettings' => $loginSettings,
-                ]);
+                ], 'auth');
                 return;
             }
 
@@ -97,7 +97,7 @@ final class AuthController extends Controller
             'error' => $error,
             'loginSettings' => $loginSettings,
             'twoStepPending' => $twoStepPending,
-        ]);
+        ], 'auth');
     }
 
     private function twoStepEnabled(array $settings): bool
@@ -254,7 +254,7 @@ final class AuthController extends Controller
             'message' => $message,
             'isDrawer' => $isDrawer,
             'recoveryEnabled' => $recoveryEnabled,
-        ], $isDrawer ? null : 'app');
+        ], $isDrawer ? null : 'auth');
     }
 
     public function resetPassword(): void
@@ -294,7 +294,7 @@ final class AuthController extends Controller
             'error' => $error,
             'validToken' => (bool) $reset,
             'loginSettings' => $loginSettings,
-        ]);
+        ], 'auth');
     }
 
     private function passwordRecoveryEnabled(array $settings): bool

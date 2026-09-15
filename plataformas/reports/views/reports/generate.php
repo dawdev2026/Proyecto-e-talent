@@ -7,7 +7,7 @@
     <a class="btn btn-primary" href="<?= e(route_url('reports.new')) ?>"><i class="bi bi-plus-lg me-1"></i> Nuevo informe</a>
 </section>
 
-<section class="content-panel">
+<section class="card content-panel">
     <div class="table-responsive">
         <table class="table align-middle mb-0">
             <thead>

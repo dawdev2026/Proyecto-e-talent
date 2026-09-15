@@ -1,5 +1,6 @@
 <div class="auth-branding auth-position-center<?= !empty($isDrawer) ? ' auth-drawer-content' : '' ?>">
-<div class="auth-card mx-auto shadow-sm">
+<div class="card auth-card mx-auto shadow-sm border-0">
+    <div class="card-body p-0">
     <div class="text-center mb-4">
         <?php if (empty($isDrawer)): ?><h1 class="auth-title fw-bold mb-1">Recuperar clave</h1><?php endif; ?>
         <p class="auth-subtitle mb-0">Te enviaremos instrucciones si el correo está registrado.</p>
@@ -10,5 +11,6 @@
         <div class="form-floating mb-4"><input id="email" class="form-control" type="email" name="email" placeholder="Correo" required><label for="email">Correo</label></div>
         <button class="btn btn-primary btn-lg w-100" type="submit">Solicitar recuperación</button>
     </form><?php endif; ?>
+</div>
 </div>
 </div>

@@ -7,9 +7,9 @@
     <a class="btn btn-primary" href="<?= e(route_url('profile.new')) ?>"><i class="bi bi-shield-plus me-1"></i> Nuevo perfil</a>
 </section>
 
-<section class="content-panel">
+<section class="card content-panel">
     <div class="table-responsive">
-        <table class="table align-middle app-table app-data-table" data-export-title="Perfiles">
+        <table class="table table-hover align-middle app-table app-data-table" data-export-title="Perfiles">
             <thead>
                 <tr>
                     <th>Perfil</th>

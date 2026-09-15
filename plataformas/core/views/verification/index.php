@@ -5,6 +5,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?= e($title ?? 'Verificar usuario') ?></title>
+    <link href="<?= e(url('assets/coreui/css/style.min.css')) ?>" rel="stylesheet">
+    <link href="<?= e(url('assets/css/coreui-adapter.css')) ?>" rel="stylesheet">
     <style>
         :root { color-scheme: light; font-family: system-ui, -apple-system, sans-serif; background:#f4f7fb; color:#172033; }
         body { margin:0; min-height:100vh; display:grid; place-items:center; padding:24px; box-sizing:border-box; }
@@ -17,15 +19,15 @@
         .muted { font-size:.9rem; color:#6e7888; } .sr-only { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0,0,0,0); }
     </style>
 </head>
-<body><main>
+<body class="auth-body"><main class="card shadow-sm border-0">
     <p class="muted">Verificación de usuarios · <?= e($companyName) ?></p>
     <h1>¿En qué procesos está el usuario?</h1>
     <p>Ingresa el correo electrónico para consultar su estado y los procesos asociados a esta empresa.</p>
     <form method="post" novalidate>
         <label for="email">Correo electrónico</label>
-        <input id="email" name="email" type="email" value="<?= e($email ?? '') ?>" autocomplete="email" required aria-describedby="email-help">
+        <input id="email" class="form-control" name="email" type="email" value="<?= e($email ?? '') ?>" autocomplete="email" required aria-describedby="email-help">
         <span id="email-help" class="sr-only">Debe ser un correo electrónico válido.</span>
-        <button type="submit">Verificar usuario</button>
+        <button class="btn btn-primary" type="submit">Verificar usuario</button>
     </form>
     <?php if ($error): ?><div class="alert" role="alert"><?= e($error) ?></div><?php endif; ?>
     <?php if ($result && !empty($result['active'])): ?>

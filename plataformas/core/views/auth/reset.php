@@ -9,7 +9,8 @@ $authStyle = sprintf(
 );
 ?>
 <div class="auth-branding auth-position-<?= e($loginSettings['login_form_position']) ?>" style="<?= $authStyle ?><?= $loginSettings['login_background_path'] ? '--login-bg-image:url(' . e(url($loginSettings['login_background_path'])) . ');' : '' ?>">
-    <div class="auth-card mx-auto shadow-sm">
+    <div class="card auth-card mx-auto shadow-sm border-0">
+        <div class="card-body p-0">
         <div class="text-center mb-4">
             <?php if ($loginSettings['login_logo_path']): ?>
                 <img class="auth-logo-image mx-auto mb-3" src="<?= e(url($loginSettings['login_logo_path'])) ?>" alt="">
@@ -39,5 +40,6 @@ $authStyle = sprintf(
         <?php else: ?>
             <a class="btn btn-primary w-100" href="<?= e(route_url('password.forgot')) ?>">Solicitar nuevo enlace</a>
         <?php endif; ?>
+    </div>
     </div>
 </div>

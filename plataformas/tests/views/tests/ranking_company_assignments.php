@@ -18,7 +18,7 @@ $selectedAssignment = $assignmentMap[$selectedCompanyId] ?? null;
     </div>
 </section>
 
-<section class="content-panel mb-4">
+<section class="card content-panel mb-4">
     <div class="alert alert-info border mb-4">
         <strong>Regla de aplicación:</strong>
         el administrador general define las matrices. El administrador cliente y el supervisor solo visualizan los resultados calculados para su empresa.
@@ -52,7 +52,7 @@ $selectedAssignment = $assignmentMap[$selectedCompanyId] ?? null;
     </form>
 </section>
 
-<section class="content-panel">
+<section class="card content-panel">
     <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
         <div>
             <h2 class="h5 fw-bold mb-1">Asignaciones vigentes</h2>

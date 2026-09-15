@@ -6,7 +6,7 @@
     </div>
 </section>
 
-<form method="post" class="content-panel">
+<form method="post" class="card content-panel">
     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
 
     <div class="row g-4">

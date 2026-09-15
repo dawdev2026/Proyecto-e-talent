@@ -13,7 +13,7 @@ $fieldValues = $fieldValues ?? [];
 <form method="post" action="<?= e($formAction ?? '') ?>" class="user-form-layout user-form-layout-drawer needs-validation" data-user-drawer-form novalidate>
     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
 
-    <section class="content-panel user-form-main">
+    <section class="card content-panel user-form-main">
         <div class="user-form-section">
             <div class="user-form-section-head">
                 <span><i class="bi bi-person-vcard"></i></span>

@@ -499,7 +499,7 @@ $usesScaleColumns = test_result_uses_scale_columns($session);
 ?>
 
 <?php if (is_array($riasecResult) && !empty($riasecResult['scales'])): ?>
-    <section class="content-panel mb-4">
+    <section class="card content-panel mb-4">
         <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-3">
             <div>
                 <p class="text-uppercase text-primary fw-bold small mb-1">Perfil RIASEC</p>
@@ -567,7 +567,7 @@ $usesScaleColumns = test_result_uses_scale_columns($session);
     </template>
 <?php endif; ?>
 
-<section class="content-panel">
+<section class="card content-panel">
     <?php if (!$summary): ?>
         <p class="text-muted mb-0">Aun no hay resultado disponible para esta evaluacion.</p>
     <?php else: ?>
@@ -590,7 +590,7 @@ $usesScaleColumns = test_result_uses_scale_columns($session);
         <?php endif; ?>
         <?php if ($usesScaleColumns): ?>
             <div class="table-responsive">
-                <table class="table align-middle app-table">
+                <table class="table table-hover align-middle app-table">
                     <thead>
                         <tr>
                             <?php foreach ($summary as $row): ?>
@@ -615,7 +615,7 @@ $usesScaleColumns = test_result_uses_scale_columns($session);
             </div>
         <?php else: ?>
             <div class="table-responsive">
-                <table class="table align-middle app-table">
+                <table class="table table-hover align-middle app-table">
                     <thead>
                         <tr>
                             <th>Escala</th>
@@ -672,7 +672,7 @@ $usesScaleColumns = test_result_uses_scale_columns($session);
 </section>
 
 <?php if (has_permission('view_test_results') && ((int) ($session['track_activity_enabled'] ?? 0) === 1 || $activityEvents)): ?>
-    <section class="content-panel mt-4">
+    <section class="card content-panel mt-4">
         <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
             <div>
                 <h2 class="h5 fw-bold mb-1">Actividad durante la evaluacion</h2>
@@ -712,10 +712,10 @@ $usesScaleColumns = test_result_uses_scale_columns($session);
 
 <?php if (has_permission('view_test_results') && $mediaEvidences): ?>
     <?php foreach (array_slice($mediaEvidences, 0, -1) as $mediaSegment): $segmentCaptures = array_values(array_filter($screenCaptures, static fn(array $capture): bool => (int) ($capture['evidence_id'] ?? 0) === (int) ($mediaSegment['id'] ?? 0))); ?>
-        <section class="content-panel mt-4"><div class="d-flex justify-content-between gap-2"><h2 class="h5 fw-bold mb-1">Control audiovisual · reapertura <?= (int) ($mediaSegment['segment_number'] ?? 1) ?></h2><span class="badge text-bg-secondary"><?= e(['saved' => 'Video guardado', 'partial' => 'Video parcial', 'failed' => 'Video no guardado', 'uploading' => 'Carga no finalizada'][$mediaSegment['status'] ?? ''] ?? 'Sin estado') ?></span></div><?php if (in_array((string) ($mediaSegment['status'] ?? ''), ['saved', 'partial'], true)): ?><video class="app-evidence-video rounded border mt-2" controls preload="metadata" src="<?= e(route_url('test-session.media-evidence', (int) $session['id']) . '?evidence_id=' . (int) $mediaSegment['id']) ?>"></video><?php endif; ?><?php if ($segmentCaptures): ?><div class="row g-2 mt-2"><?php foreach ($segmentCaptures as $capture): $captureUrl = route_url('test-session.media-screenshot-file', (int) $session['id']) . '?capture_id=' . (int) $capture['id']; ?><div class="col-6 col-md-4"><img class="img-fluid rounded border" loading="lazy" src="<?= e($captureUrl) ?>" alt="Captura <?= (int) $capture['capture_number'] ?>"></div><?php endforeach; ?></div><?php endif; ?></section>
+        <section class="card content-panel mt-4"><div class="d-flex justify-content-between gap-2"><h2 class="h5 fw-bold mb-1">Control audiovisual · reapertura <?= (int) ($mediaSegment['segment_number'] ?? 1) ?></h2><span class="badge text-bg-secondary"><?= e(['saved' => 'Video guardado', 'partial' => 'Video parcial', 'failed' => 'Video no guardado', 'uploading' => 'Carga no finalizada'][$mediaSegment['status'] ?? ''] ?? 'Sin estado') ?></span></div><?php if (in_array((string) ($mediaSegment['status'] ?? ''), ['saved', 'partial'], true)): ?><video class="app-evidence-video rounded border mt-2" controls preload="metadata" src="<?= e(route_url('test-session.media-evidence', (int) $session['id']) . '?evidence_id=' . (int) $mediaSegment['id']) ?>"></video><?php endif; ?><?php if ($segmentCaptures): ?><div class="row g-2 mt-2"><?php foreach ($segmentCaptures as $capture): $captureUrl = route_url('test-session.media-screenshot-file', (int) $session['id']) . '?capture_id=' . (int) $capture['id']; ?><div class="col-6 col-md-4"><img class="img-fluid rounded border" loading="lazy" src="<?= e($captureUrl) ?>" alt="Captura <?= (int) $capture['capture_number'] ?>"></div><?php endforeach; ?></div><?php endif; ?></section>
     <?php endforeach; ?>
     <?php $mediaEvidence = end($mediaEvidences); $segmentCaptures = array_values(array_filter($screenCaptures, static fn(array $capture): bool => (int) ($capture['evidence_id'] ?? 0) === (int) ($mediaEvidence['id'] ?? 0))); ?>
-    <section class="content-panel mt-4">
+    <section class="card content-panel mt-4">
         <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
             <div>
                 <h2 class="h5 fw-bold mb-1">Control audiovisual</h2>

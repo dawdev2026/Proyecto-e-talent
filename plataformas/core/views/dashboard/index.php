@@ -11,7 +11,7 @@ $macro = is_array($macro ?? null) ? $macro : [];
 </section>
 
 <section class="dashboard-agenda-layout" aria-labelledby="agenda-title">
-    <div class="content-panel dashboard-agenda-panel">
+    <div class="card content-panel dashboard-agenda-panel">
         <div class="dashboard-panel-header">
             <div>
                 <p class="dashboard-kicker mb-1">Hoy · <?= e(date('d/m/Y')) ?></p>
@@ -52,7 +52,7 @@ $macro = is_array($macro ?? null) ? $macro : [];
     </div>
 
     <div class="dashboard-agenda-side">
-        <section class="content-panel dashboard-process-summary" aria-labelledby="process-summary-title">
+        <section class="card content-panel dashboard-process-summary" aria-labelledby="process-summary-title">
             <div class="dashboard-panel-header">
                 <div>
                     <p class="dashboard-kicker mb-1">Evaluaciones</p>
@@ -124,7 +124,7 @@ $macro = is_array($macro ?? null) ? $macro : [];
     </div>
 </section>
 
-<section class="content-panel dashboard-progress-panel" aria-labelledby="progress-title">
+<section class="card content-panel dashboard-progress-panel" aria-labelledby="progress-title">
     <div class="dashboard-progress-heading">
         <span class="dashboard-progress-icon" aria-hidden="true"><i class="bi bi-graph-up-arrow"></i></span>
         <div>

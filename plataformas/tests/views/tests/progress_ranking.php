@@ -61,7 +61,7 @@ $rankingHeaders = [
     </div>
 </section>
 
-<section class="content-panel evaluation-dashboard mb-4">
+<section class="card content-panel evaluation-dashboard mb-4">
     <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
         <div>
             <h2 class="h5 fw-bold mb-1">Filtros</h2>
@@ -112,31 +112,31 @@ require __DIR__ . '/partials/ranking_config_form.php';
 
 <section class="row g-3 mb-4">
     <div class="col-12 col-md-6 col-xl">
-        <div class="content-panel h-100">
+        <div class="card content-panel h-100">
             <p class="text-muted small fw-bold text-uppercase mb-1">Ranking</p>
             <p class="display-6 fw-bold mb-0"><?= count($rows) ?></p>
         </div>
     </div>
     <div class="col-12 col-md-6 col-xl">
-        <div class="content-panel h-100">
+        <div class="card content-panel h-100">
             <p class="text-muted small fw-bold text-uppercase mb-1">Recomendado</p>
             <p class="display-6 fw-bold mb-0"><?= (int) ($classificationCounts['R'] ?? 0) ?></p>
         </div>
     </div>
     <div class="col-12 col-md-6 col-xl">
-        <div class="content-panel h-100">
+        <div class="card content-panel h-100">
             <p class="text-muted small fw-bold text-uppercase mb-1">Observacion</p>
             <p class="display-6 fw-bold mb-0"><?= (int) ($classificationCounts['RO'] ?? 0) ?></p>
         </div>
     </div>
     <div class="col-12 col-md-6 col-xl">
-        <div class="content-panel h-100">
+        <div class="card content-panel h-100">
             <p class="text-muted small fw-bold text-uppercase mb-1">No Recomendado</p>
             <p class="display-6 fw-bold mb-0"><?= (int) ($classificationCounts['NR'] ?? 0) ?></p>
         </div>
     </div>
     <div class="col-12 col-md-6 col-xl">
-        <div class="content-panel h-100">
+        <div class="card content-panel h-100">
             <p class="text-muted small fw-bold text-uppercase mb-1">Advertencias</p>
             <p class="display-6 fw-bold mb-0"><?= count($warnings) ?></p>
         </div>
@@ -149,7 +149,7 @@ require __DIR__ . '/partials/ranking_config_form.php';
     </div>
 <?php endif; ?>
 
-<section class="content-panel">
+<section class="card content-panel">
     <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
         <div>
             <h2 class="h5 fw-bold mb-1">Ranking Resumen</h2>
@@ -160,7 +160,7 @@ require __DIR__ . '/partials/ranking_config_form.php';
 
     <?php if ($rows): ?>
         <div class="table-responsive">
-            <table class="table align-middle app-table app-data-table" data-export-title="Ranking Resumen">
+            <table class="table table-hover align-middle app-table app-data-table" data-export-title="Ranking Resumen">
                 <thead>
                     <tr>
                         <?php foreach ($rankingHeaders as $header): ?>
@@ -202,7 +202,7 @@ require __DIR__ . '/partials/ranking_config_form.php';
 </section>
 
 <?php if ($warnings): ?>
-    <section class="content-panel mt-4">
+    <section class="card content-panel mt-4">
         <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
             <div>
                 <h2 class="h5 fw-bold mb-1">Advertencias</h2>
@@ -211,7 +211,7 @@ require __DIR__ . '/partials/ranking_config_form.php';
             <span class="badge text-bg-warning"><?= count($warnings) ?> advertencias</span>
         </div>
         <div class="table-responsive">
-            <table class="table align-middle app-table app-data-table" data-export-title="Advertencias Ranking">
+            <table class="table table-hover align-middle app-table app-data-table" data-export-title="Advertencias Ranking">
                 <thead>
                     <tr>
                         <th>RUT</th>

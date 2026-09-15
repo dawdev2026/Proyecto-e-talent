@@ -7,7 +7,7 @@
     <a class="btn btn-outline-secondary" href="<?= e(route_url('reports.generate')) ?>">Volver</a>
 </section>
 
-<section class="content-panel" data-report-batch-monitor data-batch-id="<?= (int) $batchId ?>" data-status-url="<?= e($statusUrl) ?>">
+<section class="card content-panel" data-report-batch-monitor data-batch-id="<?= (int) $batchId ?>" data-status-url="<?= e($statusUrl) ?>">
     <?php if ($batchId <= 0): ?>
         <div class="alert alert-info mb-0">Selecciona un proceso de informes para consultar su avance.</div>
     <?php else: ?>

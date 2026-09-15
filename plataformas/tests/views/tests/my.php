@@ -54,7 +54,7 @@ if (!function_exists('test_entry_instructions_html')) {
         data-test-entry-target="#auto-start-test-entry-<?= (int) $pendingAutoStartSessionId ?>"
         hidden
     ></div>
-    <section class="content-panel">
+    <section class="card content-panel">
         <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
             <div>
                 <p class="text-uppercase text-primary fw-bold small mb-1">Evaluacion obligatoria</p>
@@ -86,7 +86,7 @@ if (!function_exists('test_entry_instructions_html')) {
 <?php endif; ?>
 
 <?php if ($interviewAppointments): ?>
-    <section class="content-panel">
+    <section class="card content-panel">
         <div class="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-3">
             <div>
                 <p class="text-uppercase text-primary fw-bold small mb-1">Entrevistas seleccion</p>
@@ -95,7 +95,7 @@ if (!function_exists('test_entry_instructions_html')) {
             </div>
         </div>
         <div class="table-responsive">
-            <table class="table align-middle app-table app-data-table" data-export-title="Mis entrevistas" data-export-excel="false" data-export-pdf="false" data-page-length="5">
+            <table class="table table-hover align-middle app-table app-data-table" data-export-title="Mis entrevistas" data-export-excel="false" data-export-pdf="false" data-page-length="5">
                 <thead>
                     <tr>
                         <th>Proceso</th>
@@ -159,7 +159,7 @@ if (!function_exists('test_entry_instructions_html')) {
 <?php endif; ?>
 
 <section
-    class="content-panel"
+    class="card content-panel"
     data-my-tests-panel
     data-my-tests-status-url="<?= e(app_url('my-tests/status')) ?>"
     data-assigned-tests-finalized="<?= $assignedTestsFinalized ? '1' : '0' ?>"
@@ -174,7 +174,7 @@ if (!function_exists('test_entry_instructions_html')) {
         <strong>Has finalizado los Test asignados, ahora podrás salir de plataforma.</strong>
     </div>
     <div class="table-responsive">
-        <table class="table align-middle app-table app-data-table" data-export-title="Mis evaluaciones" data-export-excel="false" data-export-pdf="false">
+        <table class="table table-hover align-middle app-table app-data-table" data-export-title="Mis evaluaciones" data-export-excel="false" data-export-pdf="false">
             <thead>
                 <tr>
                     <th>Evaluacion</th>

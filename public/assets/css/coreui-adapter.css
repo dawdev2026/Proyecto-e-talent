@@ -67,6 +67,19 @@ body {
     border-color: var(--app-border, var(--cui-border-color));
 }
 
+/* Legacy view names are retained for business-specific behavior, but render
+ * using the same card surface as CoreUI cards. */
+.app-shell .content-panel,
+.app-shell .metric-card {
+    background: var(--card-content-bg, var(--cui-card-bg, var(--cui-body-bg)));
+    border: var(--cui-border-width) solid var(--app-border, var(--cui-border-color));
+    border-radius: var(--cui-border-radius);
+}
+
+.app-shell .page-header {
+    border-radius: var(--cui-border-radius);
+}
+
 .app-shell .card-header {
     background: var(--card-header-bg, var(--cui-tertiary-bg));
     color: var(--card-text, var(--cui-body-color));
