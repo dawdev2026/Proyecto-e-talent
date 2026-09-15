@@ -14,12 +14,9 @@ analisis/
 .tmp/
 output/
 outputs/
-database/
+database/*
 !database/
-!database/migrations/
-!database/migrations/20260831_evaluation_attempt_presence.sql
-!database/migrations/20260831_link_global_support_evaluation_results.sql
-!database/migrations/20260831_link_people_management_evaluation_results.sql
+!database/*.sql
 docs/
 scripts/
 

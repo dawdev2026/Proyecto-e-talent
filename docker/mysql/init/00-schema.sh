@@ -11,3 +11,12 @@ CREATE DATABASE IF NOT EXISTS e_talent_interviews
 CREATE DATABASE IF NOT EXISTS e_talent_evaluaciones_encuestas
   CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 SQL
+
+for schema in \
+  e_talent_core \
+  e_talent_tests \
+  e_talent_interviews \
+  e_talent_evaluaciones_encuestas
+do
+  mysql -uroot -p"${MYSQL_ROOT_PASSWORD}" < "/workspace/database/${schema}.sql"
+done
