@@ -5,30 +5,45 @@ final class PlatformSettingsController extends Controller
 {
     private PlatformSettingsModel $settings;
     private VisualPresetAnalyzer $visualAnalyzer;
+    private CompanyMailSettingsModel $companyMail;
+    private CompanyModel $companies;
 
-    public function __construct(?Template $view = null, ?PlatformSettingsModel $settings = null, ?VisualPresetAnalyzer $visualAnalyzer = null)
+    public function __construct(?Template $view = null, ?PlatformSettingsModel $settings = null, ?VisualPresetAnalyzer $visualAnalyzer = null, ?CompanyMailSettingsModel $companyMail = null, ?CompanyModel $companies = null)
     {
         parent::__construct($view);
         $this->settings = $settings ?: new PlatformSettingsModel();
         $this->visualAnalyzer = $visualAnalyzer ?: new VisualPresetAnalyzer();
+        $this->companyMail = $companyMail ?: new CompanyMailSettingsModel();
+        $this->companies = $companies ?: new CompanyModel();
     }
 
     public function index(): void
     {
-        require_permission('manage_platform_settings');
+        $companyId = $this->companyId();
+        if ($companyId > 0) {
+            if (!has_permission('manage_platform_settings')) {
+                require_permission('manage_company_branding');
+            }
+        } else {
+            require_permission('manage_platform_settings');
+        }
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $this->save();
         }
 
         $this->render('settings/index', [
-            'title' => 'Configuracion | Metricatest',
+            'title' => 'Configuracion | e-talent',
             'currentPage' => 'settings',
             'databaseConfig' => load_config('database'),
             'integrationsConfig' => load_config('integrations'),
-            'loginSettings' => $this->settings->loginSettings(),
-            'designSettings' => $this->settings->designSettings(),
-            'operationalSettings' => $this->settings->operationalSettings(),
+            'companyMailSettings' => $companyId > 0 ? $this->companyMail->find($companyId) : [],
+            'loginSettings' => $this->settings->loginSettings($companyId > 0 ? $companyId : null),
+            'designSettings' => $this->settings->designSettings($companyId > 0 ? $companyId : null),
+            'operationalSettings' => $companyId > 0 ? [] : $this->settings->operationalSettings(),
+            'companyBrandingMode' => $companyId > 0,
+            'company' => $companyId > 0 ? $this->companies->find($companyId) : null,
+            'settingsTab' => (string) ($_GET['tab'] ?? ''),
         ]);
     }
 
@@ -37,6 +52,11 @@ final class PlatformSettingsController extends Controller
         verify_csrf();
         $section = $_POST['section'] ?? '';
 
+        if ($this->companyId() > 0 && !in_array($section, ['login', 'login_preset', 'design', 'design_preset', 'mail', 'user_verification'], true)) {
+            flash('danger', 'Esta seccion solo puede ser administrada por e-talent.');
+            return;
+        }
+
         if ($section === 'database') {
             $this->saveDatabase();
             return;
@@ -44,6 +64,13 @@ final class PlatformSettingsController extends Controller
 
         if ($section === 'mail') {
             $this->saveMail();
+            return;
+        }
+
+        if ($section === 'user_verification') {
+            require_permission('manage_company_branding');
+            $this->companies->setVerificationEnabled($this->companyId(), isset($_POST['verification_enabled']));
+            flash('success', 'Configuración de verificación de usuarios guardada correctamente.');
             return;
         }
 
@@ -123,16 +150,53 @@ final class PlatformSettingsController extends Controller
 
     private function saveMail(): void
     {
+        $companyId = $this->companyId();
+        if ($companyId > 0) {
+            $data = [
+                'enabled' => isset($_POST['mail_enabled']),
+                'host' => trim((string) ($_POST['mail_host'] ?? '')),
+                'port' => (int) ($_POST['mail_port'] ?? 587),
+                'encryption' => in_array($_POST['mail_encryption'] ?? 'starttls', ['none', 'starttls', 'smtps'], true) ? $_POST['mail_encryption'] : 'starttls',
+                'smtp_auth' => isset($_POST['mail_smtp_auth']),
+                'auth_type' => in_array(strtoupper((string) ($_POST['mail_auth_type'] ?? '')), ['', 'LOGIN', 'PLAIN', 'CRAM-MD5'], true) ? strtoupper((string) ($_POST['mail_auth_type'] ?? '')) : '',
+                'username' => trim((string) ($_POST['mail_username'] ?? '')),
+                'password' => (string) ($_POST['mail_password'] ?? ''),
+                'clear_password' => isset($_POST['mail_clear_password']),
+                'from_email' => trim((string) ($_POST['from_email'] ?? '')),
+                'from_name' => trim((string) ($_POST['from_name'] ?? '')),
+                'reply_to_email' => trim((string) ($_POST['reply_to_email'] ?? '')),
+                'reply_to_name' => trim((string) ($_POST['reply_to_name'] ?? '')),
+                'timeout' => (int) ($_POST['mail_timeout'] ?? 30),
+            ];
+            if ($data['enabled'] && ($data['host'] === '' || !filter_var($data['from_email'], FILTER_VALIDATE_EMAIL))) {
+                flash('danger', 'Para activar el correo debes indicar servidor SMTP y un remitente válido.');
+                return;
+            }
+            if ($data['reply_to_email'] !== '' && !filter_var($data['reply_to_email'], FILTER_VALIDATE_EMAIL)) {
+                flash('danger', 'El correo de respuesta no es válido.');
+                return;
+            }
+            $this->companyMail->save($companyId, $data);
+            flash('success', 'Configuración de correo de la empresa guardada de forma segura.');
+            return;
+        }
+
         $current = load_config('integrations');
         $password = $_POST['mail_password'] ?? '';
         $current['mail'] = [
             'enabled' => isset($_POST['mail_enabled']),
             'host' => trim($_POST['mail_host'] ?? ''),
             'port' => (int) ($_POST['mail_port'] ?? 587),
+            'encryption' => in_array($_POST['mail_encryption'] ?? 'starttls', ['none', 'starttls', 'smtps'], true) ? $_POST['mail_encryption'] : 'starttls',
+            'smtp_auth' => isset($_POST['mail_smtp_auth']),
+            'auth_type' => in_array(strtoupper((string) ($_POST['mail_auth_type'] ?? '')), ['', 'LOGIN', 'PLAIN', 'CRAM-MD5'], true) ? strtoupper((string) ($_POST['mail_auth_type'] ?? '')) : '',
             'username' => trim($_POST['mail_username'] ?? ''),
             'password' => $password !== '' ? $password : ($current['mail']['password'] ?? ''),
             'from_email' => trim($_POST['from_email'] ?? ''),
             'from_name' => trim($_POST['from_name'] ?? ''),
+            'reply_to_email' => trim((string) ($_POST['reply_to_email'] ?? '')),
+            'reply_to_name' => trim((string) ($_POST['reply_to_name'] ?? '')),
+            'timeout' => max(5, min(120, (int) ($_POST['mail_timeout'] ?? 30))),
         ];
 
         write_secure_config('integrations', $current);
@@ -141,7 +205,8 @@ final class PlatformSettingsController extends Controller
 
     private function saveLogin(): void
     {
-        $settings = $this->settings->loginSettings();
+        $companyId = $this->companyId();
+        $settings = $this->settings->loginSettings($companyId > 0 ? $companyId : null);
         $data = [
             'login_title' => trim($_POST['login_title'] ?? $settings['login_title']),
             'login_title_font_size' => (string) $this->number($_POST['login_title_font_size'] ?? $settings['login_title_font_size'], 18, 64),
@@ -158,25 +223,30 @@ final class PlatformSettingsController extends Controller
             'login_identifier' => in_array($_POST['login_identifier'] ?? $settings['login_identifier'], ['email', 'rut'], true)
                 ? (string) ($_POST['login_identifier'] ?? $settings['login_identifier'])
                 : 'email',
+            'login_password_recovery_enabled' => isset($_POST['login_password_recovery_enabled']) ? '1' : '0',
+            'login_two_step_enabled' => isset($_POST['login_two_step_enabled']) ? '1' : '0',
+            'login_two_step_expiration_minutes' => (string) $this->number($_POST['login_two_step_expiration_minutes'] ?? $settings['login_two_step_expiration_minutes'], 2, 15),
+            'login_two_step_max_attempts' => (string) $this->number($_POST['login_two_step_max_attempts'] ?? $settings['login_two_step_max_attempts'], 3, 10),
         ];
 
-        $logo = $this->storeBrandAsset($_FILES['login_logo'] ?? [], 'logo');
+        $logo = $this->storeBrandAsset($_FILES['login_logo'] ?? [], 'logo', $companyId);
         if ($logo !== '') {
             $data['login_logo_path'] = $logo;
         }
 
-        $background = $this->storeBrandAsset($_FILES['login_background'] ?? [], 'background');
+        $background = $this->storeBrandAsset($_FILES['login_background'] ?? [], 'background', $companyId);
         if ($background !== '') {
             $data['login_background_path'] = $background;
         }
 
-        $this->settings->setMany($data);
+        $this->saveSettings($data, $companyId);
         flash('success', 'Configuracion visual del login guardada.');
     }
 
     private function saveDesign(): void
     {
-        $settings = $this->settings->designSettings();
+        $companyId = $this->companyId();
+        $settings = $this->settings->designSettings($companyId > 0 ? $companyId : null);
         $appFontUrl = $this->googleFontUrl(trim((string) ($_POST['app_font_url'] ?? $settings['app_font_url'])));
         $appFontFamily = $this->fontFamily($_POST['app_font_family'] ?? $settings['app_font_family'], $settings['app_font_family']);
         $bodyFontFamily = $this->fontFamily($_POST['font_body_family'] ?? $settings['font_body_family'], $settings['font_body_family']);
@@ -218,25 +288,26 @@ final class PlatformSettingsController extends Controller
             'table_body_text_color' => $this->color($_POST['table_body_text_color'] ?? $settings['table_body_text_color']),
         ];
 
-        $topbarIcon = $this->storeBrandAsset($_FILES['topbar_icon'] ?? [], 'topbar');
+        $topbarIcon = $this->storeBrandAsset($_FILES['topbar_icon'] ?? [], 'topbar', $companyId);
         if ($topbarIcon !== '') {
             $data['topbar_icon_path'] = $topbarIcon;
         }
 
-        $this->settings->setMany($data);
+        $this->saveSettings($data, $companyId);
         flash('success', 'Diseno general de plataforma guardado.');
     }
 
     private function applyLoginPreset(): void
     {
-        $asset = $this->storeBrandAsset($_FILES['login_reference'] ?? [], 'login_reference');
+        $companyId = $this->companyId();
+        $asset = $this->storeBrandAsset($_FILES['login_reference'] ?? [], 'login_reference', $companyId);
         if ($asset === '') {
             return;
         }
 
         try {
             $preset = $this->visualAnalyzer->analyzeLogin(PUBLIC_PATH . '/' . $asset, $asset);
-            $this->settings->setMany($preset);
+            $this->saveSettings($preset, $companyId);
             flash('success', 'Imagen de login analizada y configuracion aplicada.');
         } catch (Throwable $exception) {
             flash('danger', 'No se pudo analizar la imagen de login: ' . $exception->getMessage());
@@ -245,7 +316,8 @@ final class PlatformSettingsController extends Controller
 
     private function applyDesignPreset(): void
     {
-        $asset = $this->storeBrandAsset($_FILES['design_reference'] ?? [], 'design_reference');
+        $companyId = $this->companyId();
+        $asset = $this->storeBrandAsset($_FILES['design_reference'] ?? [], 'design_reference', $companyId);
         if ($asset === '') {
             return;
         }
@@ -253,7 +325,7 @@ final class PlatformSettingsController extends Controller
         try {
             $preset = $this->visualAnalyzer->analyzeDesign(PUBLIC_PATH . '/' . $asset);
             $preset['design_reference_path'] = $asset;
-            $this->settings->setMany($preset);
+            $this->saveSettings($preset, $companyId);
             flash('success', 'Imagen de plataforma analizada y configuracion aplicada.');
         } catch (Throwable $exception) {
             flash('danger', 'No se pudo analizar la imagen de plataforma: ' . $exception->getMessage());
@@ -298,7 +370,48 @@ final class PlatformSettingsController extends Controller
         return $family !== '' ? mb_substr($family, 0, 255) : $fallback;
     }
 
-    private function storeBrandAsset(array $file, string $prefix): string
+    private function saveSettings(array $settings, int $companyId): void
+    {
+        if ($companyId > 0) {
+            $globalSettings = array_merge(
+                $this->settings->loginSettings(),
+                $this->settings->designSettings()
+            );
+            $companySettings = [];
+            $resetKeys = [];
+            foreach ($settings as $key => $value) {
+                if (array_key_exists($key, $globalSettings) && $this->brandingValuesEqual($globalSettings[$key], $value)) {
+                    $resetKeys[] = (string) $key;
+                    continue;
+                }
+                $companySettings[$key] = $value;
+            }
+
+            $this->settings->setManyForCompany($companyId, $companySettings);
+            (new CompanyBrandingModel())->deleteMany($companyId, $resetKeys);
+            return;
+        }
+
+        $this->settings->setMany($settings);
+    }
+
+    private function brandingValuesEqual($left, $right): bool
+    {
+        $left = trim((string) $left);
+        $right = trim((string) $right);
+        if (preg_match('/^#[0-9a-f]{6}$/i', $left) && preg_match('/^#[0-9a-f]{6}$/i', $right)) {
+            return strtolower($left) === strtolower($right);
+        }
+
+        return $left === $right;
+    }
+
+    private function companyId(): int
+    {
+        return function_exists('current_company_context_id') ? current_company_context_id() : 0;
+    }
+
+    private function storeBrandAsset(array $file, string $prefix, int $companyId = 0): string
     {
         if (($file['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) {
             return '';
@@ -310,14 +423,14 @@ final class PlatformSettingsController extends Controller
         }
 
         $allowed = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp'];
-        $finfo = new finfo(FILEINFO_MIME_TYPE);
-        $mime = $finfo->file($file['tmp_name']);
+        $mime = $this->detectImageMime((string) $file['tmp_name']);
         if (!isset($allowed[$mime]) || (int) ($file['size'] ?? 0) > 3 * 1024 * 1024) {
             flash('danger', 'Las imagenes de marca deben ser JPG, PNG o WEBP y pesar maximo 3 MB.');
             return '';
         }
 
-        $dir = PUBLIC_PATH . '/uploads/branding';
+        $relativeDir = $companyId > 0 ? 'uploads/branding/company/' . $companyId : 'uploads/branding';
+        $dir = PUBLIC_PATH . '/' . $relativeDir;
         if (!is_dir($dir)) {
             mkdir($dir, 0775, true);
         }
@@ -328,6 +441,25 @@ final class PlatformSettingsController extends Controller
             return '';
         }
 
-        return 'uploads/branding/' . $filename;
+        return $relativeDir . '/' . $filename;
+    }
+
+    private function detectImageMime(string $path): string
+    {
+        if (function_exists('finfo_open')) {
+            $finfo = finfo_open(FILEINFO_MIME_TYPE);
+            if ($finfo !== false) {
+                $mime = finfo_file($finfo, $path);
+                finfo_close($finfo);
+                if (is_string($mime)) {
+                    return strtolower($mime);
+                }
+            }
+        }
+
+        $imageInfo = @getimagesize($path);
+        $mime = is_array($imageInfo) ? (string) ($imageInfo['mime'] ?? '') : '';
+
+        return strtolower($mime);
     }
 }

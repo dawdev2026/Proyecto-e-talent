@@ -1,0 +1,159 @@
+name: e-talent
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+    container_name: e-talent-app
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      APP_ENV: local
+      TZ: America/Santiago
+      DB_HOST: db
+      DB_PORT: "3306"
+      DB_USERNAME: root
+      DB_PASSWORD: root
+      DB_SOCKET: ""
+      DB_CORE_DATABASE: e_talent_core
+      DB_TESTS_DATABASE: e_talent_tests
+      DB_INTERVIEWS_DATABASE: e_talent_interviews
+      DB_PERSISTENT: "false"
+      DB_QUERY_PROFILING: "true"
+      DB_SLOW_QUERY_MS: "300"
+      DB_QUERY_SAMPLE_RATE: "0"
+      DB_QUERY_PROFILE_LOG: /var/www/html/tmp/e_talent-slow-queries.log
+    ports:
+      - "8015:80"
+    volumes:
+      - .:/var/www/html
+
+  interview-worker:
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+    container_name: e-talent-interview-worker
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["php", "/var/www/html/plataformas/interviews/bin/process-jobs.php", "--daemon", "--max-jobs=10"]
+    environment:
+      APP_ENV: local
+      DB_HOST: db
+      DB_PORT: "3306"
+      DB_USERNAME: root
+      DB_PASSWORD: root
+      DB_SOCKET: ""
+      DB_CORE_DATABASE: e_talent_core
+      DB_TESTS_DATABASE: e_talent_tests
+      DB_INTERVIEWS_DATABASE: e_talent_interviews
+      DB_PERSISTENT: "false"
+      DB_QUERY_PROFILING: "true"
+      DB_SLOW_QUERY_MS: "300"
+      DB_QUERY_SAMPLE_RATE: "0"
+      DB_QUERY_PROFILE_LOG: /var/www/html/tmp/e_talent-slow-queries.log
+    volumes:
+      - .:/var/www/html
+
+  report-worker:
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+    container_name: e-talent-report-worker
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["php", "/var/www/html/plataformas/reports/bin/process-batches.php", "--daemon", "--max-jobs=5"]
+    environment:
+      APP_ENV: local
+      TZ: America/Santiago
+      DB_HOST: db
+      DB_PORT: "3306"
+      DB_USERNAME: root
+      DB_PASSWORD: root
+      DB_SOCKET: ""
+      DB_CORE_DATABASE: e_talent_core
+      DB_TESTS_DATABASE: e_talent_tests
+      DB_INTERVIEWS_DATABASE: e_talent_interviews
+      DB_PERSISTENT: "false"
+      DB_QUERY_PROFILING: "true"
+      DB_SLOW_QUERY_MS: "300"
+      DB_QUERY_SAMPLE_RATE: "0"
+      DB_QUERY_PROFILE_LOG: /var/www/html/tmp/e_talent-slow-queries.log
+    volumes:
+      - .:/var/www/html
+
+  media-worker:
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+    container_name: e-talent-media-worker
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["php", "/var/www/html/plataformas/evaluaciones_encuestas/bin/process-media-jobs.php", "--daemon", "--max-jobs=5"]
+    environment:
+      APP_ENV: local
+      TZ: America/Santiago
+      DB_HOST: db
+      DB_PORT: "3306"
+      DB_USERNAME: root
+      DB_PASSWORD: root
+      DB_SOCKET: ""
+      DB_CORE_DATABASE: e_talent_core
+      DB_TESTS_DATABASE: e_talent_tests
+      DB_INTERVIEWS_DATABASE: e_talent_interviews
+      DB_EVALUACIONES_ENCUESTAS_DATABASE: e_talent_evaluaciones_encuestas
+      DB_PERSISTENT: "false"
+      DB_QUERY_PROFILING: "true"
+      DB_SLOW_QUERY_MS: "300"
+      DB_QUERY_SAMPLE_RATE: "0"
+      DB_QUERY_PROFILE_LOG: /var/www/html/tmp/e_talent-slow-queries.log
+    volumes:
+      - .:/var/www/html
+
+  report-cleaner-cron:
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+    container_name: e-talent-report-cleaner-cron
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["cron", "-f"]
+    environment:
+      APP_ENV: local
+      DB_HOST: db
+      DB_PORT: "3306"
+      DB_USERNAME: root
+      DB_PASSWORD: root
+      DB_CORE_DATABASE: e_talent_core
+      DB_TESTS_DATABASE: e_talent_tests
+      DB_INTERVIEWS_DATABASE: e_talent_interviews
+    volumes:
+      - .:/var/www/html
+
+  db:
+    image: mysql:5.7.44
+    platform: linux/amd64
+    container_name: e-talent-db
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_INITDB_SKIP_TZINFO: "1"
+    ports:
+      - "3314:3306"
+    volumes:
+      - e_talent_mysql_data:/var/lib/mysql
+      - ./database:/workspace/database:ro
+      - ./docker/mysql/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  e_talent_mysql_data:

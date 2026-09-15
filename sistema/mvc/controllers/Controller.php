@@ -14,4 +14,5 @@ abstract class Controller
     {
         echo $this->view->render($view, $data, $layout);
     }
+
 }

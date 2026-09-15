@@ -8,7 +8,9 @@ final class ProfileModel
     public const PERMISSIONS = [
         'manage_profiles' => 'Administrar perfiles',
         'manage_platform_settings' => 'Administrar configuracion de plataforma',
+        'manage_company_branding' => 'Administrar identidad visual de la empresa',
         'manage_user_fields' => 'Administrar campos de usuario',
+        'manage_company_user_fields' => 'Administrar campos de usuario de la empresa',
         'manage_users' => 'Administrar usuarios',
         'manage_companies' => 'Administrar empresas',
         'manage_tests' => 'Administrar evaluaciones',
@@ -18,12 +20,22 @@ final class ProfileModel
         'view_test_process_progress' => 'Ver avance de procesos',
         'view_test_process_dashboard' => 'Ver Dashboard Avance',
         'view_test_process_results' => 'Ver resultados de procesos',
+        'manage_process_session_actions' => 'Administrar acciones de sesiones de procesos',
         'take_tests' => 'Responder evaluaciones',
         'view_test_results' => 'Ver resultados de evaluaciones',
         'manage_interview_processes' => 'Administrar procesos de entrevistas',
         'conduct_selection_interviews' => 'Conducir entrevistas de seleccion',
         'view_interview_reports' => 'Ver reportes de entrevistas',
         'manage_interview_settings' => 'Administrar configuracion de entrevistas',
+        'manage_evaluation_surveys' => 'Administrar encuestas y evaluaciones',
+        'view_evaluation_dashboard' => 'Ver dashboard de evaluaciones',
+        'manage_reports' => 'Administrar informes',
+        'assign_reports_by_company' => 'Asignar informes por empresa',
+        'approve_reports' => 'Aprobar y publicar informes',
+        'generate_reports' => 'Generar informes',
+        'download_reports' => 'Descargar informes',
+        'view_report_history' => 'Ver historial de informes',
+        'run_report_batches' => 'Ejecutar informes masivos',
         'manage_company_users' => 'Administrar usuarios de la empresa',
         'manage_company_processes' => 'Administrar procesos de la empresa',
         'manage_company_interviews' => 'Administrar entrevistas de la empresa',
@@ -33,17 +45,34 @@ final class ProfileModel
     public const CORE_PERMISSIONS = [
         'manage_profiles',
         'manage_platform_settings',
+        'manage_company_branding',
         'manage_user_fields',
+        'manage_company_user_fields',
         'manage_users',
         'manage_companies',
     ];
 
-    public const PLATFORM_PERMISSIONS = [];
+    public const PLATFORM_PERMISSIONS = [
+        'evaluaciones_encuestas' => ['manage_evaluation_surveys'],
+    ];
     public const INTERVIEWS_PERMISSIONS = [
         'manage_interview_processes',
         'conduct_selection_interviews',
         'view_interview_reports',
         'manage_interview_settings',
+    ];
+    public const EVALUATION_SURVEYS_PERMISSIONS = [
+        'manage_evaluation_surveys',
+        'view_evaluation_dashboard',
+    ];
+    public const REPORTS_PERMISSIONS = [
+        'manage_reports',
+        'assign_reports_by_company',
+        'approve_reports',
+        'generate_reports',
+        'download_reports',
+        'view_report_history',
+        'run_report_batches',
     ];
     public const TESTS_PERMISSIONS = [
         'manage_tests',
@@ -53,6 +82,7 @@ final class ProfileModel
         'view_test_process_progress',
         'view_test_process_dashboard',
         'view_test_process_results',
+        'manage_process_session_actions',
         'take_tests',
         'view_test_results',
     ];
@@ -61,6 +91,8 @@ final class ProfileModel
         'core:core' => 'Core de plataforma',
         'platform:tests' => 'Sub-plataforma Evaluaciones',
         'platform:interviews' => 'Sub-plataforma Entrevistas seleccion',
+        'platform:evaluaciones_encuestas' => 'Sub-plataforma Encuestas y Evaluaciones',
+        'platform:reports' => 'Sub-plataforma Informes',
     ];
 
     public const PERMISSION_GROUPS = [
@@ -79,6 +111,16 @@ final class ProfileModel
             'type' => 'Sub-plataforma',
             'permissions' => self::INTERVIEWS_PERMISSIONS,
         ],
+        'platform:evaluaciones_encuestas' => [
+            'label' => 'Sub-plataforma Encuestas y Evaluaciones',
+            'type' => 'Sub-plataforma',
+            'permissions' => self::EVALUATION_SURVEYS_PERMISSIONS,
+        ],
+        'platform:reports' => [
+            'label' => 'Sub-plataforma Informes',
+            'type' => 'Sub-plataforma',
+            'permissions' => self::REPORTS_PERMISSIONS,
+        ],
     ];
 
     public const HOME_ROUTES = [
@@ -96,7 +138,8 @@ final class ProfileModel
         ],
         'user-fields' => [
             'label' => 'Campos usuario',
-            'permissions' => ['manage_user_fields'],
+            'permissions' => ['manage_user_fields', 'manage_company_user_fields'],
+            'match' => 'any',
         ],
         'profiles' => [
             'label' => 'Perfiles',
@@ -122,6 +165,14 @@ final class ProfileModel
             'label' => 'Estado Avance',
             'permissions' => ['manage_tests'],
         ],
+        'tests.progress-ranking' => [
+            'label' => 'Configurar ranking',
+            'permissions' => ['manage_ranking_presets'],
+        ],
+        'tests.ranking-company-assignments' => [
+            'label' => 'Asignar ranking por empresa',
+            'permissions' => ['manage_ranking_presets'],
+        ],
         'test-processes' => [
             'label' => 'Procesos',
             'permissions' => ['manage_tests', 'manage_test_processes', 'manage_company_processes', 'view_test_process_progress', 'view_test_process_dashboard', 'view_test_process_results'],
@@ -135,6 +186,11 @@ final class ProfileModel
         'tests.assign' => [
             'label' => 'Asignar evaluaciones',
             'permissions' => ['assign_tests'],
+        ],
+        'reports.generate' => [
+            'label' => 'Generar Informes',
+            'permissions' => ['manage_reports', 'generate_reports', 'manage_tests'],
+            'match' => 'any',
         ],
         'interviews' => [
             'label' => 'Entrevistas seleccion',
@@ -258,26 +314,28 @@ final class ProfileModel
 
     public function create(array $data): int
     {
-        $id = $this->db->insert('
-            INSERT INTO role_profiles (name, role_key, scope_type, scope_key, description, permissions, home_route, is_default_requester, is_active)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ', [
-            $data['name'],
-            $data['role_key'],
-            $data['primary_scope_type'],
-            $data['primary_scope_key'],
-            $data['description'] ?: null,
-            json_encode($data['permissions'], JSON_UNESCAPED_UNICODE),
-            $data['home_route'],
-            (int) $data['is_default_requester'],
-            (int) $data['is_active'],
-        ]);
+        return (int) $this->db->transaction(function () use ($data): int {
+            $id = $this->db->insert('
+                INSERT INTO role_profiles (name, role_key, scope_type, scope_key, description, permissions, home_route, is_default_requester, is_active)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ', [
+                $data['name'],
+                $data['role_key'],
+                $data['primary_scope_type'],
+                $data['primary_scope_key'],
+                $data['description'] ?: null,
+                json_encode($data['permissions'], JSON_UNESCAPED_UNICODE),
+                $data['home_route'],
+                (int) $data['is_default_requester'],
+                (int) $data['is_active'],
+            ]);
 
-        if ((int) $data['is_default_requester'] === 1) {
-            $this->setDefaultRequesterProfile($id);
-        }
+            if ((int) $data['is_default_requester'] === 1) {
+                $this->setDefaultRequesterProfile($id);
+            }
 
-        return $id;
+            return $id;
+        });
     }
 
     public function update(int $id, array $data): void
@@ -287,26 +345,28 @@ final class ProfileModel
         $scopeType = $data['primary_scope_type'];
         $scopeKey = $data['primary_scope_key'];
 
-        $this->db->execute('
-            UPDATE role_profiles
-            SET name = ?, role_key = ?, scope_type = ?, scope_key = ?, description = ?, permissions = ?, home_route = ?, is_default_requester = ?, is_active = ?
-            WHERE id = ?
-        ', [
-            $data['name'],
-            $roleKey,
-            $scopeType,
-            $scopeKey,
-            $data['description'] ?: null,
-            json_encode($data['permissions'], JSON_UNESCAPED_UNICODE),
-            $data['home_route'],
-            (int) $data['is_default_requester'],
-            (int) $data['is_active'],
-            $id,
-        ]);
+        $this->db->transaction(function () use ($id, $data, $roleKey, $scopeType, $scopeKey): void {
+            $this->db->execute('
+                UPDATE role_profiles
+                SET name = ?, role_key = ?, scope_type = ?, scope_key = ?, description = ?, permissions = ?, home_route = ?, is_default_requester = ?, is_active = ?
+                WHERE id = ?
+            ', [
+                $data['name'],
+                $roleKey,
+                $scopeType,
+                $scopeKey,
+                $data['description'] ?: null,
+                json_encode($data['permissions'], JSON_UNESCAPED_UNICODE),
+                $data['home_route'],
+                (int) $data['is_default_requester'],
+                (int) $data['is_active'],
+                $id,
+            ]);
 
-        if ((int) $data['is_default_requester'] === 1) {
-            $this->setDefaultRequesterProfile($id);
-        }
+            if ((int) $data['is_default_requester'] === 1) {
+                $this->setDefaultRequesterProfile($id);
+            }
+        });
     }
 
     public function setDefaultRequesterProfile(int $id): void
@@ -326,7 +386,11 @@ final class ProfileModel
     {
         $keys = $scopeType === 'core'
             ? self::CORE_PERMISSIONS
-            : ($scopeKey === 'tests' ? self::TESTS_PERMISSIONS : ($scopeKey === 'interviews' ? self::INTERVIEWS_PERMISSIONS : (self::PLATFORM_PERMISSIONS[$scopeKey] ?? [])));
+            : ($scopeKey === 'tests'
+                ? self::TESTS_PERMISSIONS
+                : ($scopeKey === 'interviews'
+                    ? self::INTERVIEWS_PERMISSIONS
+                    : ($scopeKey === 'reports' ? self::REPORTS_PERMISSIONS : (self::PLATFORM_PERMISSIONS[$scopeKey] ?? []))));
 
         return array_intersect_key(self::PERMISSIONS, array_flip($keys));
     }
@@ -362,24 +426,26 @@ final class ProfileModel
 
     public function syncScopes(int $profileId, array $scopePermissions): void
     {
-        $this->db->execute('DELETE FROM role_profile_scopes WHERE profile_id = ?', [$profileId]);
+        $this->db->transaction(function () use ($profileId, $scopePermissions): void {
+            $this->db->execute('DELETE FROM role_profile_scopes WHERE profile_id = ?', [$profileId]);
 
-        foreach ($scopePermissions as $scope => $permissions) {
-            if (!$permissions || !isset(self::SCOPES[$scope])) {
-                continue;
+            foreach ($scopePermissions as $scope => $permissions) {
+                if (!$permissions || !isset(self::SCOPES[$scope])) {
+                    continue;
+                }
+
+                [$scopeType, $scopeKey] = explode(':', $scope, 2);
+                $this->db->execute('
+                    INSERT INTO role_profile_scopes (profile_id, scope_type, scope_key, permissions)
+                    VALUES (?, ?, ?, ?)
+                ', [
+                    $profileId,
+                    $scopeType,
+                    $scopeKey,
+                    json_encode(array_values($permissions), JSON_UNESCAPED_UNICODE),
+                ]);
             }
-
-            [$scopeType, $scopeKey] = explode(':', $scope, 2);
-            $this->db->execute('
-                INSERT INTO role_profile_scopes (profile_id, scope_type, scope_key, permissions)
-                VALUES (?, ?, ?, ?)
-            ', [
-                $profileId,
-                $scopeType,
-                $scopeKey,
-                json_encode(array_values($permissions), JSON_UNESCAPED_UNICODE),
-            ]);
-        }
+        });
     }
 
     public function groupedPermissions(): array

@@ -22,7 +22,7 @@ final class InterviewController extends Controller
         $this->requireAnyPermission(['manage_interview_processes', 'manage_company_interviews', 'conduct_selection_interviews', 'view_interview_reports']);
 
         $this->render('interviews/index', [
-            'title' => 'Entrevistas seleccion | Metricatest',
+            'title' => 'Entrevistas seleccion | e-talent',
             'currentPage' => 'interviews',
             'processes' => $this->interviews->all(),
         ]);
@@ -67,7 +67,7 @@ final class InterviewController extends Controller
             ]);
 
         $this->render('interviews/processes/form', [
-            'title' => ($id ? 'Editar proceso' : 'Nuevo proceso') . ' | Metricatest',
+            'title' => ($id ? 'Editar proceso' : 'Nuevo proceso') . ' | e-talent',
             'currentPage' => 'interviews',
             'id' => $id,
             'values' => $values,
@@ -89,7 +89,7 @@ final class InterviewController extends Controller
         }
 
         $this->render('interviews/processes/show', [
-            'title' => 'Agenda entrevistas | Metricatest',
+            'title' => 'Agenda entrevistas | e-talent',
             'currentPage' => 'interviews',
             'process' => $process,
             'appointments' => $this->interviews->appointments($id),
@@ -127,7 +127,7 @@ final class InterviewController extends Controller
         }
 
         $id = request_secure_id('interview_appointment');
-        $appointment = $this->interviews->findAppointment($id);
+        $appointment = $this->interviews->findAppointment($id, true);
         if (!$appointment) {
             platform_error(404, 'Entrevista no encontrada.');
         }
@@ -150,14 +150,14 @@ final class InterviewController extends Controller
             $preflight = $this->interviews->moderatorPreflight($appointment);
             if ($this->interviews->moderatorBriefNeedsRefresh($appointment, $preflight)) {
                 $this->interviews->invalidateModeratorBrief($id);
-                $appointment = $this->interviews->findAppointment($id) ?: $appointment;
+                $appointment = $this->interviews->findAppointment($id, true) ?: $appointment;
             }
 
             if (($appointment['moderator_brief_status'] ?? '') === 'pending') {
                 try {
                     $this->interviews->queueJob($id, 'moderator_brief');
                     $this->processOneJob('moderator_brief');
-                    $appointment = $this->interviews->findAppointment($id) ?: $appointment;
+                    $appointment = $this->interviews->findAppointment($id, true) ?: $appointment;
                 } catch (Throwable $exception) {
                     security_log('Interview moderator brief failed for appointment ' . $id . ': ' . $exception->getMessage());
                     $appointment['moderator_brief_error'] = 'No se pudo preparar el brief automaticamente.';
@@ -174,7 +174,7 @@ final class InterviewController extends Controller
             $daily = new DailyMeetingService($dailySettings);
             try {
                 $payload = $daily->meetingPayload([
-                    'room_slug' => 'metricatest-interview-' . $id,
+                    'room_slug' => 'e_talent-interview-' . $id,
                     'user_name' => (string) ($user['name'] ?? ($isModerator ? $appointment['moderator_name'] : $appointment['candidate_name'])),
                     'user_id' => 'user-' . (int) ($user['id'] ?? 0),
                     'is_owner' => $isModerator,
@@ -220,7 +220,7 @@ final class InterviewController extends Controller
         $finalReportHtml = $this->displayFinalReportHtml($appointment);
 
         $this->render('interviews/appointments/room', [
-            'title' => 'Sala entrevista | Metricatest',
+            'title' => 'Sala entrevista | e-talent',
             'currentPage' => 'interviews',
             'appointment' => $appointment,
             'dailyPayload' => $payload,
@@ -417,7 +417,7 @@ final class InterviewController extends Controller
         }
 
         $this->render('interviews/settings/index', [
-            'title' => 'Configuracion Entrevistas | Metricatest',
+            'title' => 'Configuracion Entrevistas | e-talent',
             'currentPage' => 'interviews.settings',
             'daily' => InterviewSettings::daily(),
             'ai' => InterviewSettings::ai(),
@@ -484,16 +484,17 @@ final class InterviewController extends Controller
         return false;
     }
 
-    private function processOneJob(string $type): void
+    public function processOneJob(string $type): bool
     {
         $job = $this->interviews->claimPendingJob($type);
         if (!$job) {
-            return;
+            return false;
         }
 
         $appointment = $this->interviews->findAppointment((int) $job['appointment_id']);
         if (!$appointment) {
-            return;
+            $this->interviews->failFinalReport((int) $job['appointment_id'], (int) $job['id'], 'La cita asociada al trabajo no existe.', false);
+            return true;
         }
 
         $context = $this->interviews->reportContext($appointment);
@@ -504,7 +505,7 @@ final class InterviewController extends Controller
             } else {
                 $this->interviews->failBrief((int) $appointment['id'], (int) $job['id'], (string) $result['error'], !empty($result['pending']));
             }
-            return;
+            return true;
         }
 
         $result = $this->ai->finalReport($context);
@@ -514,6 +515,8 @@ final class InterviewController extends Controller
         } else {
             $this->interviews->failFinalReport((int) $appointment['id'], (int) $job['id'], (string) $result['error'], !empty($result['pending']));
         }
+
+        return true;
     }
 
     private function finalReportHtml(array $report): string

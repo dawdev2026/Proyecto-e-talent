@@ -72,6 +72,7 @@ $fieldValues = $fieldValues ?? [];
                             <option value="">Selecciona</option>
                             <option value="masculino" <?= ($processUser['sex'] ?? '') === 'masculino' ? 'selected' : '' ?>>Masculino</option>
                             <option value="femenino" <?= ($processUser['sex'] ?? '') === 'femenino' ? 'selected' : '' ?>>Femenino</option>
+                            <option value="no_informado" <?= ($processUser['sex'] ?? '') === 'no_informado' ? 'selected' : '' ?>>No informado</option>
                         </select>
                         <label for="process_user_sex">Sexo</label>
                     </div>

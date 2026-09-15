@@ -11,6 +11,11 @@ $dashboardAsyncShell = !empty($dashboardAsyncShell);
 $dashboardContentOnly = !empty($dashboardContentOnly);
 $dashboardSkipScripts = !empty($dashboardSkipScripts);
 $dashboardDataUrl = (string) ($dashboardDataUrl ?? '');
+$dashboardIsGlobalAdmin = (bool) ($dashboardIsGlobalAdmin ?? false);
+$dashboardCompanies = is_array($dashboardCompanies ?? null) ? $dashboardCompanies : [];
+$dashboardAvailableProcesses = is_array($dashboardAvailableProcesses ?? null) ? $dashboardAvailableProcesses : [];
+$dashboardCompanyId = (int) ($dashboardCompanyId ?? 0);
+$dashboardSelectedProcessIds = array_values(array_filter(array_map('intval', is_array($dashboardSelectedProcessIds ?? null) ? $dashboardSelectedProcessIds : [])));
 $duplicateAssignments = is_array($duplicateAssignments ?? null) ? $duplicateAssignments : ['total' => 0, 'examples' => []];
 $duplicateAssignmentsTotal = (int) ($duplicateAssignments['total'] ?? 0);
 $duplicateAssignmentExamples = is_array($duplicateAssignments['examples'] ?? null) ? $duplicateAssignments['examples'] : [];
@@ -39,6 +44,8 @@ $rankingKnockoutRules = is_array($rankingConfig['knockouts'] ?? null) ? $ranking
 $rankingPresets = is_array($rankingPresets ?? null) ? $rankingPresets : [];
 $rankingSelectedPresetId = (int) ($rankingSelectedPresetId ?? -1);
 $canManageRankingPresets = (bool) ($canManageRankingPresets ?? false);
+$canConfigureRanking = (bool) ($canConfigureRanking ?? false);
+$rankingCompanyAssignment = is_array($rankingCompanyAssignment ?? null) ? $rankingCompanyAssignment : null;
 $rankingPresetsStorageReady = (bool) ($rankingPresetsStorageReady ?? false);
 $canViewCompleteRanking = (bool) ($canViewCompleteRanking ?? false);
 $rankingSelectedPresetName = '';
@@ -153,6 +160,70 @@ if (!function_exists('process_dashboard_help_label')) {
     </div>
 </section>
 
+<section class="content-panel process-dashboard-filters mb-4" data-dashboard-selection-panel>
+    <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-3">
+        <div>
+            <h2 class="h5 fw-bold mb-1">Selecciona qué quieres visualizar</h2>
+            <p class="text-muted mb-0">Primero elige una empresa y uno o más procesos para cargar el dashboard.</p>
+        </div>
+        <span class="badge text-bg-light border" data-dashboard-selection-summary>Sin selección</span>
+    </div>
+    <form class="row g-3 align-items-end" method="get" action="<?= e(route_url('test-process.dashboard')) ?>" data-dashboard-filter-form>
+        <?php if ($dashboardIsGlobalAdmin): ?>
+            <div class="col-12 col-lg-4">
+                <label class="form-label" for="dashboard_company_id">Empresa</label>
+                <select id="dashboard_company_id" class="form-select" name="company_id" required data-dashboard-company>
+                    <option value="0">Selecciona una empresa</option>
+                    <?php foreach ($dashboardCompanies as $company): ?>
+                        <?php $companyOptionId = (int) ($company['id'] ?? 0); ?>
+                        <option value="<?= $companyOptionId ?>" <?= $dashboardCompanyId === $companyOptionId ? 'selected' : '' ?>><?= e((string) ($company['name'] ?? 'Empresa')) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+        <?php else: ?>
+            <input type="hidden" name="company_id" value="<?= $dashboardCompanyId ?>">
+        <?php endif; ?>
+        <div class="col-12 col-lg-6">
+            <label class="form-label" for="dashboard_process_picker">Procesos</label>
+            <div class="input-group">
+                <button id="dashboard_process_picker" class="form-select text-start" type="button" data-dashboard-process-picker <?= $dashboardIsGlobalAdmin && $dashboardCompanyId <= 0 ? 'disabled' : '' ?>>Seleccionar procesos</button>
+                <span class="input-group-text" data-dashboard-process-count>0 seleccionados</span>
+            </div>
+            <div class="small text-muted mt-1">Puedes seleccionar varios procesos en la grilla.</div>
+        </div>
+        <div class="col-12 col-lg-2">
+            <button class="btn btn-primary w-100" type="submit" data-dashboard-apply>Aplicar</button>
+        </div>
+        <div data-dashboard-process-inputs>
+            <?php foreach ($dashboardSelectedProcessIds as $selectedProcessId): ?>
+                <input type="hidden" name="process_ids[]" value="<?= $selectedProcessId ?>">
+            <?php endforeach; ?>
+        </div>
+    </form>
+</section>
+
+<template id="dashboardProcessPickerTemplate">
+    <div class="mb-3">
+        <p class="text-muted mb-0">Marca los procesos que quieres incluir en el cálculo.</p>
+    </div>
+    <div class="table-responsive">
+        <table class="table align-middle app-table app-data-table" data-export-excel="false" data-export-pdf="false" data-page-length="10" data-searching="true">
+            <thead><tr><th class="no-sort" style="width: 94px;"><span class="d-inline-flex align-items-center gap-2"><input class="form-check-input mt-0" type="checkbox" data-dashboard-process-select-all aria-label="Seleccionar todos los procesos"><span>Incluir</span></span></th><th>Proceso</th><th>Código</th><th>Estado</th></tr></thead>
+            <tbody>
+            <?php foreach ($dashboardAvailableProcesses as $process): ?>
+                <?php $pickerProcessId = (int) ($process['id'] ?? 0); ?>
+                <tr data-dashboard-process-row data-company-id="<?= (int) ($process['company_id'] ?? 0) ?>">
+                    <td><input class="form-check-input" type="checkbox" value="<?= $pickerProcessId ?>" data-dashboard-process-checkbox <?= in_array($pickerProcessId, $dashboardSelectedProcessIds, true) ? 'checked' : '' ?> aria-label="Incluir proceso <?= e((string) ($process['name'] ?? 'Proceso')) ?>"></td>
+                    <td class="fw-semibold"><?= e((string) ($process['name'] ?? 'Proceso')) ?></td>
+                    <td><?= e((string) ($process['code'] ?? '')) ?></td>
+                    <td><?= e((string) ($process['status'] ?? '')) ?></td>
+                </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
+    </div>
+</template>
+
 <section class="alert alert-danger d-none" role="alert" data-inline-alert data-process-dashboard-error>
     <div class="d-flex align-items-start justify-content-between gap-3">
         <div>
@@ -194,6 +265,7 @@ if (!function_exists('process_dashboard_help_label')) {
 </section>
 <?php endif; ?>
 
+<?php if ($canConfigureRanking): ?>
 <section class="content-panel process-dashboard-filters mb-4">
     <form method="get" action="<?= e(route_url('test-process.dashboard')) ?>" class="row g-3 align-items-end">
         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>" disabled data-ranking-preset-post-field>
@@ -426,6 +498,19 @@ if (!function_exists('process_dashboard_help_label')) {
         </div>
     </form>
 </section>
+<?php else: ?>
+<section class="content-panel process-dashboard-filters mb-4">
+    <div class="d-flex flex-wrap align-items-start justify-content-between gap-3">
+        <div>
+            <h2 class="h5 fw-bold mb-1">Configuración del ranking</h2>
+            <p class="text-muted mb-0">La matriz de ranking es administrada globalmente y se aplica automáticamente a esta empresa.</p>
+        </div>
+        <span class="badge text-bg-light border">
+            <?= e((string) ($rankingCompanyAssignment['preset_name'] ?? 'Matriz oficial')) ?>
+        </span>
+    </div>
+</section>
+<?php endif; ?>
 
 <?php if ($duplicateAssignmentsTotal > 0): ?>
     <div class="alert alert-warning border d-flex align-items-start gap-2 mb-4" role="alert">
@@ -651,7 +736,7 @@ if (!function_exists('process_dashboard_help_label')) {
                         </td>
                         <td style="min-width: 170px;">
                             <div class="d-flex align-items-center gap-2">
-                                <div class="progress flex-grow-1" role="progressbar" aria-valuenow="<?= (int) ($row['progress_percent'] ?? 0) ?>" aria-valuemin="0" aria-valuemax="100" style="height: .6rem;">
+                                <div class="progress flex-grow-1" role="progressbar" aria-label="Avance del proceso" aria-valuenow="<?= (int) ($row['progress_percent'] ?? 0) ?>" aria-valuemin="0" aria-valuemax="100" style="height: .6rem;">
                                     <div class="progress-bar" style="width: <?= (int) ($row['progress_percent'] ?? 0) ?>%;"></div>
                                 </div>
                                 <span class="small text-muted"><?= (int) ($row['progress_percent'] ?? 0) ?>%</span>
@@ -683,6 +768,7 @@ if (!function_exists('process_dashboard_help_label')) {
     var embeddedDashboardData = <?= json_encode($chartData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
     var dashboardDataUrl = <?= json_encode($dashboardDataUrl, JSON_UNESCAPED_SLASHES) ?>;
     var isAsyncShell = <?= $dashboardAsyncShell ? 'true' : 'false' ?>;
+    var isGlobalDashboardAdmin = <?= $dashboardIsGlobalAdmin ? 'true' : 'false' ?>;
 
     window.renderProcessDashboardCharts = function (dashboardData) {
     if (!window.Chart || !dashboardData) {
@@ -955,6 +1041,16 @@ if (!function_exists('process_dashboard_help_label')) {
             return;
         }
 
+        if (isGlobalDashboardAdmin) {
+            var company = document.querySelector('[data-dashboard-company]');
+            var selected = document.querySelectorAll('[data-dashboard-process-inputs] input[name="process_ids[]"]');
+            if (!company || Number(company.value) <= 0 || !selected.length) {
+                setDashboardLoading(false);
+                content.innerHTML = '<div class="alert alert-info">Selecciona una empresa y al menos un proceso para visualizar el dashboard.</div>';
+                return;
+            }
+        }
+
         setDashboardError('');
         setDashboardLoading(true);
         content.innerHTML = '';
@@ -986,6 +1082,131 @@ if (!function_exists('process_dashboard_help_label')) {
     }
 
     document.addEventListener('DOMContentLoaded', function () {
+        var filterForm = document.querySelector('[data-dashboard-filter-form]');
+        var companySelect = document.querySelector('[data-dashboard-company]');
+        var pickerButton = document.querySelector('[data-dashboard-process-picker]');
+        var pickerTemplate = document.getElementById('dashboardProcessPickerTemplate');
+        var processInputs = document.querySelector('[data-dashboard-process-inputs]');
+        var processCount = document.querySelector('[data-dashboard-process-count]');
+        var processSummary = document.querySelector('[data-dashboard-selection-summary]');
+
+        function syncProcessSelection() {
+            if (!processInputs) return;
+            var checked = document.querySelectorAll('#appDrawerBody [data-dashboard-process-checkbox]:checked');
+            if (!checked.length && !document.querySelector('#appDrawerBody [data-dashboard-process-checkbox]')) {
+                var existing = document.querySelectorAll('[data-dashboard-process-inputs] input[name="process_ids[]"]');
+                if (processCount) processCount.textContent = existing.length + ' seleccionado' + (existing.length === 1 ? '' : 's');
+                if (processSummary) processSummary.textContent = existing.length ? existing.length + ' proceso' + (existing.length === 1 ? '' : 's') : 'Sin selección';
+                if (pickerButton) pickerButton.textContent = existing.length ? 'Modificar selección' : 'Seleccionar procesos';
+                return;
+            }
+            var selectedSet = {};
+            processInputs.querySelectorAll('input[name="process_ids[]"]').forEach(function (input) { selectedSet[input.value] = true; });
+            var pickerTable = document.querySelector('#appDrawerBody table.app-data-table');
+            var tableApi = pickerTable && window.jQuery && window.jQuery.fn.DataTable && window.jQuery.fn.DataTable.isDataTable(pickerTable)
+                ? window.jQuery(pickerTable).DataTable()
+                : null;
+            var activeRows = tableApi
+                ? tableApi.rows({ search: 'applied' }).nodes().toArray()
+                : Array.prototype.slice.call(document.querySelectorAll('#appDrawerBody [data-dashboard-process-row]'));
+            activeRows.filter(function (row) {
+                return !row.classList.contains('d-none') && row.querySelector('[data-dashboard-process-checkbox]');
+            }).forEach(function (row) {
+                var checkbox = row.querySelector('[data-dashboard-process-checkbox]');
+                if (checkbox.checked) selectedSet[checkbox.value] = true;
+                else delete selectedSet[checkbox.value];
+            });
+            processInputs.innerHTML = '';
+            Object.keys(selectedSet).forEach(function (value) {
+                var input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = 'process_ids[]';
+                input.value = value;
+                processInputs.appendChild(input);
+            });
+            var count = Object.keys(selectedSet).length;
+            if (processCount) processCount.textContent = count + ' seleccionado' + (count === 1 ? '' : 's');
+            if (processSummary) processSummary.textContent = count ? count + ' proceso' + (count === 1 ? '' : 's') : 'Sin selección';
+            if (pickerButton) pickerButton.textContent = count ? 'Modificar selección' : 'Seleccionar procesos';
+        }
+
+        function filterPickerRows(clearSelection) {
+            var companyId = companySelect ? companySelect.value : '<?= (int) $dashboardCompanyId ?>';
+            if (clearSelection && processInputs) processInputs.innerHTML = '';
+            document.querySelectorAll('[data-dashboard-process-row]').forEach(function (row) {
+                var matches = !isGlobalDashboardAdmin || (companyId !== '0' && row.getAttribute('data-company-id') === companyId);
+                row.classList.toggle('d-none', !matches);
+                if (!matches) row.querySelector('input[type="checkbox"]').checked = false;
+            });
+            syncProcessSelection();
+            if (pickerButton) pickerButton.disabled = isGlobalDashboardAdmin && companyId === '0';
+        }
+
+        if (companySelect) companySelect.addEventListener('change', function () { filterPickerRows(true); });
+        if (pickerButton && pickerTemplate) pickerButton.addEventListener('click', function () {
+            window.AppDrawer.open({
+                title: 'Seleccionar procesos',
+                size: 'lg',
+                html: pickerTemplate.innerHTML
+            });
+            window.setTimeout(function () {
+                var drawer = document.getElementById('appDrawerBody');
+                var companyId = companySelect ? companySelect.value : '<?= (int) $dashboardCompanyId ?>';
+                var selectedValues = Array.prototype.map.call(processInputs.querySelectorAll('input[name="process_ids[]"]'), function (input) { return input.value; });
+                var pickerTable = drawer.querySelector('table.app-data-table');
+                var selectAll = drawer.querySelector('[data-dashboard-process-select-all]');
+
+                function getSelectableProcessRows() {
+                    if (!pickerTable) return [];
+                    var tableApi = window.jQuery && window.jQuery.fn.DataTable && window.jQuery.fn.DataTable.isDataTable(pickerTable)
+                        ? window.jQuery(pickerTable).DataTable()
+                        : null;
+                    var rows = tableApi ? tableApi.rows({ search: 'applied' }).nodes().toArray() : Array.prototype.slice.call(pickerTable.querySelectorAll('[data-dashboard-process-row]'));
+                    return rows.filter(function (row) {
+                        return !row.classList.contains('d-none') && row.querySelector('[data-dashboard-process-checkbox]');
+                    });
+                }
+
+                function syncSelectAllState() {
+                    if (!selectAll) return;
+                    var rows = getSelectableProcessRows();
+                    var checkedCount = rows.filter(function (row) { return row.querySelector('[data-dashboard-process-checkbox]').checked; }).length;
+                    selectAll.checked = rows.length > 0 && checkedCount === rows.length;
+                    selectAll.indeterminate = checkedCount > 0 && checkedCount < rows.length;
+                    selectAll.disabled = rows.length === 0;
+                }
+
+                drawer.querySelectorAll('[data-dashboard-process-checkbox]').forEach(function (checkbox) {
+                    var row = checkbox.closest('[data-dashboard-process-row]');
+                    var visible = !isGlobalDashboardAdmin || (companyId !== '0' && row.getAttribute('data-company-id') === companyId);
+                    row.classList.toggle('d-none', !visible);
+                    checkbox.checked = visible && selectedValues.indexOf(checkbox.value) !== -1;
+                    checkbox.addEventListener('change', function () {
+                        document.querySelectorAll('[data-dashboard-process-checkbox][value="' + checkbox.value + '"]').forEach(function (other) { other.checked = checkbox.checked; });
+                        syncProcessSelection();
+                        syncSelectAllState();
+                    });
+                });
+                if (selectAll) {
+                    selectAll.addEventListener('change', function () {
+                        getSelectableProcessRows().forEach(function (row) {
+                            row.querySelector('[data-dashboard-process-checkbox]').checked = selectAll.checked;
+                        });
+                        syncProcessSelection();
+                        syncSelectAllState();
+                    });
+                }
+                if (pickerTable && window.jQuery && window.jQuery.fn.DataTable && window.jQuery.fn.DataTable.isDataTable(pickerTable)) {
+                    window.jQuery(pickerTable).on('draw.dt.dashboardProcessPicker', syncSelectAllState);
+                }
+                syncSelectAllState();
+            }, 0);
+        });
+        if (filterForm) filterForm.addEventListener('submit', function () {
+            syncProcessSelection();
+        });
+        filterPickerRows(false);
+
         document.querySelectorAll('[data-process-dashboard-refresh]').forEach(function (button) {
             button.addEventListener('click', loadDashboardData);
         });

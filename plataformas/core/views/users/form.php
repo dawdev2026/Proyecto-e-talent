@@ -70,6 +70,7 @@
                             <option value="">Selecciona</option>
                             <option value="masculino" <?= ($values['sex'] ?? '') === 'masculino' ? 'selected' : '' ?>>Masculino</option>
                             <option value="femenino" <?= ($values['sex'] ?? '') === 'femenino' ? 'selected' : '' ?>>Femenino</option>
+                            <option value="no_informado" <?= ($values['sex'] ?? '') === 'no_informado' ? 'selected' : '' ?>>No informado</option>
                         </select>
                         <label for="sex">Sexo</label>
                     </div>

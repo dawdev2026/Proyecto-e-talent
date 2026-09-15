@@ -53,6 +53,32 @@
             <p class="text-muted mb-0">Se muestra al volver atras o navegar fuera de una evaluacion en curso.</p>
         </div>
 
+        <div class="col-12">
+            <hr>
+            <h2 class="h5 fw-bold mb-1">Preguntas pendientes y tiempo agotado</h2>
+            <p class="text-muted mb-0">Estos mensajes se usan en evaluaciones psicometricas, encuestas y evaluaciones.</p>
+        </div>
+        <div class="col-md-6">
+            <label class="form-label" for="incomplete_confirm_title">Titulo de preguntas pendientes</label>
+            <input id="incomplete_confirm_title" class="form-control" type="text" name="incomplete_confirm_title" value="<?= e($settings['incomplete_confirm_title']) ?>" required>
+        </div>
+        <div class="col-md-6">
+            <label class="form-label" for="expired_message">Mensaje al agotarse el tiempo</label>
+            <textarea id="expired_message" class="form-control" name="expired_message" rows="3" required><?= e($settings['expired_message']) ?></textarea>
+        </div>
+        <div class="col-12">
+            <label class="form-label" for="incomplete_confirm_message">Mensaje de confirmacion</label>
+            <textarea id="incomplete_confirm_message" class="form-control" name="incomplete_confirm_message" rows="3" required><?= e($settings['incomplete_confirm_message']) ?></textarea>
+        </div>
+        <div class="col-md-6">
+            <label class="form-label" for="incomplete_confirm_button">Boton para contestar pendientes</label>
+            <input id="incomplete_confirm_button" class="form-control" type="text" name="incomplete_confirm_button" value="<?= e($settings['incomplete_confirm_button']) ?>" required>
+        </div>
+        <div class="col-md-6">
+            <label class="form-label" for="incomplete_cancel_button">Boton para guardar y finalizar</label>
+            <input id="incomplete_cancel_button" class="form-control" type="text" name="incomplete_cancel_button" value="<?= e($settings['incomplete_cancel_button']) ?>" required>
+        </div>
+
         <div class="col-md-6">
             <label class="form-label" for="exit_confirm_title">Titulo</label>
             <input id="exit_confirm_title" class="form-control" type="text" name="exit_confirm_title" value="<?= e($settings['exit_confirm_title']) ?>" required>

@@ -7,7 +7,7 @@ final class PlatformSettingsModel
     private static ?array $settingsCache = null;
 
     public const LOGIN_DEFAULTS = [
-        'login_title' => 'Metricatest',
+        'login_title' => 'e-talent',
         'login_title_font_size' => '32',
         'login_subtitle' => 'Evaluaciones y gestion institucional.',
         'login_subtitle_font_size' => '16',
@@ -17,15 +17,19 @@ final class PlatformSettingsModel
         'login_title_color' => '#2E2E2E',
         'login_subtitle_color' => '#6E6E6E',
         'login_button_color' => '#92BE2E',
-        'login_logo_path' => 'uploads/branding/metricatest_logo_clean_20260708.png',
-        'login_background_path' => 'uploads/branding/metricatest_login_bg_20260708.png',
+        'login_logo_path' => 'uploads/branding/e_talent_logo_clean_20260708.png',
+        'login_background_path' => 'uploads/branding/e_talent_login_bg_20260708.png',
         'login_identifier' => 'email',
+        'login_password_recovery_enabled' => '1',
+        'login_two_step_enabled' => '0',
+        'login_two_step_expiration_minutes' => '5',
+        'login_two_step_max_attempts' => '5',
     ];
 
     public const DESIGN_DEFAULTS = [
-        'html_title' => 'Metricatest',
-        'html_favicon_path' => 'uploads/branding/metricatest_icon_20260708.png',
-        'html_meta_description' => 'Plataforma Metricatest para evaluaciones, procesos y reportes de seleccion.',
+        'html_title' => 'e-talent',
+        'html_favicon_path' => 'uploads/branding/e_talent_icon_20260708.png',
+        'html_meta_description' => 'Plataforma e-talent para evaluaciones, procesos y reportes de seleccion.',
         'app_font_url' => 'https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800&family=Poppins:wght@400;500;600;700&display=swap',
         'app_font_family' => 'Poppins, Inter, Roboto, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
         'app_font_size' => '16',
@@ -42,8 +46,8 @@ final class PlatformSettingsModel
         'font_size_table' => '14',
         'app_primary_color' => '#00283C',
         'portal_text_color' => '#2E2E2E',
-        'topbar_icon_path' => 'uploads/branding/metricatest_icon_20260708.png',
-        'topbar_name' => 'Metricatest',
+        'topbar_icon_path' => 'uploads/branding/e_talent_icon_20260708.png',
+        'topbar_name' => 'e-talent',
         'topbar_background_color' => '#ffffff',
         'topbar_menu_background_color' => '#ffffff',
         'topbar_menu_button_color' => '#92BE2E',
@@ -84,14 +88,14 @@ final class PlatformSettingsModel
         return self::$settingsCache;
     }
 
-    public function loginSettings(): array
+    public function loginSettings(?int $companyId = null): array
     {
-        return array_merge(self::LOGIN_DEFAULTS, array_intersect_key($this->all(), self::LOGIN_DEFAULTS));
+        return $this->resolve(self::LOGIN_DEFAULTS, $companyId);
     }
 
-    public function designSettings(): array
+    public function designSettings(?int $companyId = null): array
     {
-        return array_merge(self::DESIGN_DEFAULTS, array_intersect_key($this->all(), self::DESIGN_DEFAULTS));
+        return $this->resolve(self::DESIGN_DEFAULTS, $companyId);
     }
 
     public function operationalSettings(): array
@@ -101,6 +105,34 @@ final class PlatformSettingsModel
             'test_evidence_retention_days' => max(1, min(3650, (int) ($settings['test_evidence_retention_days'] ?? 365))),
             'test_evidence_max_size_mb' => max(50, min(5000, (int) ($settings['test_evidence_max_size_mb'] ?? 500))),
             'test_evidence_chunk_size_mb' => max(1, min(50, (int) ($settings['test_evidence_chunk_size_mb'] ?? 10))),
+        ];
+    }
+
+    /**
+     * Resolves the shared AI integration without exposing its credential to views.
+     * The secret is returned only to backend services that explicitly request it.
+     */
+    public function aiSettings(?array $integrations = null, bool $includeSecret = false): array
+    {
+        $integrations = $integrations ?? load_config('integrations');
+        $configured = $integrations['interviews_ai'] ?? ($integrations['ai'] ?? []);
+        $configured = is_array($configured) ? $configured : [];
+
+        $apiKey = trim((string) ($configured['api_key'] ?? ''));
+        $baseUrl = rtrim(trim((string) ($configured['base_url'] ?? 'https://api.openai.com/v1')), '/');
+        if (!preg_match('/^https:\/\//i', $baseUrl)) {
+            $baseUrl = 'https://api.openai.com/v1';
+        }
+
+        return [
+            'enabled' => $this->settingBool($configured['enabled'] ?? false),
+            'provider' => trim((string) ($configured['provider'] ?? 'openai_compatible')) ?: 'openai_compatible',
+            'base_url' => $baseUrl,
+            'api_key' => $includeSecret ? $apiKey : '',
+            'has_api_key' => $apiKey !== '',
+            'model' => trim((string) ($configured['model'] ?? '')),
+            'timeout_seconds' => max(10, min(180, (int) ($configured['timeout_seconds'] ?? 45))),
+            'prompt_version' => trim((string) ($configured['prompt_version'] ?? 'e_talent-ai-v1')) ?: 'e_talent-ai-v1',
         ];
     }
 
@@ -117,5 +149,30 @@ final class PlatformSettingsModel
         });
 
         self::$settingsCache = null;
+    }
+
+    public function setManyForCompany(int $companyId, array $settings): void
+    {
+        (new CompanyBrandingModel($this->db))->setMany($companyId, $settings);
+    }
+
+    private function resolve(array $defaults, ?int $companyId): array
+    {
+        $settings = array_merge($defaults, array_intersect_key($this->all(), $defaults));
+        if (!$companyId || $companyId <= 0) {
+            return $settings;
+        }
+
+        $companySettings = (new CompanyBrandingModel($this->db))->allForCompany($companyId);
+        return array_merge($settings, array_intersect_key($companySettings, $defaults));
+    }
+
+    private function settingBool($value): bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        return in_array(strtolower((string) $value), ['1', 'true', 'on', 'yes'], true);
     }
 }

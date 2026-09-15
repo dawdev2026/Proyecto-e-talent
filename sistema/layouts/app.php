@@ -3,7 +3,9 @@ $user = current_user();
 $currentPage = $currentPage ?? '';
 $homeRoute = $user ? profile_home_route($user) : 'dashboard';
 $homeUrl = route_url($homeRoute);
-$designSettings = (new PlatformSettingsModel())->designSettings();
+$companyBrandingId = function_exists('current_company_context_id') ? current_company_context_id() : 0;
+$isDtBranding = $companyBrandingId === 4;
+$designSettings = (new PlatformSettingsModel())->designSettings($companyBrandingId > 0 ? $companyBrandingId : null);
 $designStyle = sprintf(
     '--app-primary:%s;--app-primary-dark:%s;--app-primary-soft:color-mix(in srgb, %s 14%%, %s);--app-bg:%s;--app-surface:%s;--app-surface-2:%s;--app-ink:%s;--app-text:%s;--app-muted:color-mix(in srgb, %s 58%%, %s);--app-border:%s;--app-border-soft:color-mix(in srgb, %s 58%%, %s);--app-font-family:%s;--app-font-size:%spx;--topbar-bg:%s;--topbar-menu-bg:%s;--topbar-menu-button:%s;--topbar-height:%spx;--topbar-logo-width:%spx;--card-header-bg:%s;--card-content-bg:%s;--card-text:%s;--button-bg:%s;--button-text:%s;--table-border:%s;--table-header-bg:%s;--table-header-text:%s;--table-body-bg:%s;--table-body-text:%s;',
     e($designSettings['app_primary_color']),
@@ -55,7 +57,7 @@ $designStyle .= sprintf(
 $topbarLogoPosition = 'start';
 $pageLabels = [
     'dashboard' => 'Home Portal',
-    'tests' => 'Evaluaciones',
+    'tests' => 'Evaluaciones Psicométricas',
     'tests.assign' => 'Asignar evaluaciones',
     'my-tests' => 'Mis evaluaciones',
     'companies' => 'Empresas',
@@ -64,14 +66,24 @@ $pageLabels = [
     'profiles' => 'Perfiles',
     'settings' => 'Configuracion',
     'tests.settings' => 'Configuracion Evaluaciones',
+    'tests.progress-ranking' => 'Configurar ranking',
+    'tests.ranking-company-assignments' => 'Asignar ranking por empresa',
     'test-process.dashboard' => 'Dashboard Avance',
     'test-process.review-assignment' => 'Revisar asignacion',
     'test-processes' => 'Procesos',
     'interviews' => 'Entrevistas seleccion',
     'interviews.settings' => 'Configuracion Entrevistas',
+    'evaluation-surveys.assessments' => 'Evaluaciones con nota',
+    'evaluation-surveys.dashboard' => 'Dashboard de evaluaciones',
+    'evaluation-surveys.dashboard.results' => 'Resultados de evaluación',
+    'evaluation-surveys.surveys' => 'Encuestas de satisfacción',
+    'evaluation-surveys.ai.settings' => 'Configuración IA',
+    'reports.generate' => 'Registrar Informes',
+    'reports.company-assignments' => 'Asignar Informes por Empresas',
+    'reports.history' => 'Historial de Informes',
 ];
 $breadcrumbLabel = $pageLabels[$currentPage] ?? labelize($currentPage ?: 'Inicio');
-$pageTitleLabel = trim((string) preg_replace('/\s*\|\s*Metricatest.*/', '', $title ?? ''));
+$pageTitleLabel = trim((string) preg_replace('/\s*\|\s*e-talent.*/', '', $title ?? ''));
 $breadcrumbTrail = [
     ['label' => 'Inicio', 'route' => $homeRoute, 'icon' => 'bi-house-door'],
 ];
@@ -99,7 +111,10 @@ if ($user) {
 }
 $coreMenuItems = [];
 $testsMenuItems = [];
+$processMenuItems = [];
 $interviewsMenuItems = [];
+$evaluationSurveysMenuItems = [];
+$reportsMenuItems = [];
 
 if ($user) {
     $coreMenuMap = [
@@ -108,6 +123,8 @@ if ($user) {
         ['permission' => 'manage_user_fields', 'page' => 'user-fields', 'route' => 'user-fields', 'label' => 'Campos usuario', 'icon' => 'bi-ui-checks-grid'],
         ['permission' => 'manage_profiles', 'page' => 'profiles', 'route' => 'profiles', 'label' => 'Perfiles', 'icon' => 'bi-shield-lock'],
         ['permission' => 'manage_platform_settings', 'page' => 'settings', 'route' => 'settings', 'label' => 'Configuracion', 'icon' => 'bi-sliders'],
+        ['permission' => 'manage_company_branding', 'page' => 'settings', 'route' => 'settings', 'label' => 'Identidad visual', 'icon' => 'bi-palette'],
+        ['permission' => 'manage_company_branding', 'page' => 'settings', 'route' => route_url('settings') . '?tab=verification', 'label' => 'Verificación de usuarios', 'icon' => 'bi-person-check'],
         ['permission' => 'manage_platform_settings', 'page' => 'tests.settings', 'route' => 'tests.settings', 'label' => 'Configuracion / Evaluaciones', 'icon' => 'bi-clipboard2-pulse'],
     ];
 
@@ -119,6 +136,9 @@ if ($user) {
     if (has_permission('manage_company_users')) {
         $coreMenuItems[] = ['page' => 'users', 'route' => 'users', 'label' => 'Usuarios', 'icon' => 'bi-people'];
     }
+    if (has_permission('manage_company_user_fields')) {
+        $coreMenuItems[] = ['page' => 'user-fields', 'route' => 'user-fields', 'label' => 'Campos usuario', 'icon' => 'bi-ui-checks-grid'];
+    }
 
     if (has_permission('take_tests') || has_permission('view_test_results')) {
         $testsMenuItems[] = ['page' => 'my-tests', 'route' => 'my-tests', 'label' => 'Mis evaluaciones', 'icon' => 'bi-clipboard-check'];
@@ -127,17 +147,46 @@ if ($user) {
         $testsMenuItems[] = ['page' => 'tests', 'route' => 'tests', 'label' => 'Evaluaciones', 'icon' => 'bi-list-check'];
         $testsMenuItems[] = ['page' => 'tests.progress', 'route' => 'tests.progress', 'label' => 'Estado Avance', 'icon' => 'bi-graph-up-arrow'];
     }
-    if (has_permission('view_test_process_dashboard')) {
-        $testsMenuItems[] = ['page' => 'test-process.dashboard', 'route' => 'test-process.dashboard', 'label' => 'Dashboard Avance', 'icon' => 'bi-bar-chart-line'];
-    }
-    if (has_permission('manage_tests') || has_permission('manage_test_processes') || has_permission('manage_company_processes')) {
-        $testsMenuItems[] = ['page' => 'test-process.review-assignment', 'route' => 'test-process.review-assignment', 'label' => 'Revisar asignacion', 'icon' => 'bi-person-lines-fill'];
-    }
-    if (has_permission('manage_tests') || has_permission('manage_test_processes') || has_permission('view_test_process_progress') || has_permission('view_test_process_dashboard') || has_permission('view_test_process_results')) {
-        $testsMenuItems[] = ['page' => 'test-processes', 'route' => 'test-processes', 'label' => 'Procesos', 'icon' => 'bi-kanban'];
+    if (has_permission('manage_ranking_presets')) {
+        $testsMenuItems[] = ['page' => 'tests.progress-ranking', 'route' => 'tests.progress-ranking', 'label' => 'Configurar ranking', 'icon' => 'bi-sliders'];
+        $testsMenuItems[] = ['page' => 'tests.ranking-company-assignments', 'route' => 'tests.ranking-company-assignments', 'label' => 'Asignar ranking por empresa', 'icon' => 'bi-diagram-3'];
     }
     if (has_permission('assign_tests')) {
         $testsMenuItems[] = ['page' => 'tests.assign', 'route' => 'tests.assign', 'label' => 'Asignar evaluaciones', 'icon' => 'bi-send-check'];
+        $testsMenuItems[] = ['page' => 'tests.company-assignments', 'route' => 'tests.company-assignments', 'label' => 'Asignar evaluaciones Empresa', 'icon' => 'bi-buildings'];
+    }
+    if (has_permission('manage_evaluation_surveys')) {
+        $evaluationSurveysMenuItems[] = ['page' => 'evaluation-surveys.assessments', 'route' => 'evaluation-surveys.assessments', 'label' => 'Evaluaciones con nota', 'icon' => 'bi-clipboard2-check'];
+        if (is_general_admin()) {
+            $evaluationSurveysMenuItems[] = ['page' => 'evaluation-surveys.surveys', 'route' => 'evaluation-surveys.surveys', 'label' => 'Encuestas de satisfacción', 'icon' => 'bi-bar-chart-line'];
+        }
+        $evaluationSurveysMenuItems[] = ['page' => 'evaluation-surveys.ai.settings', 'route' => 'evaluation-surveys.ai.settings', 'label' => 'Configuración IA', 'icon' => 'bi-stars'];
+    }
+    if (is_general_admin() || (string) ($user['role'] ?? '') === 'company_admin') {
+        $evaluationSurveysMenuItems[] = ['page' => 'evaluation-surveys.dashboard', 'route' => 'evaluation-surveys.dashboard', 'label' => 'Dashboard de evaluaciones', 'icon' => 'bi-speedometer2'];
+    }
+    if (has_permission('manage_reports') || has_permission('manage_tests')) {
+        $reportsMenuItems[] = ['page' => 'reports.generate', 'route' => 'reports.generate', 'label' => 'Registrar Informes', 'icon' => 'bi-file-earmark-bar-graph'];
+        $reportsMenuItems[] = ['page' => 'reports.company-assignments', 'route' => 'reports.company-assignments', 'label' => 'Asignar Informes por Empresas', 'icon' => 'bi-buildings'];
+        if (has_permission('view_report_history') || has_permission('manage_reports')) {
+            $reportsMenuItems[] = ['page' => 'reports.history', 'route' => 'reports.history', 'label' => 'Historial de Informes', 'icon' => 'bi-clock-history'];
+        }
+    }
+    $isCompanyAdminOrSupervisor = in_array((string) ($user['role'] ?? ''), ['company_admin', 'supervisor_sede'], true)
+        || in_array((string) ($user['profile_key'] ?? ''), ['company_admin', 'supervisor_sede'], true);
+    if (has_permission('view_test_process_dashboard') && !$isCompanyAdminOrSupervisor) {
+        $processMenuItems[] = ['page' => 'test-process.dashboard', 'route' => 'test-process.dashboard', 'label' => 'Dashboard Avance', 'icon' => 'bi-bar-chart-line'];
+    }
+    if (has_permission('manage_tests') || has_permission('manage_test_processes') || has_permission('manage_company_processes')) {
+        $processMenuItems[] = ['page' => 'test-process.review-assignment', 'route' => 'test-process.review-assignment', 'label' => 'Revisar asignación', 'icon' => 'bi-person-lines-fill'];
+    }
+    if (has_permission('manage_tests') || has_permission('manage_test_processes') || has_permission('view_test_process_progress') || has_permission('view_test_process_dashboard') || has_permission('view_test_process_results')) {
+        $processMenuItems[] = ['page' => 'test-processes', 'route' => 'test-processes', 'label' => 'Procesos', 'icon' => 'bi-kanban'];
+    }
+    $isCompanyAdmin = in_array((string) ($user['role'] ?? ''), ['company_admin'], true)
+        || in_array((string) ($user['profile_key'] ?? ''), ['company_admin'], true);
+    if ($isCompanyAdmin) {
+        $processMenuItems[] = ['page' => 'test-processes', 'route' => 'evaluation-surveys.dashboard.integrity', 'label' => 'Reporte Incidencias', 'icon' => 'bi-shield-exclamation'];
     }
     if (has_permission('manage_interview_processes') || has_permission('manage_company_interviews') || has_permission('conduct_selection_interviews') || has_permission('view_interview_reports')) {
         $interviewsMenuItems[] = ['page' => 'interviews', 'route' => 'interviews', 'label' => 'Procesos', 'icon' => 'bi-camera-video'];
@@ -153,8 +202,8 @@ foreach ($coreMenuItems as $item) {
         break;
     }
 }
-$coreMenuLabel = $activeCoreItem['label'] ?? 'Administracion';
-$coreMenuIcon = $activeCoreItem['icon'] ?? 'bi-gear';
+$coreMenuLabel = 'Administración';
+$coreMenuIcon = 'bi-gear';
 ?>
 <!doctype html>
 <html lang="es">
@@ -174,11 +223,20 @@ $coreMenuIcon = $activeCoreItem['icon'] ?? 'bi-gear';
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
         <link href="<?= e($designSettings['app_font_url']) ?>" rel="stylesheet">
     <?php endif; ?>
+    <?php if ($isDtBranding): ?>
+        <style>
+            @font-face { font-family: "DTGobCL"; src: url("<?= e(url('uploads/branding/company/4/gobcl-regular.woff')) ?>") format("woff"); font-weight: 500; font-style: normal; font-display: swap; }
+            @font-face { font-family: "DTGobCL"; src: url("<?= e(url('uploads/branding/company/4/gobcl-bold.woff')) ?>") format("woff"); font-weight: 700 900; font-style: normal; font-display: swap; }
+        </style>
+    <?php endif; ?>
     <link href="<?= e(url('assets/vendor/bootstrap.min.css')) ?>" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/datatables.net-bs5@1.13.8/css/dataTables.bootstrap5.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/datatables.net-buttons-bs5@2.4.2/css/buttons.bootstrap5.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/notyf@3.10.0/notyf.min.css" rel="stylesheet">
+    <?php if (!empty($useSelect2)): ?>
+        <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet">
+    <?php endif; ?>
     <link href="<?= e(url('assets/css/app.css')) ?>" rel="stylesheet">
     <?php if ($user): ?>
         <script>window.AppBackUrl = <?= json_encode(back_url(), JSON_UNESCAPED_SLASHES) ?>;</script>
@@ -189,8 +247,8 @@ $coreMenuIcon = $activeCoreItem['icon'] ?? 'bi-gear';
 <nav class="navbar navbar-expand-lg navbar-light app-navbar app-navbar-logo-<?= e($topbarLogoPosition) ?> sticky-top">
     <div class="container-fluid px-lg-4">
         <a class="navbar-brand fw-bold d-flex align-items-center gap-2" href="<?= e($homeUrl) ?>">
-            <?php if ($designSettings['topbar_icon_path']): ?>
-                <img class="brand-image" src="<?= e(url($designSettings['topbar_icon_path'])) ?>" alt="<?= e($designSettings['topbar_name']) ?>">
+            <?php if ($topbarIconAvailable): ?>
+                <img class="brand-image" src="<?= e(url($topbarIconPath)) ?>" alt="">
                 <span><?= e($designSettings['topbar_name']) ?></span>
             <?php else: ?>
                 <span class="brand-mark"><i class="bi bi-shield-check"></i></span>
@@ -208,15 +266,91 @@ $coreMenuIcon = $activeCoreItem['icon'] ?? 'bi-gear';
                         <span>Inicio</span>
                     </a>
                 </li>
+                <?php if ($coreMenuItems): ?>
+                    <?php $coreActive = in_array($currentPage, array_column($coreMenuItems, 'page'), true); ?>
+                    <li class="nav-item dropdown">
+                        <button class="nav-link dropdown-toggle <?= $coreActive ? 'active' : '' ?>" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="bi <?= e($coreMenuIcon) ?>"></i>
+                            <span><?= e($coreMenuLabel) ?></span>
+                        </button>
+                        <ul class="dropdown-menu app-nav-dropdown">
+                            <?php foreach ($coreMenuItems as $item): ?>
+                                <li>
+                                    <a class="dropdown-item <?= e(active($item['page'], $currentPage)) ?>" href="<?= e(route_url($item['route'])) ?>">
+                                        <i class="bi <?= e($item['icon']) ?>"></i>
+                                        <span><?= e($item['label']) ?></span>
+                                    </a>
+                                </li>
+                            <?php endforeach; ?>
+                        </ul>
+                    </li>
+                <?php endif; ?>
                 <?php if ($testsMenuItems): ?>
                     <?php $testsActive = in_array($currentPage, array_column($testsMenuItems, 'page'), true); ?>
                     <li class="nav-item dropdown">
                         <button class="nav-link dropdown-toggle <?= $testsActive ? 'active' : '' ?>" type="button" data-bs-toggle="dropdown" aria-expanded="false">
                             <i class="bi bi-clipboard-check"></i>
-                            <span>Evaluaciones</span>
+                            <span>Evaluaciones Psicométricas</span>
                         </button>
                         <ul class="dropdown-menu app-nav-dropdown">
                             <?php foreach ($testsMenuItems as $item): ?>
+                                <li>
+                                    <a class="dropdown-item <?= e(active($item['page'], $currentPage)) ?>" href="<?= e(route_url($item['route'])) ?>">
+                                        <i class="bi <?= e($item['icon']) ?>"></i>
+                                        <span><?= e($item['label']) ?></span>
+                                    </a>
+                                </li>
+                            <?php endforeach; ?>
+                        </ul>
+                    </li>
+                <?php endif; ?>
+                <?php if ($evaluationSurveysMenuItems): ?>
+                    <?php $evaluationSurveysActive = in_array($currentPage, array_column($evaluationSurveysMenuItems, 'page'), true); ?>
+                    <li class="nav-item dropdown">
+                        <button class="nav-link dropdown-toggle <?= $evaluationSurveysActive ? 'active' : '' ?>" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="bi bi-ui-checks-grid"></i>
+                            <span>Encuestas y Evaluaciones</span>
+                        </button>
+                        <ul class="dropdown-menu app-nav-dropdown">
+                            <?php foreach ($evaluationSurveysMenuItems as $item): ?>
+                                <li>
+                                    <a class="dropdown-item <?= e(active($item['page'], $currentPage)) ?>" href="<?= e(route_url($item['route'])) ?>">
+                                        <i class="bi <?= e($item['icon']) ?>"></i>
+                                        <span><?= e($item['label']) ?></span>
+                                    </a>
+                                </li>
+                            <?php endforeach; ?>
+                        </ul>
+                    </li>
+                <?php endif; ?>
+                <?php if ($reportsMenuItems): ?>
+                    <?php $reportsActive = in_array($currentPage, array_column($reportsMenuItems, 'page'), true); ?>
+                    <li class="nav-item dropdown">
+                        <button class="nav-link dropdown-toggle <?= $reportsActive ? 'active' : '' ?>" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="bi bi-file-earmark-bar-graph"></i>
+                            <span>Informes</span>
+                        </button>
+                        <ul class="dropdown-menu app-nav-dropdown">
+                            <?php foreach ($reportsMenuItems as $item): ?>
+                                <li>
+                                    <a class="dropdown-item <?= e(active($item['page'], $currentPage)) ?>" href="<?= e(route_url($item['route'])) ?>">
+                                        <i class="bi <?= e($item['icon']) ?>"></i>
+                                        <span><?= e($item['label']) ?></span>
+                                    </a>
+                                </li>
+                            <?php endforeach; ?>
+                        </ul>
+                    </li>
+                <?php endif; ?>
+                <?php if ($processMenuItems): ?>
+                    <?php $processesActive = in_array($currentPage, array_column($processMenuItems, 'page'), true); ?>
+                    <li class="nav-item dropdown">
+                        <button class="nav-link dropdown-toggle <?= $processesActive ? 'active' : '' ?>" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="bi bi-kanban"></i>
+                            <span>Procesos</span>
+                        </button>
+                        <ul class="dropdown-menu app-nav-dropdown">
+                            <?php foreach ($processMenuItems as $item): ?>
                                 <li>
                                     <a class="dropdown-item <?= e(active($item['page'], $currentPage)) ?>" href="<?= e(route_url($item['route'])) ?>">
                                         <i class="bi <?= e($item['icon']) ?>"></i>
@@ -236,25 +370,6 @@ $coreMenuIcon = $activeCoreItem['icon'] ?? 'bi-gear';
                         </button>
                         <ul class="dropdown-menu app-nav-dropdown">
                             <?php foreach ($interviewsMenuItems as $item): ?>
-                                <li>
-                                    <a class="dropdown-item <?= e(active($item['page'], $currentPage)) ?>" href="<?= e(route_url($item['route'])) ?>">
-                                        <i class="bi <?= e($item['icon']) ?>"></i>
-                                        <span><?= e($item['label']) ?></span>
-                                    </a>
-                                </li>
-                            <?php endforeach; ?>
-                        </ul>
-                    </li>
-                <?php endif; ?>
-                <?php if ($coreMenuItems): ?>
-                    <?php $coreActive = in_array($currentPage, array_column($coreMenuItems, 'page'), true); ?>
-                    <li class="nav-item dropdown">
-                        <button class="nav-link dropdown-toggle <?= $coreActive ? 'active' : '' ?>" type="button" data-bs-toggle="dropdown" aria-expanded="false">
-                            <i class="bi <?= e($coreMenuIcon) ?>"></i>
-                            <span><?= e($coreMenuLabel) ?></span>
-                        </button>
-                        <ul class="dropdown-menu app-nav-dropdown">
-                            <?php foreach ($coreMenuItems as $item): ?>
                                 <li>
                                     <a class="dropdown-item <?= e(active($item['page'], $currentPage)) ?>" href="<?= e(route_url($item['route'])) ?>">
                                         <i class="bi <?= e($item['icon']) ?>"></i>
@@ -375,6 +490,9 @@ $coreMenuIcon = $activeCoreItem['icon'] ?? 'bi-gear';
 <script src="https://cdn.jsdelivr.net/npm/pdfmake@0.2.10/build/vfs_fonts.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/datatables.net-buttons@2.4.2/js/buttons.html5.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/notyf@3.10.0/notyf.min.js"></script>
+<?php if (!empty($useSelect2)): ?>
+<script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+<?php endif; ?>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script src="https://cdn.jsdelivr.net/npm/tinymce@7/tinymce.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@tinymce/tinymce-jquery@2/dist/tinymce-jquery.min.js"></script>

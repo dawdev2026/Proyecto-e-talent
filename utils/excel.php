@@ -25,8 +25,8 @@ function download_xlsx_workbook(string $filename, array $sheets, string $title =
 
     $spreadsheet = new Spreadsheet();
     $spreadsheet->getProperties()
-        ->setCreator('Metricatest')
-        ->setLastModifiedBy('Metricatest')
+        ->setCreator('e-talent')
+        ->setLastModifiedBy('e-talent')
         ->setTitle($title);
 
     $usedTitles = [];
@@ -56,7 +56,21 @@ function download_xlsx_workbook(string $filename, array $sheets, string $title =
             $sheet->setAutoFilterByColumnAndRow(1, 1, $lastColumn, max(1, $lastRow));
             $sheet->freezePane('A2');
             for ($column = 1; $column <= $lastColumn; $column++) {
-                $sheet->getColumnDimensionByColumn($column)->setAutoSize(true);
+                $width = (array) ($sheetData['columnWidths'] ?? []);
+                if (isset($width[$column - 1]) && is_numeric($width[$column - 1])) {
+                    $sheet->getColumnDimensionByColumn($column)->setWidth((float) $width[$column - 1]);
+                } else {
+                    $sheet->getColumnDimensionByColumn($column)->setAutoSize(true);
+                }
+            }
+            if (!empty($sheetData['wrapText'])) {
+                $sheet->getStyleByColumnAndRow(1, 1, $lastColumn, $lastRow)->getAlignment()->setWrapText(true);
+            }
+        }
+
+        foreach ((array) ($sheetData['cellStyles'] ?? []) as $coordinate => $style) {
+            if (is_array($style) && preg_match('/^[A-Z]+[1-9][0-9]*$/', (string) $coordinate)) {
+                $sheet->getStyle((string) $coordinate)->applyFromArray($style);
             }
         }
     }

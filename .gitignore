@@ -1,14 +1,27 @@
 .DS_Store
+documento_propuesta_optimizacion_evidencia.docx
 
-# Entorno Docker exclusivamente local; no se publica en GitHub
-docker/
-docker-compose.yml
+# La infraestructura Docker forma parte de este proyecto independiente.
 
 # Agentes e infraestructura interna exclusivamente local
 AGENTS.md
 .agents/
 .codex/
 config/agent-loop/
+
+# Carpetas de trabajo y soporte exclusivamente locales
+analisis/
+.tmp/
+output/
+outputs/
+database/
+!database/
+!database/migrations/
+!database/migrations/20260831_evaluation_attempt_presence.sql
+!database/migrations/20260831_link_global_support_evaluation_results.sql
+!database/migrations/20260831_link_people_management_evaluation_results.sql
+docs/
+scripts/
 
 # Credenciales y claves locales
 config/database.php
@@ -20,6 +33,12 @@ config/*.secure
 vendor/
 sistema/vendor/
 database/sistema/vendor/
+
+# Dependencias frontend públicas requeridas por el runtime
+!public/assets/vendor/
+!public/assets/vendor/**
+!public/assets/js/vendor/
+!public/assets/js/vendor/**
 
 # Datos generados localmente, respaldos y temporales
 backups/
@@ -34,6 +53,7 @@ analisis/*.xlsx
 public/error_log
 public/tmp/*
 !public/tmp/.gitkeep
+public/uploads/
 database/public/tmp/*
 !database/public/tmp/.gitkeep
 database/tmp/*

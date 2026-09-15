@@ -8,6 +8,9 @@ $sessionsTotal = (int) ($sessionsTotal ?? 0);
 $classificationCounts = is_array($classificationCounts ?? null) ? $classificationCounts : ['R' => 0, 'RO' => 0, 'NR' => 0];
 $rankingConfig = is_array($rankingConfig ?? null) ? $rankingConfig : [];
 $rankingUsesOfficialConfig = (bool) ($rankingUsesOfficialConfig ?? false);
+$canConfigureRanking = (bool) ($canConfigureRanking ?? false);
+$rankingCompanyAssignment = is_array($rankingCompanyAssignment ?? null) ? $rankingCompanyAssignment : null;
+$rankingReports = is_array($rankingReports ?? null) ? $rankingReports : [];
 
 $rankingHeaders = [
     'Ranking',
@@ -44,10 +47,22 @@ $rankingHeaders = [
     </div>
 </section>
 
-<?php
-$rankingFormAction = route_url('test-process.ranking', $processId);
-require dirname(__DIR__) . '/partials/ranking_config_form.php';
-?>
+<?php if ($canConfigureRanking): ?>
+    <?php
+    $rankingFormAction = route_url('test-process.ranking', $processId);
+    require dirname(__DIR__) . '/partials/ranking_config_form.php';
+    ?>
+<?php else: ?>
+    <section class="content-panel mb-4">
+        <div class="d-flex flex-wrap align-items-start justify-content-between gap-3">
+            <div>
+                <h2 class="h5 fw-bold mb-1">Configuración del ranking</h2>
+                <p class="text-muted mb-0">La matriz es administrada globalmente y se aplica automáticamente a esta empresa.</p>
+            </div>
+            <span class="badge text-bg-light border"><?= e((string) ($rankingCompanyAssignment['preset_name'] ?? 'Matriz oficial')) ?></span>
+        </div>
+    </section>
+<?php endif; ?>
 
 <section class="row g-3 mb-4">
     <div class="col-12 col-md-3">
@@ -147,12 +162,32 @@ require dirname(__DIR__) . '/partials/ranking_config_form.php';
                                             $reportUrl = $reportProcessId > 0 && $reportSessionId > 0
                                                 ? route_url('test-process.ranking-report', $reportProcessId) . '?session=' . rawurlencode(secure_url_token($reportSessionId, 'test_session'))
                                                 : '';
+                                            $reportUserId = (int) ($row['_user_id'] ?? 0);
+                                            $reportCompanyId = (int) ($process['company_id'] ?? 0);
                                         ?>
                                         <div class="text-end">
                                             <?php if ($reportUrl !== ''): ?>
-                                                <a class="btn btn-sm btn-outline-primary" href="<?= e($reportUrl) ?>" title="Descargar informe PDF">
-                                                    <i class="bi bi-file-earmark-pdf me-1"></i> Informe
-                                                </a>
+                                                <?php if (count($rankingReports) === 1 && $reportUserId > 0 && $reportCompanyId > 0): ?>
+                                                    <?php $registeredReport = $rankingReports[0]; ?>
+                                                    <a class="btn btn-sm btn-outline-primary" href="<?= e(route_url('reports.run', (int) $registeredReport['id']) . '?company_id=' . $reportCompanyId . '&process_id=' . $reportProcessId . '&user_id=' . $reportUserId . '&format=pdf') ?>" title="Descargar informe registrado">
+                                                        <i class="bi bi-file-earmark-pdf me-1"></i> <?= e((string) $registeredReport['name']) ?>
+                                                    </a>
+                                                <?php elseif (count($rankingReports) > 1 && $reportUserId > 0 && $reportCompanyId > 0): ?>
+                                                    <div class="dropdown">
+                                                        <button class="btn btn-sm btn-outline-primary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                                                            <i class="bi bi-file-earmark-pdf me-1"></i> Informes
+                                                        </button>
+                                                        <ul class="dropdown-menu dropdown-menu-end">
+                                                            <?php foreach ($rankingReports as $registeredReport): ?>
+                                                                <li><a class="dropdown-item" href="<?= e(route_url('reports.run', (int) $registeredReport['id']) . '?company_id=' . $reportCompanyId . '&process_id=' . $reportProcessId . '&user_id=' . $reportUserId . '&format=pdf') ?>"><i class="bi bi-file-earmark-pdf me-2"></i><?= e((string) $registeredReport['name']) ?> <span class="text-muted small">v<?= e((string) $registeredReport['version']) ?></span></a></li>
+                                                            <?php endforeach; ?>
+                                                        </ul>
+                                                    </div>
+                                                <?php else: ?>
+                                                    <a class="btn btn-sm btn-outline-primary" href="<?= e($reportUrl) ?>" title="Descargar informe estándar">
+                                                        <i class="bi bi-file-earmark-pdf me-1"></i> Informe estándar
+                                                    </a>
+                                                <?php endif; ?>
                                             <?php else: ?>
                                                 <span class="text-muted small">Sin informe</span>
                                             <?php endif; ?>

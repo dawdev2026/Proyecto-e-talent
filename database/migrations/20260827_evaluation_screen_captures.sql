@@ -1,0 +1,21 @@
+CREATE TABLE IF NOT EXISTS e_talent_evaluaciones_encuestas.evaluation_survey_screen_captures (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    attempt_id INT UNSIGNED NOT NULL,
+    evidence_id BIGINT UNSIGNED NULL,
+    capture_source ENUM('screen','canvas') NOT NULL,
+    capture_number INT UNSIGNED NOT NULL,
+    question_id INT UNSIGNED NULL,
+    event_type VARCHAR(80) NOT NULL DEFAULT 'periodic',
+    mime_type VARCHAR(120) NOT NULL,
+    storage_key VARCHAR(255) NOT NULL,
+    file_size INT UNSIGNED NOT NULL,
+    sha256 CHAR(64) NOT NULL,
+    captured_at DATETIME NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_essc_attempt_number (attempt_id, capture_number),
+    KEY idx_essc_attempt_created (attempt_id, created_at),
+    KEY idx_essc_evidence_created (evidence_id, created_at),
+    CONSTRAINT fk_essc_attempt FOREIGN KEY (attempt_id) REFERENCES e_talent_evaluaciones_encuestas.evaluation_survey_attempts(id) ON DELETE CASCADE,
+    CONSTRAINT fk_essc_evidence FOREIGN KEY (evidence_id) REFERENCES e_talent_evaluaciones_encuestas.evaluation_survey_media_evidence(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

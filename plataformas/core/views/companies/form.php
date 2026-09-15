@@ -32,6 +32,13 @@
                     </div>
                 </div>
                 <div class="col-12 col-lg-5">
+                    <div class="form-floating">
+                        <input id="url_prefix" class="form-control form-control-lg" name="url_prefix" value="<?= e($values['url_prefix'] ?? '') ?>" maxlength="80" pattern="[a-z0-9]+(?:-[a-z0-9]+)*" placeholder="Prefijo de URL" required>
+                        <label for="url_prefix">Prefijo de URL</label>
+                    </div>
+                    <small class="form-text text-muted">Ejemplo: <code>dt</code> → <code>/dt</code>. Usa letras, números y guiones.</small>
+                </div>
+                <div class="col-12 col-lg-5">
                     <label class="user-form-switch">
                         <input id="is_active" class="form-check-input" type="checkbox" name="is_active" <?= (int) $values['is_active'] === 1 ? 'checked' : '' ?>>
                         <span>
@@ -103,6 +110,10 @@
             <div>
                 <span>Identificador</span>
                 <strong><?= e($values['tax_id'] ?: 'Pendiente') ?></strong>
+            </div>
+            <div>
+                <span>Ruta base</span>
+                <strong>/<?= e($values['url_prefix'] ?? 'pendiente') ?></strong>
             </div>
         </div>
         <div class="user-form-guidance">

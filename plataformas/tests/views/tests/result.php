@@ -18,7 +18,9 @@ $supportsCorrectAnswers = !empty($resultContext['supports_correct_answers']);
 $age = trim((string) ($resultContext['age'] ?? ''));
 $activityEvents = $activityEvents ?? [];
 $mediaEvidence = is_array($mediaEvidence ?? null) ? $mediaEvidence : null;
+$mediaEvidences = is_array($mediaEvidences ?? null) ? $mediaEvidences : ($mediaEvidence ? [$mediaEvidence] : []);
 $audioVisualRisks = is_array($audioVisualRisks ?? null) ? $audioVisualRisks : [];
+$screenCaptures = is_array($screenCaptures ?? null) ? $screenCaptures : [];
 $riasecResult = $riasecResult ?? null;
 
 if (!function_exists('test_activity_label')) {
@@ -269,6 +271,14 @@ if (!function_exists('test_result_selected_values')) {
     }
 }
 
+if (!function_exists('test_result_normalize_choice_value')) {
+    function test_result_normalize_choice_value(string $value): string
+    {
+        $value = html_entity_decode($value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        return trim((string) (preg_replace('/\s+/u', ' ', $value) ?? $value));
+    }
+}
+
 if (!function_exists('test_result_uses_scale_columns')) {
     function test_result_uses_scale_columns(array $session): bool
     {
@@ -413,7 +423,17 @@ if (!function_exists('test_result_answer_detail_html')) {
                 <?php
                 $options = test_result_option_pairs($item['options'] ?? '');
                 $selectedValues = test_result_selected_values($item);
-                $selectedSet = array_flip($selectedValues);
+                if (($item['item_type'] ?? '') === 'multiple_choice' && count($selectedValues) > 1) {
+                    $normalizedAnswer = test_result_normalize_choice_value((string) ($item['answer_value'] ?? ''));
+                    foreach ($options as $value => $label) {
+                        if ($normalizedAnswer === test_result_normalize_choice_value((string) $value)
+                            || $normalizedAnswer === test_result_normalize_choice_value((string) $label)) {
+                            $selectedValues = [(string) ($item['answer_value'] ?? '')];
+                            break;
+                        }
+                    }
+                }
+                $selectedSet = array_fill_keys(array_map('test_result_normalize_choice_value', $selectedValues), true);
                 $itemType = (string) ($item['item_type'] ?? '');
                 ?>
                 <article class="test-question-card">
@@ -435,11 +455,12 @@ if (!function_exists('test_result_answer_detail_html')) {
                             <?php $hasVisibleSelection = false; ?>
                             <?php foreach ($options as $value => $label): ?>
                                 <?php
-                                $isSelected = isset($selectedSet[(string) $value]);
+                                $isSelected = isset($selectedSet[test_result_normalize_choice_value((string) $value)])
+                                    || isset($selectedSet[test_result_normalize_choice_value((string) $label)]);
                                 $hasVisibleSelection = $hasVisibleSelection || $isSelected;
                                 $choiceMarker = test_result_choice_marker($choiceIndex++);
                                 ?>
-                                <label class="test-choice-card">
+                                <label class="test-choice-card <?= $isSelected ? 'is-selected' : '' ?>">
                                     <input type="<?= $itemType === 'multiple_choice' ? 'checkbox' : 'radio' ?>" disabled <?= $isSelected ? 'checked' : '' ?>>
                                     <span class="test-choice-mark"><?= e($choiceMarker) ?></span>
                                     <span><?= e((string) $label) ?></span>
@@ -689,7 +710,11 @@ $usesScaleColumns = test_result_uses_scale_columns($session);
     </section>
 <?php endif; ?>
 
-<?php if (has_permission('view_test_results') && $mediaEvidence): ?>
+<?php if (has_permission('view_test_results') && $mediaEvidences): ?>
+    <?php foreach (array_slice($mediaEvidences, 0, -1) as $mediaSegment): $segmentCaptures = array_values(array_filter($screenCaptures, static fn(array $capture): bool => (int) ($capture['evidence_id'] ?? 0) === (int) ($mediaSegment['id'] ?? 0))); ?>
+        <section class="content-panel mt-4"><div class="d-flex justify-content-between gap-2"><h2 class="h5 fw-bold mb-1">Control audiovisual · reapertura <?= (int) ($mediaSegment['segment_number'] ?? 1) ?></h2><span class="badge text-bg-secondary"><?= e(['saved' => 'Video guardado', 'partial' => 'Video parcial', 'failed' => 'Video no guardado', 'uploading' => 'Carga no finalizada'][$mediaSegment['status'] ?? ''] ?? 'Sin estado') ?></span></div><?php if (in_array((string) ($mediaSegment['status'] ?? ''), ['saved', 'partial'], true)): ?><video class="app-evidence-video rounded border mt-2" controls preload="metadata" src="<?= e(route_url('test-session.media-evidence', (int) $session['id']) . '?evidence_id=' . (int) $mediaSegment['id']) ?>"></video><?php endif; ?><?php if ($segmentCaptures): ?><div class="row g-2 mt-2"><?php foreach ($segmentCaptures as $capture): $captureUrl = route_url('test-session.media-screenshot-file', (int) $session['id']) . '?capture_id=' . (int) $capture['id']; ?><div class="col-6 col-md-4"><img class="img-fluid rounded border" loading="lazy" src="<?= e($captureUrl) ?>" alt="Captura <?= (int) $capture['capture_number'] ?>"></div><?php endforeach; ?></div><?php endif; ?></section>
+    <?php endforeach; ?>
+    <?php $mediaEvidence = end($mediaEvidences); $segmentCaptures = array_values(array_filter($screenCaptures, static fn(array $capture): bool => (int) ($capture['evidence_id'] ?? 0) === (int) ($mediaEvidence['id'] ?? 0))); ?>
     <section class="content-panel mt-4">
         <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
             <div>
@@ -697,16 +722,30 @@ $usesScaleColumns = test_result_uses_scale_columns($session);
                 <p class="text-muted mb-0">Evidencia y señales audiovisuales asociadas a la rendicion.</p>
             </div>
             <?php $mediaStatus = (string) ($mediaEvidence['status'] ?? ''); ?>
-            <span class="badge <?= $mediaStatus === 'saved' ? 'text-bg-success' : 'text-bg-warning' ?>"><?= e(['saved' => 'Video guardado', 'failed' => 'Video no guardado', 'uploading' => 'Carga no finalizada'][$mediaStatus] ?? 'Sin estado') ?></span>
+            <span class="badge <?= $mediaStatus === 'saved' ? 'text-bg-success' : 'text-bg-warning' ?>"><?= e(['saved' => 'Video guardado', 'partial' => 'Video parcial', 'failed' => 'Video no guardado', 'uploading' => 'Carga no finalizada'][$mediaStatus] ?? 'Sin estado') ?></span>
         </div>
         <div class="row g-3 align-items-start">
             <div class="col-12 col-lg-8">
-                <?php if (($mediaEvidence['status'] ?? '') === 'saved'): ?>
-                    <video class="w-100 rounded border" controls preload="metadata" src="<?= e(route_url('test-session.media-evidence', (int) $session['id'])) ?>"></video>
+                <?php if (in_array(($mediaEvidence['status'] ?? ''), ['saved', 'partial'], true)): ?>
+                    <div class="small fw-semibold mb-2">Grabación <?= (int) ($mediaEvidence['segment_number'] ?? 1) ?></div><video class="app-evidence-video rounded border" controls preload="metadata" src="<?= e(route_url('test-session.media-evidence', (int) $session['id']) . '?evidence_id=' . (int) $mediaEvidence['id']) ?>"></video>
+                    <?php if ($segmentCaptures): ?>
+                        <h3 class="h6 fw-bold mt-3">Capturas de pantalla (<?= count($segmentCaptures) ?>)</h3>
+                        <div class="row g-2">
+                            <?php foreach ($segmentCaptures as $capture): $captureUrl = route_url('test-session.media-screenshot-file', (int) $session['id']) . '?capture_id=' . (int) $capture['id']; ?><div class="col-6 col-md-4"><a href="<?= e($captureUrl) ?>" data-screen-capture-view><img class="img-fluid rounded border" loading="lazy" src="<?= e($captureUrl) ?>" alt="Captura <?= (int) $capture['capture_number'] ?>"><span class="small text-muted d-block mt-1"><?= e((string) ($capture['capture_source'] ?? '')) ?> · <?= e((string) ($capture['captured_at'] ?? '')) ?></span></a></div><?php endforeach; ?>
+                        </div>
+                    <?php endif; ?>
                     <div class="text-muted small mt-2">Tamaño: <?= e(number_format(((int) ($mediaEvidence['file_size'] ?? 0)) / 1048576, 2, ',', '.')) ?> MB · Duracion: <?= (int) ($mediaEvidence['duration_seconds'] ?? 0) ?> s</div>
+                    <?php if ($mediaStatus === 'partial'): ?><div class="alert alert-warning mt-2 mb-0">Evidencia parcial: solo se unieron los fragmentos disponibles hasta el primer faltante.</div><?php endif; ?>
                 <?php else: ?>
                     <p class="mb-1">La evidencia no quedo almacenada completamente porque la carga no recibio confirmacion final.</p>
                     <?php if (!empty($mediaEvidence['failure_reason'])): ?><div class="text-muted small">Motivo: <?= e((string) $mediaEvidence['failure_reason']) ?></div><?php endif; ?>
+                    <?php if ($segmentCaptures): ?>
+                        <h3 class="h6 fw-bold mt-3">Capturas de pantalla (<?= count($segmentCaptures) ?>)</h3>
+                        <div class="row g-2">
+                            <?php foreach ($screenCaptures as $capture): $captureUrl = route_url('test-session.media-screenshot-file', (int) $session['id']) . '?capture_id=' . (int) $capture['id']; ?><div class="col-6 col-md-4"><a href="<?= e($captureUrl) ?>" data-screen-capture-view><img class="img-fluid rounded border" loading="lazy" src="<?= e($captureUrl) ?>" alt="Captura <?= (int) $capture['capture_number'] ?>"><span class="small text-muted d-block mt-1"><?= e((string) ($capture['capture_source'] ?? '')) ?> · <?= e((string) ($capture['captured_at'] ?? '')) ?></span></a></div><?php endforeach; ?>
+                        </div>
+                    <?php endif; ?>
+                    <?php if (in_array($mediaStatus, ['uploading', 'failed'], true)): ?><form method="post" action="<?= e(route_url('test-session.media-partial', (int) $session['id'])) ?>" class="mt-2" onsubmit="return window.confirm('¿Deseas unir los fragmentos audiovisuales disponibles y ver la evidencia parcial?');"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><button class="btn btn-sm btn-outline-warning" type="submit">Unir fragmentos disponibles y ver video parcial</button></form><?php endif; ?>
                 <?php endif; ?>
             </div>
             <div class="col-12 col-lg-4">

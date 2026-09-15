@@ -28,12 +28,13 @@ final class UserFieldController extends Controller
 
     public function index(): void
     {
-        require_permission('manage_user_fields');
+        require_company_user_field_management();
 
         $this->render('user_fields/index', [
-            'title' => 'Campos de usuario | Metricatest',
+            'title' => 'Campos de usuario | e-talent',
             'currentPage' => 'user-fields',
             'fields' => $this->fields->all(),
+            'companyName' => (string) (current_user()['company_name'] ?? ''),
             'types' => UserFieldModel::TYPES,
             'validationRules' => UserFieldModel::VALIDATION_RULES,
             'scopes' => UserFieldModel::SCOPES,
@@ -42,7 +43,7 @@ final class UserFieldController extends Controller
 
     public function form(): void
     {
-        require_permission('manage_user_fields');
+        require_company_user_field_management();
 
         $id = request_secure_id('user_field');
         $field = $id ? $this->fields->find($id) : null;
@@ -58,7 +59,7 @@ final class UserFieldController extends Controller
         }
 
         $this->render('user_fields/form', [
-            'title' => ($id ? 'Editar campo' : 'Nuevo campo') . ' | Metricatest',
+            'title' => ($id ? 'Editar campo' : 'Nuevo campo') . ' | e-talent',
             'currentPage' => 'user-fields',
             'id' => $id,
             'types' => UserFieldModel::TYPES,
@@ -85,7 +86,7 @@ final class UserFieldController extends Controller
 
     public function delete(): void
     {
-        require_permission('manage_user_fields');
+        require_company_user_field_management();
         verify_csrf();
 
         $id = request_secure_id('user_field');
@@ -111,6 +112,9 @@ final class UserFieldController extends Controller
         verify_csrf();
 
         $data = [
+            'company_id' => has_permission('manage_company_user_fields') && !has_permission('manage_user_fields')
+                ? (int) (current_user()['company_id'] ?? 0)
+                : null,
             'scope' => $_POST['scope'] ?? 'core:core',
             'label' => trim($_POST['label'] ?? ''),
             'field_type' => $_POST['field_type'] ?? 'text',

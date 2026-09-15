@@ -10,6 +10,7 @@ $rankingUsesOfficialConfig = (bool) ($rankingUsesOfficialConfig ?? false);
 $dashboardQueryString = (string) ($dashboardQueryString ?? '');
 $dashboardBackUrl = route_url('test-process.dashboard') . ($dashboardQueryString !== '' ? '?' . $dashboardQueryString : '');
 $reportsZipUrl = route_url('test-process.ranking-all-reports-zip') . ($dashboardQueryString !== '' ? '?' . $dashboardQueryString : '');
+$rankingReportsByCompany = is_array($rankingReportsByCompany ?? null) ? $rankingReportsByCompany : [];
 
 $rankingHeaders = [
     'Proceso',
@@ -113,7 +114,7 @@ $rankingHeaders = [
             <?php if ($rows): ?>
                 <a
                     class="btn btn-outline-primary"
-                    href="<?= e($reportsZipUrl) ?>"
+                    href="<?= e($reportsZipUrl . (strpos($reportsZipUrl, '?') === false ? '?' : '&') . 'prepare=1') ?>"
                     data-download-processing
                     data-processing-message="Generando informes ZIP..."
                     data-processing-detail="Preparando PDFs y comprimiendo el archivo.">
@@ -163,12 +164,20 @@ $rankingHeaders = [
                                             $reportUrl = $reportProcessId > 0 && $reportSessionId > 0
                                                 ? route_url('test-process.ranking-report', $reportProcessId) . '?session=' . rawurlencode(secure_url_token($reportSessionId, 'test_session'))
                                                 : '';
+                                            $reportUserId = (int) ($row['_user_id'] ?? 0);
+                                            $reportCompanyId = (int) ($row['_company_id'] ?? 0);
+                                            $registeredReports = $rankingReportsByCompany[$reportCompanyId] ?? [];
                                         ?>
                                         <div class="text-end">
                                             <?php if ($reportUrl !== ''): ?>
-                                                <a class="btn btn-sm btn-outline-primary" href="<?= e($reportUrl) ?>" title="Descargar informe PDF">
-                                                    <i class="bi bi-file-earmark-pdf me-1"></i> Informe
-                                                </a>
+                                                <?php if (count($registeredReports) === 1 && $reportUserId > 0): ?>
+                                                    <?php $registeredReport = $registeredReports[0]; ?>
+                                                    <a class="btn btn-sm btn-outline-primary" href="<?= e(route_url('reports.run', (int) $registeredReport['id']) . '?company_id=' . $reportCompanyId . '&process_id=' . $reportProcessId . '&user_id=' . $reportUserId . '&format=pdf') ?>" title="Descargar informe registrado"><i class="bi bi-file-earmark-pdf me-1"></i> <?= e((string) $registeredReport['name']) ?></a>
+                                                <?php elseif (count($registeredReports) > 1 && $reportUserId > 0): ?>
+                                                    <div class="dropdown"><button class="btn btn-sm btn-outline-primary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false"><i class="bi bi-file-earmark-pdf me-1"></i> Informes</button><ul class="dropdown-menu dropdown-menu-end"><?php foreach ($registeredReports as $registeredReport): ?><li><a class="dropdown-item" href="<?= e(route_url('reports.run', (int) $registeredReport['id']) . '?company_id=' . $reportCompanyId . '&process_id=' . $reportProcessId . '&user_id=' . $reportUserId . '&format=pdf') ?>"><i class="bi bi-file-earmark-pdf me-2"></i><?= e((string) $registeredReport['name']) ?> <span class="text-muted small">v<?= e((string) $registeredReport['version']) ?></span></a></li><?php endforeach; ?></ul></div>
+                                                <?php else: ?>
+                                                    <a class="btn btn-sm btn-outline-primary" href="<?= e($reportUrl) ?>" title="Descargar informe estándar"><i class="bi bi-file-earmark-pdf me-1"></i> Informe estándar</a>
+                                                <?php endif; ?>
                                             <?php else: ?>
                                                 <span class="text-muted small">Sin informe</span>
                                             <?php endif; ?>

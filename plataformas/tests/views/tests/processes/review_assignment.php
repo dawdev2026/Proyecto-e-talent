@@ -2,6 +2,8 @@
 $review = $review ?? null;
 $rut = (string) ($rut ?? '');
 $error = (string) ($error ?? '');
+$companyScoped = (bool) ($companyScoped ?? false);
+$companyName = (string) ($companyName ?? '');
 $user = is_array($review ?? null) ? ($review['user'] ?? null) : null;
 $assignments = is_array($review ?? null) ? ($review['assignments'] ?? []) : [];
 $candidateProcesses = is_array($review ?? null) ? ($review['candidate_processes'] ?? []) : [];
@@ -53,6 +55,13 @@ $formatDateTime = static function ($value): string {
             <button class="btn btn-primary btn-lg" type="submit"><i class="bi bi-search me-1"></i> Revisar asignacion</button>
         </div>
     </form>
+    <?php if ($companyScoped): ?>
+        <div class="alert alert-info mt-3 mb-0">
+            <i class="bi bi-building me-1"></i>
+            Solo puedes revisar y reasignar usuarios de <?= e($companyName !== '' ? $companyName : 'tu empresa') ?>.
+            El RUT ingresado se valida contra esa empresa.
+        </div>
+    <?php endif; ?>
     <?php if ($error !== ''): ?>
         <div class="alert alert-warning mt-3 mb-0"><?= e($error) ?></div>
     <?php endif; ?>
@@ -61,7 +70,11 @@ $formatDateTime = static function ($value): string {
 <?php if (is_array($review)): ?>
     <?php if (!$user): ?>
         <section class="content-panel">
-            <div class="alert alert-light border mb-0">No se encontro un usuario con el RUT <?= e((string) ($review['rut'] ?? $rut)) ?>.</div>
+            <div class="alert alert-light border mb-0">
+                <?= $companyScoped
+                    ? 'No se encontro un usuario de ' . e($companyName !== '' ? $companyName : 'tu empresa') . ' con el RUT indicado.'
+                    : 'No se encontro un usuario con el RUT ' . e((string) ($review['rut'] ?? $rut)) . '.' ?>
+            </div>
         </section>
     <?php else: ?>
         <section class="content-panel">

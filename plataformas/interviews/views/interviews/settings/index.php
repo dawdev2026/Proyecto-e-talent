@@ -152,7 +152,7 @@ $progressWidth = max(0, min(100, (int) ($dailyPool['committed_percent'] ?? 0)));
                 </div>
             </div>
 
-            <div class="interview-pool-meter mt-3" aria-label="Uso proyectado de bolsa Daily">
+            <div class="interview-pool-meter mt-3" role="progressbar" aria-label="Uso proyectado de bolsa Daily" aria-valuenow="<?= $progressWidth ?>" aria-valuemin="0" aria-valuemax="100">
                 <span style="width: <?= $progressWidth ?>%"></span>
             </div>
             <div class="d-flex justify-content-between small text-muted mt-2">

@@ -1,6 +1,9 @@
 <?php
 $process = $process ?? [];
 $selectedInstrumentSet = array_flip(array_map('intval', $selectedInstrumentIds ?? []));
+$evaluationForms = $evaluationForms ?? [];
+$selectedEvaluationFormSet = array_flip(array_map('intval', $selectedEvaluationFormIds ?? []));
+$isCompanyAdmin = has_permission('manage_company_users') && !has_permission('manage_users');
 $selectedFields = $selectedFields ?? [];
 $selectedProfiles = $selectedProfiles ?? [];
 $selectedUserAdmins = $selectedUserAdmins ?? [];
@@ -17,13 +20,6 @@ $datetimeValue = static function (?string $value): string {
 };
 $permissionShortLabels = [
     'view_process' => 'Ver',
-    'view_process_results' => 'Resultados',
-    'view_process_dashboard' => 'Dashboard',
-    'view_process_ranking' => 'Ranking',
-    'manage_process_users' => 'Usuarios',
-    'manage_process_user_data' => 'Datos usuario',
-    'manage_process_assignments' => 'Asignaciones',
-    'manage_process_settings' => 'Config.',
 ];
 $availabilityStatus = (string) ($process['availability_status'] ?? 'scheduled');
 if (!in_array($availabilityStatus, ['scheduled', 'open_now', 'closed_now'], true)) {
@@ -89,8 +85,8 @@ if (!in_array($availabilityStatus, ['scheduled', 'open_now', 'closed_now'], true
                 <label class="user-form-switch user-form-switch-compact">
                     <input class="form-check-input" type="checkbox" name="allow_expired_reopen" <?= (int) ($process['allow_expired_reopen'] ?? 0) === 1 ? 'checked' : '' ?>>
                     <span>
-                        <strong>Permitir reabrir evaluaciones expiradas</strong>
-                        <small>Habilita en Avance del proceso una accion para asignar un nuevo tiempo a usuarios cuya evaluacion expiro.</small>
+                        <strong>Permitir reabrir evaluaciones</strong>
+                        <small>Habilita en Avance del proceso acciones para asignar un nuevo tiempo a evaluaciones expiradas o guardadas.</small>
                     </span>
                 </label>
             </div>
@@ -98,7 +94,7 @@ if (!in_array($availabilityStatus, ['scheduled', 'open_now', 'closed_now'], true
     </section>
 
     <section class="content-panel mt-4">
-        <h2 class="h5 fw-bold mb-3">Evaluaciones del proceso</h2>
+        <h2 class="h5 fw-bold mb-3"><?= $isCompanyAdmin ? 'Evaluaciones Psicométricas Asignadas' : 'Evaluaciones del proceso' ?></h2>
         <div class="assignment-evaluation-grid">
             <?php foreach ($instruments as $instrument): ?>
                 <label class="assignment-evaluation-option">
@@ -113,67 +109,26 @@ if (!in_array($availabilityStatus, ['scheduled', 'open_now', 'closed_now'], true
     </section>
 
     <section class="content-panel mt-4">
-        <h2 class="h5 fw-bold mb-3">Campos de usuario del proceso</h2>
-        <div class="table-responsive">
-            <table class="table align-middle app-table">
-                <thead>
-                    <tr>
-                        <th>Usar</th>
-                        <th>Campo</th>
-                        <th>Clave</th>
-                        <th>Requerido</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($fields as $field): ?>
-                        <?php
-                        $fieldId = (int) $field['id'];
-                        $isSelected = isset($selectedFields[$fieldId]);
-                        ?>
-                        <tr>
-                            <td><input class="form-check-input" type="checkbox" name="field_ids[]" value="<?= $fieldId ?>" <?= $isSelected ? 'checked' : '' ?>></td>
-                            <td><?= e((string) $field['label']) ?></td>
-                            <td><code><?= e((string) $field['field_key']) ?></code></td>
-                            <td><input class="form-check-input" type="checkbox" name="required_field_ids[]" value="<?= $fieldId ?>" <?= $isSelected && (int) ($selectedFields[$fieldId]['is_required'] ?? 0) === 1 ? 'checked' : '' ?>></td>
-                        </tr>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
-        </div>
+        <h2 class="h5 fw-bold mb-1">Evaluaciones y Encuestas</h2>
+        <p class="text-muted mb-3">Selecciona las evaluaciones con nota y encuestas disponibles para este proceso.</p>
+        <?php if (!$evaluationForms): ?>
+            <div class="alert alert-light border mb-0">No hay evaluaciones ni encuestas activas disponibles para tu empresa.</div>
+        <?php else: ?>
+            <div class="assignment-evaluation-grid">
+                <?php foreach ($evaluationForms as $evaluationForm): ?>
+                    <label class="assignment-evaluation-option">
+                        <input class="form-check-input" type="checkbox" name="evaluation_form_ids[]" value="<?= (int) $evaluationForm['id'] ?>" <?= isset($selectedEvaluationFormSet[(int) $evaluationForm['id']]) ? 'checked' : '' ?> >
+                        <span>
+                            <strong><?= e((string) $evaluationForm['title']) ?></strong>
+                            <small><?= e(($evaluationForm['form_type'] ?? '') === 'survey' ? 'Encuesta de satisfacción' : 'Evaluación con nota') ?><?= (int) ($evaluationForm['duration_minutes'] ?? 0) > 0 ? ' · ' . (int) $evaluationForm['duration_minutes'] . ' min' : '' ?></small>
+                        </span>
+                    </label>
+                <?php endforeach; ?>
+            </div>
+        <?php endif; ?>
     </section>
 
-    <section class="content-panel mt-4">
-        <h2 class="h5 fw-bold mb-1">Perfiles a mostrar en asignacion de usuarios</h2>
-        <p class="text-muted mb-3">Solo los usuarios con estos perfiles apareceran en la grilla de usuarios disponibles para este proceso.</p>
-        <div class="assignment-evaluation-grid">
-            <?php foreach ($profiles as $profile): ?>
-                <?php
-                $profileId = (int) $profile['id'];
-                $isResponderProfile = (string) ($profile['role_key'] ?? '') === 'usuario'
-                    || stripos((string) ($profile['name'] ?? ''), 'usuario') !== false
-                    || stripos((string) ($profile['name'] ?? ''), 'postulante') !== false
-                    || stripos((string) ($profile['name'] ?? ''), 'colaborador') !== false;
-                ?>
-                <label class="assignment-evaluation-option">
-                    <input
-                        class="form-check-input"
-                        type="checkbox"
-                        name="assignable_profile_ids[]"
-                        value="<?= $profileId ?>"
-                        <?= isset($selectedAssignableProfileSet[$profileId]) ? 'checked' : '' ?>
-                    >
-                    <span>
-                        <strong><?= e((string) $profile['name']) ?></strong>
-                        <small>
-                            <?= e((string) $profile['role_key']) ?>
-                            <?= $isResponderProfile ? ' · perfil de respuesta' : ' · revisar si corresponde asignarlo' ?>
-                        </small>
-                    </span>
-                </label>
-            <?php endforeach; ?>
-        </div>
-    </section>
-
+    <?php if (false): ?>
     <section class="content-panel mt-4">
         <h2 class="h5 fw-bold mb-1">Modo de acceso administrativo</h2>
         <p class="text-muted mb-3">Elige como se asignaran los permisos para revisar este proceso.</p>
@@ -212,10 +167,11 @@ if (!in_array($availabilityStatus, ['scheduled', 'open_now', 'closed_now'], true
             </div>
         </div>
     </section>
+    <?php endif; ?>
 
-    <section class="content-panel mt-4 <?= $adminAssignmentMode === 'user' ? '' : 'd-none' ?>" data-process-admin-mode-panel="user">
+    <section class="content-panel mt-4" data-process-admin-mode-panel="user">
         <h2 class="h5 fw-bold mb-1">Supervisores con acceso al proceso</h2>
-        <p class="text-muted mb-3">Asigna usuarios concretos para que revisen solo este proceso. Esto evita crear perfiles duplicados para cada sede o grupo.</p>
+        <p class="text-muted mb-3">Asigna usuarios concretos para que puedan ver solo este proceso. El Supervisor no puede ver resultados ni modificar información.</p>
         <?php if (!$adminUsers): ?>
             <div class="alert alert-light border mb-0">No hay usuarios supervisores o administradores activos disponibles.</div>
         <?php else: ?>
@@ -235,14 +191,6 @@ if (!in_array($availabilityStatus, ['scheduled', 'open_now', 'closed_now'], true
                                 <th class="no-sort no-export text-center process-permission-heading" title="<?= e($label) ?>">
                                     <span><?= e($permissionShortLabels[$permission] ?? $label) ?></span>
                                     <small><?= e($label) ?></small>
-                                    <span class="process-permission-tools" aria-label="Seleccion rapida">
-                                        <button class="btn btn-sm btn-link" type="button" data-process-permission-bulk="<?= e($permission) ?>" data-checked="true" title="Marcar todos">
-                                            <i class="bi bi-check2-square"></i>
-                                        </button>
-                                        <button class="btn btn-sm btn-link" type="button" data-process-permission-bulk="<?= e($permission) ?>" data-checked="false" title="Desmarcar todos">
-                                            <i class="bi bi-square"></i>
-                                        </button>
-                                    </span>
                                 </th>
                             <?php endforeach; ?>
                         </tr>
@@ -284,7 +232,8 @@ if (!in_array($availabilityStatus, ['scheduled', 'open_now', 'closed_now'], true
         <?php endif; ?>
     </section>
 
-    <section class="content-panel mt-4 <?= $adminAssignmentMode === 'profile' ? '' : 'd-none' ?>" data-process-admin-mode-panel="profile">
+    <?php if (false): ?>
+    <section class="content-panel mt-4" data-process-admin-mode-panel="profile">
         <h2 class="h5 fw-bold mb-3">Administradores por perfil</h2>
         <p class="text-muted mb-3">Usa esta seccion solo para permisos amplios. Si marcas un perfil como Supervisor sede aqui, todos los usuarios con ese perfil podran acceder a este proceso.</p>
         <div class="process-admin-table-wrap">
@@ -300,18 +249,10 @@ if (!in_array($availabilityStatus, ['scheduled', 'open_now', 'closed_now'], true
                     <tr>
                         <th>Perfil</th>
                         <?php foreach ($processPermissions as $permission => $label): ?>
-                            <th class="no-sort no-export text-center process-permission-heading" title="<?= e($label) ?>">
-                                <span><?= e($permissionShortLabels[$permission] ?? $label) ?></span>
-                                <small><?= e($label) ?></small>
-                                <span class="process-permission-tools" aria-label="Seleccion rapida">
-                                    <button class="btn btn-sm btn-link" type="button" data-process-permission-bulk="<?= e($permission) ?>" data-checked="true" title="Marcar todos">
-                                        <i class="bi bi-check2-square"></i>
-                                    </button>
-                                    <button class="btn btn-sm btn-link" type="button" data-process-permission-bulk="<?= e($permission) ?>" data-checked="false" title="Desmarcar todos">
-                                        <i class="bi bi-square"></i>
-                                    </button>
-                                </span>
-                            </th>
+                                <th class="no-sort no-export text-center process-permission-heading" title="<?= e($label) ?>">
+                                    <span><?= e($permissionShortLabels[$permission] ?? $label) ?></span>
+                                    <small><?= e($label) ?></small>
+                                </th>
                         <?php endforeach; ?>
                     </tr>
                 </thead>
@@ -342,6 +283,8 @@ if (!in_array($availabilityStatus, ['scheduled', 'open_now', 'closed_now'], true
             </table>
         </div>
     </section>
+
+    <?php endif; ?>
 
     <div class="d-flex justify-content-end gap-2 mt-4">
         <a class="btn btn-outline-secondary" href="<?= e($processId ? route_url('test-process.show', $processId) : route_url('test-processes')) ?>"><?= $processId ? 'Cancelar' : 'Volver a procesos' ?></a>
