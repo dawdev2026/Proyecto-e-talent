@@ -204,6 +204,25 @@ foreach ($coreMenuItems as $item) {
 }
 $coreMenuLabel = 'Administración';
 $coreMenuIcon = 'bi-gear';
+$renderSidebarGroup = static function (string $label, string $icon, array $items, string $groupKey) use ($currentPage): void {
+    if (!$items) {
+        return;
+    }
+    $isActive = in_array($currentPage, array_column($items, 'page'), true);
+    $groupId = 'sidebar-group-' . preg_replace('/[^a-z0-9-]/i', '-', $groupKey);
+    ?>
+    <li class="nav-group <?= $isActive ? 'show' : '' ?>">
+        <a class="nav-link nav-group-toggle <?= $isActive ? 'active' : '' ?>" href="#<?= e($groupId) ?>" aria-expanded="<?= $isActive ? 'true' : 'false' ?>">
+            <i class="nav-icon bi <?= e($icon) ?>"></i><span><?= e($label) ?></span>
+        </a>
+        <ul class="nav-group-items" id="<?= e($groupId) ?>">
+            <?php foreach ($items as $item): ?>
+                <li class="nav-item"><a class="nav-link <?= e(active($item['page'], $currentPage)) ?>" href="<?= e(route_url($item['route'])) ?>"><span class="nav-icon"><span class="nav-icon-bullet"></span></span><span><?= e($item['label']) ?></span></a></li>
+            <?php endforeach; ?>
+        </ul>
+    </li>
+    <?php
+};
 ?>
 <!doctype html>
 <html lang="es">
@@ -216,7 +235,9 @@ $coreMenuIcon = 'bi-gear';
         <link rel="icon" href="<?= e(url($designSettings['html_favicon_path'])) ?>">
     <?php endif; ?>
     <script>
-        document.documentElement.setAttribute('data-theme', localStorage.getItem('corePlatformTheme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+        const initialTheme = localStorage.getItem('corePlatformTheme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        document.documentElement.setAttribute('data-theme', initialTheme);
+        document.documentElement.setAttribute('data-coreui-theme', initialTheme);
     </script>
     <?php if ($designSettings['app_font_url']): ?>
         <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -229,7 +250,9 @@ $coreMenuIcon = 'bi-gear';
             @font-face { font-family: "DTGobCL"; src: url("<?= e(url('uploads/branding/company/4/gobcl-bold.woff')) ?>") format("woff"); font-weight: 700 900; font-style: normal; font-display: swap; }
         </style>
     <?php endif; ?>
-    <link href="<?= e(url('assets/vendor/bootstrap.min.css')) ?>" rel="stylesheet">
+    <link href="<?= e(url('assets/coreui/css/style.min.css')) ?>" rel="stylesheet">
+    <link href="<?= e(url('assets/coreui/css/vendors/simplebar.css')) ?>" rel="stylesheet">
+    <link href="<?= e(url('assets/css/coreui-adapter.css')) ?>" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/datatables.net-bs5@1.13.8/css/dataTables.bootstrap5.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/datatables.net-buttons-bs5@2.4.2/css/buttons.bootstrap5.min.css" rel="stylesheet">
@@ -242,199 +265,33 @@ $coreMenuIcon = 'bi-gear';
         <script>window.AppBackUrl = <?= json_encode(back_url(), JSON_UNESCAPED_SLASHES) ?>;</script>
     <?php endif; ?>
 </head>
-<body style="<?= $designStyle ?>">
+<body style="<?= $designStyle ?>" class="<?= $user ? 'app-body' : 'auth-body' ?>">
 <?php if ($user): ?>
-<nav class="navbar navbar-expand-lg navbar-light app-navbar app-navbar-logo-<?= e($topbarLogoPosition) ?> sticky-top">
-    <div class="container-fluid px-lg-4">
-        <a class="navbar-brand fw-bold d-flex align-items-center gap-2" href="<?= e($homeUrl) ?>">
-            <?php if ($topbarIconAvailable): ?>
-                <img class="brand-image" src="<?= e(url($topbarIconPath)) ?>" alt="">
-                <span><?= e($designSettings['topbar_name']) ?></span>
-            <?php else: ?>
-                <span class="brand-mark"><i class="bi bi-shield-check"></i></span>
-                <?= e($designSettings['topbar_name']) ?>
-            <?php endif; ?>
+<div class="sidebar sidebar-dark sidebar-fixed border-end" id="sidebar">
+    <div class="sidebar-header border-bottom">
+        <a class="sidebar-brand text-decoration-none" href="<?= e($homeUrl) ?>">
+            <?php if ($topbarIconAvailable): ?><img class="sidebar-brand-full brand-image" src="<?= e(url($topbarIconPath)) ?>" alt="<?= e($designSettings['topbar_name']) ?>"><?php else: ?><span class="sidebar-brand-full d-flex align-items-center gap-2"><span class="brand-mark"><i class="bi bi-shield-check"></i></span><?= e($designSettings['topbar_name']) ?></span><?php endif; ?>
         </a>
-        <button class="navbar-toggler app-navbar-toggler ms-auto" type="button" data-bs-toggle="collapse" data-bs-target="#appTopNav" aria-controls="appTopNav" aria-expanded="false" aria-label="Abrir menu">
-            <span class="navbar-toggler-icon"></span>
-        </button>
-        <div id="appTopNav" class="collapse navbar-collapse app-navbar-collapse">
-            <ul class="navbar-nav portal-nav app-top-nav">
-                <li class="nav-item">
-                    <a class="nav-link <?= e(active($homeRoute, $currentPage)) ?>" href="<?= e($homeUrl) ?>">
-                        <i class="bi bi-house-door"></i>
-                        <span>Inicio</span>
-                    </a>
-                </li>
-                <?php if ($coreMenuItems): ?>
-                    <?php $coreActive = in_array($currentPage, array_column($coreMenuItems, 'page'), true); ?>
-                    <li class="nav-item dropdown">
-                        <button class="nav-link dropdown-toggle <?= $coreActive ? 'active' : '' ?>" type="button" data-bs-toggle="dropdown" aria-expanded="false">
-                            <i class="bi <?= e($coreMenuIcon) ?>"></i>
-                            <span><?= e($coreMenuLabel) ?></span>
-                        </button>
-                        <ul class="dropdown-menu app-nav-dropdown">
-                            <?php foreach ($coreMenuItems as $item): ?>
-                                <li>
-                                    <a class="dropdown-item <?= e(active($item['page'], $currentPage)) ?>" href="<?= e(route_url($item['route'])) ?>">
-                                        <i class="bi <?= e($item['icon']) ?>"></i>
-                                        <span><?= e($item['label']) ?></span>
-                                    </a>
-                                </li>
-                            <?php endforeach; ?>
-                        </ul>
-                    </li>
-                <?php endif; ?>
-                <?php if ($testsMenuItems): ?>
-                    <?php $testsActive = in_array($currentPage, array_column($testsMenuItems, 'page'), true); ?>
-                    <li class="nav-item dropdown">
-                        <button class="nav-link dropdown-toggle <?= $testsActive ? 'active' : '' ?>" type="button" data-bs-toggle="dropdown" aria-expanded="false">
-                            <i class="bi bi-clipboard-check"></i>
-                            <span>Evaluaciones Psicométricas</span>
-                        </button>
-                        <ul class="dropdown-menu app-nav-dropdown">
-                            <?php foreach ($testsMenuItems as $item): ?>
-                                <li>
-                                    <a class="dropdown-item <?= e(active($item['page'], $currentPage)) ?>" href="<?= e(route_url($item['route'])) ?>">
-                                        <i class="bi <?= e($item['icon']) ?>"></i>
-                                        <span><?= e($item['label']) ?></span>
-                                    </a>
-                                </li>
-                            <?php endforeach; ?>
-                        </ul>
-                    </li>
-                <?php endif; ?>
-                <?php if ($evaluationSurveysMenuItems): ?>
-                    <?php $evaluationSurveysActive = in_array($currentPage, array_column($evaluationSurveysMenuItems, 'page'), true); ?>
-                    <li class="nav-item dropdown">
-                        <button class="nav-link dropdown-toggle <?= $evaluationSurveysActive ? 'active' : '' ?>" type="button" data-bs-toggle="dropdown" aria-expanded="false">
-                            <i class="bi bi-ui-checks-grid"></i>
-                            <span>Encuestas y Evaluaciones</span>
-                        </button>
-                        <ul class="dropdown-menu app-nav-dropdown">
-                            <?php foreach ($evaluationSurveysMenuItems as $item): ?>
-                                <li>
-                                    <a class="dropdown-item <?= e(active($item['page'], $currentPage)) ?>" href="<?= e(route_url($item['route'])) ?>">
-                                        <i class="bi <?= e($item['icon']) ?>"></i>
-                                        <span><?= e($item['label']) ?></span>
-                                    </a>
-                                </li>
-                            <?php endforeach; ?>
-                        </ul>
-                    </li>
-                <?php endif; ?>
-                <?php if ($reportsMenuItems): ?>
-                    <?php $reportsActive = in_array($currentPage, array_column($reportsMenuItems, 'page'), true); ?>
-                    <li class="nav-item dropdown">
-                        <button class="nav-link dropdown-toggle <?= $reportsActive ? 'active' : '' ?>" type="button" data-bs-toggle="dropdown" aria-expanded="false">
-                            <i class="bi bi-file-earmark-bar-graph"></i>
-                            <span>Informes</span>
-                        </button>
-                        <ul class="dropdown-menu app-nav-dropdown">
-                            <?php foreach ($reportsMenuItems as $item): ?>
-                                <li>
-                                    <a class="dropdown-item <?= e(active($item['page'], $currentPage)) ?>" href="<?= e(route_url($item['route'])) ?>">
-                                        <i class="bi <?= e($item['icon']) ?>"></i>
-                                        <span><?= e($item['label']) ?></span>
-                                    </a>
-                                </li>
-                            <?php endforeach; ?>
-                        </ul>
-                    </li>
-                <?php endif; ?>
-                <?php if ($processMenuItems): ?>
-                    <?php $processesActive = in_array($currentPage, array_column($processMenuItems, 'page'), true); ?>
-                    <li class="nav-item dropdown">
-                        <button class="nav-link dropdown-toggle <?= $processesActive ? 'active' : '' ?>" type="button" data-bs-toggle="dropdown" aria-expanded="false">
-                            <i class="bi bi-kanban"></i>
-                            <span>Procesos</span>
-                        </button>
-                        <ul class="dropdown-menu app-nav-dropdown">
-                            <?php foreach ($processMenuItems as $item): ?>
-                                <li>
-                                    <a class="dropdown-item <?= e(active($item['page'], $currentPage)) ?>" href="<?= e(route_url($item['route'])) ?>">
-                                        <i class="bi <?= e($item['icon']) ?>"></i>
-                                        <span><?= e($item['label']) ?></span>
-                                    </a>
-                                </li>
-                            <?php endforeach; ?>
-                        </ul>
-                    </li>
-                <?php endif; ?>
-                <?php if ($interviewsMenuItems): ?>
-                    <?php $interviewsActive = in_array($currentPage, array_column($interviewsMenuItems, 'page'), true); ?>
-                    <li class="nav-item dropdown">
-                        <button class="nav-link dropdown-toggle <?= $interviewsActive ? 'active' : '' ?>" type="button" data-bs-toggle="dropdown" aria-expanded="false">
-                            <i class="bi bi-camera-video"></i>
-                            <span>Entrevistas</span>
-                        </button>
-                        <ul class="dropdown-menu app-nav-dropdown">
-                            <?php foreach ($interviewsMenuItems as $item): ?>
-                                <li>
-                                    <a class="dropdown-item <?= e(active($item['page'], $currentPage)) ?>" href="<?= e(route_url($item['route'])) ?>">
-                                        <i class="bi <?= e($item['icon']) ?>"></i>
-                                        <span><?= e($item['label']) ?></span>
-                                    </a>
-                                </li>
-                            <?php endforeach; ?>
-                        </ul>
-                    </li>
-                <?php endif; ?>
-            </ul>
-        </div>
-        <button class="btn btn-sm theme-toggle app-icon-button ms-2 me-2 d-lg-none" type="button" aria-label="Cambiar tema">
-            <i class="bi bi-moon-stars"></i>
-            <span class="theme-toggle-label visually-hidden">Oscuro</span>
-        </button>
-        <div class="app-navbar-actions d-flex align-items-center gap-2 ms-lg-auto">
-            <button class="btn btn-sm theme-toggle app-icon-button d-none d-lg-inline-grid" type="button" aria-label="Cambiar tema">
-                <i class="bi bi-moon-stars"></i>
-                <span class="theme-toggle-label visually-hidden">Oscuro</span>
-            </button>
-            <button class="btn btn-sm app-icon-button app-help-button d-none d-lg-inline-grid" type="button" aria-label="Ayuda">
-                <i class="bi bi-question-circle"></i>
-            </button>
-            <div class="dropdown user-menu">
-                <button class="btn user-menu-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
-                    <span class="user-avatar"><?= e($userInitials) ?></span>
-                    <span class="user-menu-name d-none d-md-inline"><?= e($user['name']) ?></span>
-                    <i class="bi bi-chevron-down d-none d-md-inline"></i>
-                </button>
-                <ul class="dropdown-menu dropdown-menu-end app-nav-dropdown">
-                    <li><span class="dropdown-item-text user-menu-meta"><?= e($user['profile_name'] ?: 'Sin perfil') ?><?= $user['company_name'] ? ' · ' . e($user['company_name']) : '' ?></span></li>
-                </ul>
-            </div>
-            <a class="btn btn-sm app-icon-button app-logout-button" href="<?= e(route_url('logout')) ?>" aria-label="Cerrar sesion"><i class="bi bi-box-arrow-right"></i></a>
-        </div>
+        <button class="btn-close d-lg-none" type="button" data-coreui-theme="dark" aria-label="Cerrar menú" data-sidebar-close></button>
     </div>
-</nav>
+    <ul class="sidebar-nav" data-coreui="navigation" data-simplebar>
+        <li class="nav-item"><a class="nav-link <?= e(active($homeRoute, $currentPage)) ?>" href="<?= e($homeUrl) ?>"><i class="nav-icon bi bi-house-door"></i><span>Inicio</span></a></li>
+        <?php $renderSidebarGroup($coreMenuLabel, $coreMenuIcon, $coreMenuItems, 'core'); ?>
+        <?php $renderSidebarGroup('Evaluaciones Psicométricas', 'bi-clipboard-check', $testsMenuItems, 'tests'); ?>
+        <?php $renderSidebarGroup('Encuestas y Evaluaciones', 'bi-ui-checks-grid', $evaluationSurveysMenuItems, 'surveys'); ?>
+        <?php $renderSidebarGroup('Informes', 'bi-file-earmark-bar-graph', $reportsMenuItems, 'reports'); ?>
+        <?php $renderSidebarGroup('Procesos', 'bi-kanban', $processMenuItems, 'processes'); ?>
+        <?php $renderSidebarGroup('Entrevistas', 'bi-camera-video', $interviewsMenuItems, 'interviews'); ?>
+    </ul>
+</div>
+<div class="wrapper d-flex flex-column min-vh-100">
+<header class="header header-sticky p-0 mb-4">
+    <div class="container-fluid border-bottom px-4"><button class="header-toggler" type="button" aria-label="Abrir menú" data-sidebar-toggle><i class="bi bi-list"></i></button><div class="ms-auto d-flex align-items-center gap-2"><button class="btn btn-link header-toggler theme-toggle" type="button" aria-label="Cambiar tema"><i class="bi bi-moon-stars"></i></button><div class="dropdown user-menu"><button class="btn btn-link d-flex align-items-center gap-2 text-decoration-none" type="button" data-coreui-toggle="dropdown" aria-expanded="false"><span class="user-avatar"><?= e($userInitials) ?></span><span class="user-menu-name d-none d-md-inline"><?= e($user['name']) ?></span><i class="bi bi-chevron-down"></i></button><ul class="dropdown-menu dropdown-menu-end app-nav-dropdown"><li><span class="dropdown-item-text user-menu-meta"><?= e($user['profile_name'] ?: 'Sin perfil') ?><?= $user['company_name'] ? ' · ' . e($user['company_name']) : '' ?></span></li><li><a class="dropdown-item" href="<?= e(route_url('logout')) ?>"><i class="bi bi-box-arrow-right me-2"></i>Cerrar sesión</a></li></ul></div></div></div>
+    <div class="container-fluid px-4"><nav aria-label="breadcrumb"><ol class="breadcrumb my-0 py-3"><?php foreach ($breadcrumbTrail as $index => $crumb): ?><?php $isLast = $index === array_key_last($breadcrumbTrail); ?><li class="breadcrumb-item <?= $isLast ? 'active' : '' ?>" <?= $isLast ? 'aria-current="page"' : '' ?>><?php if (!$isLast && $crumb['route']): ?><a href="<?= e(route_url($crumb['route'])) ?>"><?= $crumb['icon'] ? '<i class="bi ' . e($crumb['icon']) . ' me-1"></i>' : '' ?><?= e($crumb['label']) ?></a><?php else: ?><?= e($crumb['label']) ?><?php endif; ?></li><?php endforeach; ?></ol></nav></div>
+</header>
 <?php endif; ?>
 
-<main class="<?= $user ? 'app-shell' : 'auth-shell' ?>">
-    <?php if ($user): ?>
-        <div class="app-breadcrumb-bar">
-            <div class="container-fluid px-lg-4 app-breadcrumb-content">
-                <nav class="app-breadcrumb-trail" aria-label="Breadcrumb">
-                    <?php foreach ($breadcrumbTrail as $index => $crumb): ?>
-                        <?php $isLast = $index === array_key_last($breadcrumbTrail); ?>
-                        <?php if ($index > 0): ?><span class="app-breadcrumb-separator">/</span><?php endif; ?>
-                        <?php if (!$isLast && $crumb['route']): ?>
-                            <a href="<?= e(route_url($crumb['route'])) ?>">
-                                <?php if ($crumb['icon']): ?><i class="bi <?= e($crumb['icon']) ?>"></i><?php endif; ?>
-                                <span><?= e($crumb['label']) ?></span>
-                            </a>
-                        <?php else: ?>
-                            <span class="<?= $isLast ? 'is-current' : '' ?>"><?= e($crumb['label']) ?></span>
-                        <?php endif; ?>
-                    <?php endforeach; ?>
-                </nav>
-                <div class="app-breadcrumb-session d-none d-md-flex">
-                    <span>Ultimo acceso: <?= e($lastLoginLabel) ?></span>
-                    <span class="app-online-status"><i class="bi bi-circle-fill"></i> En linea</span>
-                </div>
-            </div>
-        </div>
-    <?php endif; ?>
+<main class="<?= $user ? 'body flex-grow-1 px-4 app-shell' : 'auth-shell' ?>">
     <div class="<?= $user ? 'container-fluid px-lg-4' : 'container' ?>">
         <?php foreach (flashes() as $message): ?>
             <div data-app-message data-type="<?= e($message['type']) ?>" hidden>
@@ -445,6 +302,7 @@ $coreMenuIcon = 'bi-gear';
         <?= $content ?>
     </div>
 </main>
+<?php if ($user): ?></div><?php endif; ?>
 
 <div class="app-processing-overlay" data-app-processing-overlay hidden aria-live="polite" aria-busy="true">
     <div class="app-processing-card" role="status">
@@ -480,6 +338,9 @@ $coreMenuIcon = 'bi-gear';
 </aside>
 
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="<?= e(url('assets/coreui/vendors/@coreui/coreui/js/coreui.bundle.min.js')) ?>"></script>
+<script src="<?= e(url('assets/coreui/vendors/simplebar/js/simplebar.min.js')) ?>"></script>
+<!-- Bootstrap se conserva para la API data-bs-* utilizada por las vistas existentes. -->
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/datatables.net@1.13.8/js/jquery.dataTables.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/datatables.net-bs5@1.13.8/js/dataTables.bootstrap5.min.js"></script>
@@ -498,5 +359,17 @@ $coreMenuIcon = 'bi-gear';
 <script src="https://cdn.jsdelivr.net/npm/@tinymce/tinymce-jquery@2/dist/tinymce-jquery.min.js"></script>
 <script src="<?= e(url('assets/js/vendor/jquery.rut.local.js')) ?>"></script>
 <script src="<?= e(url('assets/js/app.js')) ?>"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const sidebar = document.getElementById('sidebar');
+    document.querySelectorAll('[data-sidebar-toggle], [data-sidebar-close]').forEach(function (button) {
+        button.addEventListener('click', function () {
+            if (sidebar && window.coreui && window.coreui.Sidebar) {
+                window.coreui.Sidebar.getOrCreateInstance(sidebar).toggle();
+            }
+        });
+    });
+});
+</script>
 </body>
 </html>

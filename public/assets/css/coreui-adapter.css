@@ -1,0 +1,87 @@
+/* e-talent visual adapter: CoreUI shell + existing platform theme variables. */
+:root,
+[data-coreui-theme="light"] {
+    --cui-primary: var(--app-primary, #5856d6);
+    --cui-link-color: var(--app-primary, #5856d6);
+    --cui-body-bg: var(--app-bg, #f3f4f7);
+    --cui-tertiary-bg: var(--app-bg, #f3f4f7);
+    --cui-body-font-family: var(--app-font-family, var(--cui-font-sans-serif));
+    --cui-body-font-size: var(--app-font-size, 15px);
+}
+
+[data-coreui-theme="dark"] {
+    --cui-primary: var(--app-primary, #8d8bea);
+    --cui-link-color: var(--app-primary, #8d8bea);
+}
+
+html,
+body {
+    min-height: 100%;
+}
+
+.app-body {
+    background: var(--app-bg, var(--cui-tertiary-bg));
+}
+
+.sidebar-brand {
+    color: #fff;
+    font-weight: 700;
+    letter-spacing: .01em;
+}
+
+.sidebar-brand .brand-image {
+    display: block;
+    max-width: 160px;
+    max-height: 38px;
+    object-fit: contain;
+}
+
+.sidebar .nav-link {
+    text-decoration: none;
+}
+
+.sidebar .nav-icon.bi {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1rem;
+}
+
+.header .header-toggler {
+    color: var(--app-text, var(--cui-body-color));
+}
+
+.header .theme-toggle {
+    min-width: 2.5rem;
+}
+
+.app-shell {
+    padding-top: 0;
+}
+
+.app-shell > .container-fluid {
+    width: 100%;
+}
+
+.app-shell .card {
+    border-color: var(--app-border, var(--cui-border-color));
+}
+
+.app-shell .card-header {
+    background: var(--card-header-bg, var(--cui-tertiary-bg));
+    color: var(--card-text, var(--cui-body-color));
+}
+
+.app-shell .table {
+    --cui-table-border-color: var(--table-border, var(--cui-border-color));
+}
+
+@media (max-width: 991.98px) {
+    .wrapper {
+        padding-inline: 0;
+    }
+
+    .body.flex-grow-1 {
+        padding-inline: 1rem !important;
+    }
+}

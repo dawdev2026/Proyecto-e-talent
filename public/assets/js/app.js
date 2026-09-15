@@ -16,6 +16,7 @@ $(function () {
 
     function applyTheme(theme) {
         $('html').attr('data-theme', theme);
+        $('html').attr('data-coreui-theme', theme);
         $('.theme-toggle i').attr('class', theme === 'dark' ? 'bi bi-moon-stars' : 'bi bi-sun');
         $('.theme-toggle-label').text(theme === 'dark' ? 'Claro' : 'Oscuro');
     }
