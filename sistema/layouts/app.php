@@ -252,6 +252,7 @@ $renderSidebarGroup = static function (string $label, string $icon, array $items
     <?php endif; ?>
     <link href="<?= e(url('assets/coreui/css/style.min.css')) ?>" rel="stylesheet">
     <link href="<?= e(url('assets/coreui/css/vendors/simplebar.css')) ?>" rel="stylesheet">
+    <link href="<?= e(url('assets/coreui/vendors/@coreui/icons/css/free.min.css')) ?>" rel="stylesheet">
     <link href="<?= e(url('assets/css/coreui-adapter.css')) ?>" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/datatables.net-bs5@1.13.8/css/dataTables.bootstrap5.min.css" rel="stylesheet">

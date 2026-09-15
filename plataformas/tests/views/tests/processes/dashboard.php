@@ -762,7 +762,7 @@ if (!function_exists('process_dashboard_help_label')) {
 <?php endif; ?>
 
 <?php if (!$dashboardSkipScripts): ?>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script src="<?= e(url('assets/coreui/vendors/chart.js/js/chart.umd.js')) ?>"></script>
 <script>
 (function () {
     var embeddedDashboardData = <?= json_encode($chartData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
