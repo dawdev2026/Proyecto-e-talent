@@ -11,7 +11,7 @@ $number = static fn($value): string => number_format((float) $value, 2, ',', '.'
     </div>
     <a class="btn btn-outline-secondary" href="<?= e(route_url('evaluation-surveys.dashboard.results', (int) ($form['id'] ?? 0)) . (!empty($processId) ? '?process_id=' . (int) $processId : '')) ?>">Volver al detalle</a>
 </section>
-<section class="content-panel">
+<section class="card content-panel">
     <h2 class="h5 fw-bold mb-3">Resumen del caso</h2>
     <div class="table-responsive"><table class="table align-middle mb-4"><tbody>
         <tr><th>Persona</th><td><?= e((string) ($attempt['user_name'] ?? '')) ?><div class="text-muted small"><?= e((string) ($attempt['user_email'] ?? '')) ?></div></td></tr>

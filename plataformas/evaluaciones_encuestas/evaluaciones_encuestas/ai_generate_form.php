@@ -6,7 +6,7 @@ $operation = in_array((string) ($formValues['operation'] ?? 'import'), ['import'
 <section class="page-header">
     <div><p class="dashboard-kicker mb-2">Encuestas / Evaluaciones</p><h1>Crear <?= $isSurvey ? 'encuesta' : 'evaluación' ?> con IA</h1><p class="text-muted mb-0">Carga un PDF para importar o generar preguntas.</p></div>
 </section>
-<form method="post" enctype="multipart/form-data" class="content-panel needs-validation" novalidate data-ai-pdf-form>
+<form method="post" enctype="multipart/form-data" class="card content-panel needs-validation" novalidate data-ai-pdf-form>
     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
     <div class="row g-3">
         <div class="col-12">

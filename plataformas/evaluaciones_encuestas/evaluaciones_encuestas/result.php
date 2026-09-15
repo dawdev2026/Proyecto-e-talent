@@ -179,14 +179,14 @@ $renderResponses = static function (array $questionSet, array $answerSet) use ($
 <?php endif; ?>
 
 <?php if (!$resultsVisible): ?>
-    <section class="content-panel evaluation-result-panel">
+    <section class="card content-panel evaluation-result-panel">
         <div class="alert alert-info mb-0" role="status">
             <h2 class="h5 fw-bold mb-2">Evaluación finalizada</h2>
             <p class="mb-0">Tus respuestas fueron guardadas correctamente. El resultado no está disponible para consulta del usuario según la configuración de esta evaluación.</p>
         </div>
     </section>
 <?php else: ?>
-<section class="content-panel evaluation-result-panel">
+<section class="card content-panel evaluation-result-panel">
     <div class="row g-3">
         <?php if ($isAssessment): ?>
             <div class="col-12 col-md-6">
@@ -221,7 +221,7 @@ $renderResponses = static function (array $questionSet, array $answerSet) use ($
     </div>
 </section>
 
-<section class="content-panel evaluation-result-panel">
+<section class="card content-panel evaluation-result-panel">
     <?php if ($isAssessment && $resultDisplayMode === 'collapsible_attempts' && $resultAttemptDetails): ?>
         <h2 class="h5 fw-bold mb-2">Intentos</h2>
         <p class="text-muted mb-3">El resultado oficial corresponde a la mejor nota registrada.</p>
@@ -261,7 +261,7 @@ $renderResponses = static function (array $questionSet, array $answerSet) use ($
             <h2 id="evaluation-control-events-title" class="h5 fw-bold mb-1">Detalle de acciones</h2>
             <p class="text-muted small mb-3">Registro técnico del modo <?= e(EvaluationSurveyFormModel::CONTROL_MODES[(string) ($attempt['control_mode'] ?? 'off')] ?? 'Sin registro') ?>.</p>
             <div class="table-responsive">
-                <table class="table align-middle app-table">
+                <table class="table table-hover align-middle app-table">
                     <thead><tr><th>Evento</th><th>Fecha</th><th>Detalle</th><th>IP</th></tr></thead>
                     <tbody>
                         <?php foreach ($controlEvents as $event): ?>

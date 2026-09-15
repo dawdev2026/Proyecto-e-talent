@@ -3,7 +3,7 @@ $pdfPresets = EvaluationSurveySettingsModel::AI_PDF_PRESETS;
 $currentPages = (int) ($settings['max_pdf_pages'] ?? 60);
 ?>
 <section class="page-header"><div><p class="dashboard-kicker mb-2">Encuestas / Evaluaciones</p><h1>Configuración IA</h1><p class="text-muted mb-0">Configura la generación e importación asistida.</p></div></section>
-<form method="post" class="content-panel needs-validation" novalidate>
+<form method="post" class="card content-panel needs-validation" novalidate>
     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
     <div class="alert alert-info small">Estado transversal: <strong><?= !empty($globalAi['enabled']) && !empty($globalAi['has_api_key']) ? 'disponible' : 'no habilitado' ?></strong></div>
     <div class="row g-3">

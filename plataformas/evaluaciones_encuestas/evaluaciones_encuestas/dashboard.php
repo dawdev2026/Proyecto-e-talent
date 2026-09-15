@@ -32,7 +32,7 @@ $statusLabels = [
         ['Reprobadas', 'failed', 'bi-x-circle', 'danger'],
     ] as [$label, $key, $icon, $color]): ?>
         <div class="col-12 col-sm-6 col-xl">
-            <div class="content-panel h-100">
+            <div class="card content-panel h-100">
                 <div class="d-flex align-items-center gap-3">
                     <span class="rounded-circle text-bg-<?= e($color) ?> p-2"><i class="bi <?= e($icon) ?>" aria-hidden="true"></i></span>
                     <div><span class="text-muted small d-block"><?= e($label) ?></span><strong class="fs-4"><?= (int) ($summary[$key] ?? 0) ?></strong></div>
@@ -41,7 +41,7 @@ $statusLabels = [
         </div>
     <?php endforeach; ?>
     <div class="col-12 col-sm-6 col-xl">
-        <div class="content-panel h-100">
+        <div class="card content-panel h-100">
             <span class="text-muted small d-block">Tasa de aprobación</span>
             <strong class="fs-4"><?= $number($summary['approval_rate'] ?? 0) ?>%</strong>
             <div class="progress mt-2" role="progressbar" aria-label="Tasa de aprobación" aria-valuenow="<?= (float) ($summary['approval_rate'] ?? 0) ?>" aria-valuemin="0" aria-valuemax="100">
@@ -51,7 +51,7 @@ $statusLabels = [
     </div>
 </section>
 
-<section class="content-panel mb-4">
+<section class="card content-panel mb-4">
     <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
         <div>
             <h2 class="h5 fw-bold mb-1">Resumen por evaluación</h2>
@@ -63,7 +63,7 @@ $statusLabels = [
         <div class="alert alert-info mb-0">Todavía no hay evaluaciones calificadas disponibles para este alcance.</div>
     <?php else: ?>
         <div class="table-responsive">
-            <table class="table align-middle app-table app-data-table" data-export-title="Dashboard de evaluaciones">
+            <table class="table table-hover align-middle app-table app-data-table" data-export-title="Dashboard de evaluaciones">
                 <thead><tr><th>Evaluación</th><th>Proceso</th><th>Estado</th><th>Nota máxima</th><th>Aprobación</th><th>Asignadas</th><th>Contestaron</th><th>Finalizadas</th><th>Aprobadas</th><th>Reprobadas</th><th>Buenas</th><th>Malas</th><th>Omitidas</th><th>Nota promedio</th><th class="text-end no-sort no-export">Acciones</th></tr></thead>
                 <tbody>
                 <?php foreach ($rows as $row): ?>
@@ -98,7 +98,7 @@ $statusLabels = [
     <?php endif; ?>
 </section>
 
-<section class="content-panel">
+<section class="card content-panel">
     <h2 class="h5 fw-bold mb-2">Criterio de cálculo</h2>
     <p class="text-muted mb-0">APROBADO cuando la nota obtenida es mayor o igual a la nota de aprobación configurada; REPROBADO cuando es menor. Las evaluaciones sin nota de aprobación quedan visibles, pero no se cuentan como aprobadas ni reprobadas.</p>
 </section>

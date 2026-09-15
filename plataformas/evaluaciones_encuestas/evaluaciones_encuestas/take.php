@@ -48,7 +48,7 @@ $processRemainingSeconds = array_key_exists('remaining_seconds', $processAvailab
     </div>
 <?php endif; ?>
 
-<section class="content-panel evaluation-take-panel">
+<section class="card content-panel evaluation-take-panel">
     <?php if ($previewMode): ?>
         <div class="evaluation-take-intro mb-3">
             <h2 class="h5 fw-bold mb-2">Vista previa administrativa</h2>

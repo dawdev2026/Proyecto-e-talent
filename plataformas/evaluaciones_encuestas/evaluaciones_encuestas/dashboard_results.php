@@ -31,12 +31,12 @@ $isDrawer = (string) ($_GET['drawer'] ?? '') === '1';
     <h2 class="h4 fw-bold mb-1">Resultados individuales</h2>
     <p class="text-muted mb-0"><?= e((string) ($form['title'] ?? 'Evaluación')) ?></p>
 </div><?php endif; ?>
-<section class="content-panel">
+<section class="card content-panel">
     <?php if (!$attempts): ?>
         <div class="alert alert-info mb-0">No hay intentos registrados para esta evaluación en el alcance disponible.</div>
     <?php else: ?>
         <div class="table-responsive">
-            <table class="table align-middle app-table app-data-table" data-export-title="Resultados individuales">
+            <table class="table table-hover align-middle app-table app-data-table" data-export-title="Resultados individuales">
                 <thead><tr><th>Persona</th><th>Proceso</th><th>Intento</th><th>Estado</th><th>Nota</th><th>Porcentaje</th><th>Finalizada</th><th class="text-end no-sort no-export">Detalle</th></tr></thead>
                 <tbody>
                 <?php foreach ($attempts as $attempt): ?>

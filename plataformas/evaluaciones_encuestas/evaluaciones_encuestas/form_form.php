@@ -27,7 +27,7 @@ $nonScoredQuestionTypes = ['text', 'likert', 'nps', 'rating', 'matrix'];
     <?php endif; ?>
 </section>
 
-<section class="content-panel">
+<section class="card content-panel">
     <form method="post" class="row g-4 app-form-stack needs-validation" novalidate>
         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
         <input type="hidden" name="form_type" value="<?= e($lockedFormType) ?>">
@@ -228,7 +228,7 @@ $nonScoredQuestionTypes = ['text', 'likert', 'nps', 'rating', 'matrix'];
 </section>
 
 <?php if ($formId > 0): ?>
-<section class="content-panel">
+<section class="card content-panel">
     <div class="d-flex flex-column flex-md-row justify-content-between gap-3 mb-3">
         <div>
             <h2 class="h5 fw-bold mb-1">Preguntas</h2>
@@ -246,7 +246,7 @@ $nonScoredQuestionTypes = ['text', 'likert', 'nps', 'rating', 'matrix'];
     </div>
     <div class="table-responsive">
         <table
-            class="table align-middle app-table"
+            class="table table-hover align-middle app-table"
             data-question-reorder-table
             data-reorder-url="<?= e(route_url('evaluation-surveys.questions.reorder', (int) $formId)) ?>"
             data-csrf-token="<?= e(csrf_token()) ?>">
