@@ -72,7 +72,14 @@ final class DashboardController extends Controller
         $canSeeAllInterviews = has_permission('manage_interview_processes')
             || has_permission('conduct_selection_interviews')
             || has_permission('view_interview_reports');
-        foreach ($this->interviews->agendaForUser((int) ($user['id'] ?? 0), $canSeeAllInterviews) as $interview) {
+        try {
+            $interviewAgenda = $this->interviews->agendaForUser((int) ($user['id'] ?? 0), $canSeeAllInterviews);
+        } catch (Throwable $exception) {
+            error_log('Dashboard interview agenda error: ' . $exception->getMessage());
+            $interviewAgenda = [];
+        }
+
+        foreach ($interviewAgenda as $interview) {
             $startTimestamp = strtotime((string) ($interview['scheduled_start_at'] ?? ''));
             $endTimestamp = strtotime((string) ($interview['scheduled_end_at'] ?? ''));
             if ($startTimestamp === false || $endTimestamp === false) {
@@ -108,7 +115,7 @@ final class DashboardController extends Controller
         $interviewsToday = count(array_filter($agenda, static fn(array $item): bool => $item['kind'] === 'interview'));
 
         $this->render('dashboard/index', [
-            'title' => 'Dashboard | Metricatest',
+            'title' => 'Dashboard | e-talent',
             'currentPage' => 'dashboard',
             'agenda' => $agenda,
             'processOverview' => $processOverview,

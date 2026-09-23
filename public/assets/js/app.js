@@ -16,6 +16,7 @@ $(function () {
 
     function applyTheme(theme) {
         $('html').attr('data-theme', theme);
+        $('html').attr('data-coreui-theme', theme);
         $('.theme-toggle i').attr('class', theme === 'dark' ? 'bi bi-moon-stars' : 'bi bi-sun');
         $('.theme-toggle-label').text(theme === 'dark' ? 'Claro' : 'Oscuro');
     }
@@ -28,6 +29,90 @@ $(function () {
         var nextTheme = $('html').attr('data-theme') === 'dark' ? 'light' : 'dark';
         localStorage.setItem('corePlatformTheme', nextTheme);
         applyTheme(nextTheme);
+    });
+
+    // Bootstrap posiciona los dropdowns dentro de la tabla. En tablas
+    // responsivas ese ancestro puede recortar el menu; lo elevamos al body
+    // mientras esta abierto y lo devolvemos a su lugar al cerrarlo.
+    $(document).on('show.bs.dropdown', '.app-table [data-bs-toggle="dropdown"]', function () {
+        var toggle = this;
+        var menu = toggle.parentElement ? toggle.parentElement.querySelector('.dropdown-menu') : null;
+        if (!menu || menu.classList.contains('app-table-dropdown-floating')) {
+            return;
+        }
+
+        menu.dataset.appDropdownParent = menu.parentElement ? '1' : '';
+        menu._appDropdownParent = menu.parentElement;
+        menu._appDropdownNextSibling = menu.nextSibling;
+        menu.classList.add('app-table-dropdown-floating');
+        document.body.appendChild(menu);
+    });
+
+    $(document).on('shown.bs.dropdown', '.app-table [data-bs-toggle="dropdown"]', function () {
+        var toggle = this;
+        var menu = document.querySelector('.app-table-dropdown-floating.show');
+        if (!menu) {
+            return;
+        }
+
+        var rect = toggle.getBoundingClientRect();
+        var viewportPadding = 12;
+        var menuWidth = Math.min(menu.offsetWidth || 288, window.innerWidth - (viewportPadding * 2));
+        var left = Math.max(viewportPadding, Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - viewportPadding));
+        var top = rect.bottom + 4;
+        var menuHeight = menu.offsetHeight || 160;
+        if (top + menuHeight > window.innerHeight - viewportPadding && rect.top - menuHeight - 4 >= viewportPadding) {
+            top = rect.top - menuHeight - 4;
+        }
+        menu.style.left = left + 'px';
+        menu.style.top = Math.max(viewportPadding, top) + 'px';
+    });
+
+    $(document).on('hidden.bs.dropdown', '.app-table [data-bs-toggle="dropdown"]', function () {
+        var menu = document.querySelector('.app-table-dropdown-floating');
+        if (!menu) {
+            return;
+        }
+
+        var parent = menu._appDropdownParent;
+        var nextSibling = menu._appDropdownNextSibling;
+        menu.classList.remove('app-table-dropdown-floating');
+        menu.style.left = '';
+        menu.style.top = '';
+        if (parent) {
+            if (nextSibling && nextSibling.parentNode === parent) {
+                parent.insertBefore(menu, nextSibling);
+            } else {
+                parent.appendChild(menu);
+            }
+        }
+        delete menu._appDropdownParent;
+        delete menu._appDropdownNextSibling;
+    });
+
+    $(window).on('resize scroll', function () {
+        var menu = document.querySelector('.app-table-dropdown-floating.show');
+        if (menu) {
+            var toggle = document.querySelector('.app-table [data-bs-toggle="dropdown"][aria-expanded="true"]');
+            if (toggle) {
+                $(toggle).trigger('shown.bs.dropdown');
+            }
+        }
+    });
+
+    $(document).on('click', '[data-password-toggle]', function () {
+        var button = $(this);
+        var input = document.getElementById(button.data('password-toggle'));
+
+        if (!input) {
+            return;
+        }
+
+        var showing = input.type === 'text';
+        input.type = showing ? 'password' : 'text';
+        button.attr('aria-pressed', String(!showing));
+        button.attr('aria-label', showing ? 'Mostrar clave' : 'Ocultar clave');
+        button.find('i').toggleClass('bi-eye', showing).toggleClass('bi-eye-slash', !showing);
     });
 
     var appNotifier = window.Notyf ? new Notyf({
@@ -132,6 +217,17 @@ $(function () {
     function showNotification(type, message) {
         var text = String(message || '').replace(/\s+/g, ' ').trim();
         if (!text) {
+            return;
+        }
+
+        if (String(type || '').toLowerCase() === 'pdf_import_error' && window.Swal) {
+            Swal.fire($.extend({}, swalBaseOptions(), {
+                title: 'PDF no procesable',
+                text: text,
+                icon: 'error',
+                confirmButtonText: 'Entendido',
+                buttonsStyling: false
+            }));
             return;
         }
 
@@ -302,6 +398,24 @@ $(function () {
             }
 
             var contentType = String(response.headers.get('Content-Type') || '').toLowerCase();
+            if (contentType.indexOf('application/json') !== -1) {
+                return response.json().then(function (result) {
+                    if (!result || !result.ok || !result.download_url) {
+                        throw new Error(result && result.message ? result.message : 'No se pudo preparar el archivo ZIP.');
+                    }
+                    var downloadButton = document.createElement('a');
+                    downloadButton.href = result.download_url;
+                    downloadButton.className = 'btn btn-success ms-2';
+                    downloadButton.innerHTML = '<i class="bi bi-download me-1"></i> Descargar ZIP';
+                    downloadButton.setAttribute('data-download-processing', '1');
+                    downloadButton.setAttribute('data-processing-message', 'Descargando ZIP...');
+                    downloadButton.setAttribute('data-processing-detail', 'Los archivos temporales se eliminarán automáticamente a medianoche.');
+                    $(link).after(downloadButton);
+                    showNotification('success', (result.message || 'Proceso finalizado correctamente.') + ' ' + (result.detail || ''));
+                    hideAppProcessing();
+                    return null;
+                });
+            }
             if (contentType && contentType.indexOf('application/zip') === -1 && contentType.indexOf('application/octet-stream') === -1) {
                 throw new Error('No se recibio un archivo ZIP valido. Vuelve a iniciar sesion e intenta nuevamente.');
             }
@@ -336,6 +450,9 @@ $(function () {
 
             return readChunk();
         }).then(function (download) {
+            if (!download) {
+                return;
+            }
             downloadBlob(download.blob, download.filename);
             window.setTimeout(hideAppProcessing, 500);
         }).catch(function (error) {
@@ -378,7 +495,10 @@ $(function () {
             $message.remove();
         });
 
-        $scope.find('.alert').not('[data-app-message-processed], [data-inline-alert]').each(function () {
+        // Los alertas ocultos y los mensajes internos de un componente no son
+        // notificaciones globales. En particular, el gate audiovisual mantiene
+        // estados pendientes/ocultos que deben mostrarse solo cuando corresponda.
+        $scope.find('.alert').not('[data-app-message-processed], [data-inline-alert], .d-none, [hidden]').each(function () {
             var $alert = $(this);
             var type = 'info';
             var classes = String($alert.attr('class') || '').split(/\s+/);
@@ -427,6 +547,61 @@ $(function () {
 
     initNotifications(document);
     initBootstrapPopovers(document);
+
+    var activeStatusHelpTrigger = null;
+
+    function ensureStatusHelpModal() {
+        var $modal = $('#app-status-help-modal');
+        if ($modal.length) {
+            return $modal;
+        }
+
+        $modal = $('<div class="modal fade" id="app-status-help-modal" tabindex="-1" aria-labelledby="app-status-help-modal-title" aria-hidden="true"><div class="modal-dialog modal-dialog-centered modal-dialog-scrollable"><div class="modal-content"><div class="modal-header"><h2 class="modal-title h5" id="app-status-help-modal-title"></h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button></div><div class="modal-body" data-status-help-modal-body></div></div></div></div>');
+        $('body').append($modal);
+        return $modal;
+    }
+
+    $(document).on('click', '[data-status-help]', function () {
+        var $trigger = $(this);
+        var rawContent = String($trigger.attr('data-status-help-content') || '');
+        try {
+            rawContent = JSON.parse(rawContent);
+        } catch (error) {
+            // Permite abrir ayudas emitidas por una versión previa del HTML.
+        }
+
+        if (!window.bootstrap || !window.bootstrap.Modal) {
+            window.alert(($trigger.attr('data-status-help-title') || 'Ayuda sobre estados') + '\n\n' + rawContent);
+            return;
+        }
+
+        activeStatusHelpTrigger = this;
+        var $modal = ensureStatusHelpModal();
+        var $body = $modal.find('[data-status-help-modal-body]').empty();
+        var lines = String(rawContent).split(/\r?\n/).map(function (line) {
+            return line.replace(/^\s*•\s*/, '').trim();
+        }).filter(Boolean);
+
+        $modal.find('#app-status-help-modal-title').text($trigger.attr('data-status-help-title') || 'Ayuda sobre estados');
+        if (lines.length > 1) {
+            var $list = $('<ul class="mb-0"></ul>');
+            lines.forEach(function (line) {
+                $('<li></li>').text(line).appendTo($list);
+            });
+            $body.append($list);
+        } else {
+            $('<p class="mb-0"></p>').text(lines[0] || '').appendTo($body);
+        }
+
+        window.bootstrap.Modal.getOrCreateInstance($modal[0]).show();
+    });
+
+    $(document).on('hidden.bs.modal', '#app-status-help-modal', function () {
+        if (activeStatusHelpTrigger && document.contains(activeStatusHelpTrigger)) {
+            activeStatusHelpTrigger.focus();
+        }
+        activeStatusHelpTrigger = null;
+    });
 
     function initRutInputs(scope) {
         if (!$.fn.rut) {
@@ -511,7 +686,7 @@ $(function () {
         },
         supervised_audio_visual: {
             title: 'Rendicion supervisada + control audiovisual',
-            content: 'Incluye lo anterior y solicita camara y microfono para grabar evidencia audiovisual completa. Registra interrupciones, posibles multiples voces y fallas de carga. El usuario selecciona que hacer ante una interrupcion.'
+            content: 'Incluye lo anterior y solicita camara, microfono y captura de pantalla o evidencia Canvas para la rendicion. Registra interrupciones, posibles multiples voces y fallas de carga. La accion ante cada incidencia usa la configuracion vigente de la evaluacion.'
         }
     };
 
@@ -584,6 +759,10 @@ $(function () {
     });
 
     $(document).on('submit', '.needs-validation', function (event) {
+        if (window.tinymce && typeof tinymce.triggerSave === 'function') {
+            tinymce.triggerSave();
+        }
+
         var submitter = event.originalEvent && event.originalEvent.submitter;
         if (submitter && submitter.name === 'test_action' && submitter.value === 'save_exit') {
             return;
@@ -1523,7 +1702,7 @@ $(function () {
         }
 
         var $scope = scope ? $(scope) : $(document);
-        $scope.find('[data-item-prompt-editor]').each(function () {
+        $scope.find('[data-item-prompt-editor], [data-evaluation-richtext-editor]').each(function () {
             var $editor = $(this);
             if ($editor.data('prompt-editor-ready')) {
                 return;
@@ -1569,7 +1748,9 @@ $(function () {
                 content_style: 'body{font-family:Inter,Roboto,system-ui,sans-serif;font-size:16px;line-height:1.45;margin:12px;} img{max-width:100%;height:auto;display:block;margin:10px 0;} p{margin:0 0 10px;}',
                 setup: function (editor) {
                     editor.on('change keyup undo redo setcontent', function () {
-                        syncItemLines($editor.closest('form'));
+                        if ($editor.is('[data-item-prompt-editor]')) {
+                            syncItemLines($editor.closest('form'));
+                        }
                     });
                 }
             });
@@ -1699,6 +1880,805 @@ $(function () {
         syncTestProgress($(this));
     });
 
+    function setAudioVisualCheck($form, name, label, state, message) {
+        var $item = $form.find('[data-audio-visual-check="' + name + '"]').first();
+        if (!$item.length) return;
+        var icons = {pending: 'bi-hourglass-split', ok: 'bi-check-circle-fill', error: 'bi-x-circle-fill'};
+        var statuses = {pending: 'verificando', ok: 'operativo', error: 'no disponible'};
+        var $icon = $item.find('[data-audio-visual-check-icon]').first();
+        var $label = $item.find('[data-audio-visual-check-label]').first();
+        var $message = $item.find('[data-audio-visual-check-message]').first();
+        $item.removeClass('border-warning border-success border-danger text-warning text-success text-danger').addClass(state === 'ok' ? 'border-success text-success' : state === 'error' ? 'border-danger text-danger' : 'border-warning text-warning');
+        if ($icon.length) $icon.removeClass('bi-hourglass-split bi-check-circle-fill bi-x-circle-fill').addClass(icons[state] || icons.pending);
+        if ($label.length) $label.text(label + ': ' + (statuses[state] || statuses.pending)); else $item.text(label + ': ' + (statuses[state] || statuses.pending));
+        if ($message.length) $message.text(message || '');
+        if (message) $item.attr('title', message); else $item.removeAttr('title');
+    }
+
+    function initAudioVisualBrowserLog($form) {
+        var enabled = new URLSearchParams(window.location.search || '').get('audio_debug') === '1';
+        var $entries = $();
+        if (enabled) {
+            var $panel = $('<details open class="audio-visual-debug-panel" style="position:fixed;left:8px;right:8px;bottom:8px;z-index:2147483647;background:#111827;color:#f9fafb;border:2px solid #f59e0b;border-radius:8px;padding:6px;font:12px/1.35 -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif;box-shadow:0 4px 18px rgba(0,0,0,.35)"></details>');
+            $entries = $('<div style="max-height:28vh;overflow:auto;margin-top:6px"></div>');
+            var $clear = $('<button type="button" style="margin-top:6px;padding:3px 8px;border:1px solid #9ca3af;border-radius:4px;background:#374151;color:#fff">Limpiar</button>');
+            $clear.on('click', function () { $entries.empty(); });
+            $panel.append('<summary style="cursor:pointer;font-weight:700">Diagnóstico audiovisual · toca para contraer</summary>', $entries, $clear).appendTo('body');
+        }
+        return function (eventType, metadata) {
+            if (!enabled) return;
+            var timestamp = new Date().toISOString();
+            var details = metadata || {};
+            try { window.console.info('[e-talent audiovisual] ' + eventType, details); } catch (error) {}
+            var serialized = '';
+            try { serialized = JSON.stringify(details); } catch (error) { serialized = String(details); }
+            var $entry = $('<div style="border-top:1px solid #374151;padding:4px 0;word-break:break-word"></div>');
+            $('<span style="color:#fbbf24"></span>').text(timestamp).appendTo($entry);
+            $('<strong></strong>').text(' ' + eventType).appendTo($entry);
+            $('<br>').appendTo($entry);
+            $('<span style="color:#d1d5db"></span>').text(serialized).appendTo($entry);
+            $entry.appendTo($entries);
+            $entries[0].scrollTop = $entries[0].scrollHeight;
+        };
+    }
+
+    function getAudioVisualBrowserCompatibility() {
+        var userAgent = String(window.navigator && window.navigator.userAgent || '');
+        var hasScreenCapture = Boolean(navigator.mediaDevices && typeof navigator.mediaDevices.getDisplayMedia === 'function');
+        var isFirefox = /Firefox\//i.test(userAgent);
+        var isEdge = /Edg\//i.test(userAgent);
+        var isChrome = /Chrome\//i.test(userAgent) && !isEdge;
+        var isSafari = /Safari\//i.test(userAgent) && !isChrome && !isEdge && !isFirefox;
+
+        if (!window.isSecureContext || !hasScreenCapture) {
+            return {ok: true, source: 'canvas', message: 'Este navegador o dispositivo no ofrece compartir pantalla. Se usará captura Canvas del contenido visible de la evaluación.'};
+        }
+        if (isFirefox) {
+            return {ok: true, source: 'canvas', message: 'Firefox usará captura Canvas del contenido visible de la evaluación.'};
+        }
+        if (isChrome || isEdge || isSafari) {
+            return {ok: true, source: 'screen', message: 'Navegador compatible. Deberás seleccionar “Toda la pantalla” al iniciar.'};
+        }
+        return {ok: true, source: 'canvas', message: 'La pantalla completa no está disponible en este navegador. Se usará captura Canvas del contenido visible de la evaluación.'};
+    }
+
+    function applyAudioVisualBrowserCompatibility($form) {
+        var result = getAudioVisualBrowserCompatibility();
+        $form.data('audio-visual-browser-compatibility', result);
+        var $status = $form.find('[data-audio-visual-status]').first();
+        if ($status.length && result.message) {
+            $status.removeClass('alert-secondary alert-success alert-danger alert-warning').addClass(result.ok && result.source === 'screen' ? 'alert-secondary' : result.ok ? 'alert-warning' : 'alert-danger').text(result.message).toggleClass('d-none', false);
+        }
+        if (!result.ok) {
+            setAudioVisualCheck($form, 'screen', 'Captura', 'error', result.message);
+        }
+        return result;
+    }
+
+    function setAudioVisualReconnectStatus($form, component, message) {
+        var $indicator = $form.find('[data-audio-visual-reconnect-indicator]').first();
+        if (!$indicator.length) return;
+        var labels = {camera: 'Cámara', microphone: 'Micrófono', screen: 'Captura de pantalla', recording: 'Grabación audiovisual'};
+        var $icon = $indicator.find('[data-audio-visual-reconnect-icon]').first();
+        var $component = $indicator.find('[data-audio-visual-reconnect-component]').first();
+        $indicator.removeClass('alert-danger alert-warning alert-success').addClass(component ? 'alert-danger' : 'alert-warning');
+        if ($icon.length) $icon.removeClass('bi-exclamation-circle-fill bi-camera-video bi-mic-fill bi-display').addClass(component === 'camera' ? 'bi-camera-video' : component === 'microphone' ? 'bi-mic-fill' : component === 'screen' ? 'bi-display' : 'bi-exclamation-circle-fill');
+        if ($component.length) $component.text((labels[component] || 'Componente audiovisual') + ': ' + (message || 'no disponible'));
+    }
+
+    function requestAudioVisualDevices($form) {
+        var constraints = {
+            video: {facingMode: {ideal: 'user'}, width: {ideal: 640, max: 1280}, height: {ideal: 360, max: 720}, frameRate: {ideal: 15, max: 20}},
+            audio: {channelCount: {ideal: 1}, echoCancellation: true, noiseSuppression: true, autoGainControl: true}
+        };
+        var explain = function (component, error) {
+            if (error && error.audioVisualMessage) return error.audioVisualMessage;
+            var name = error && error.name ? error.name : '';
+            if (name === 'NotAllowedError' || name === 'SecurityError') return component === 'camera' ? 'Permite el uso de la cámara en el navegador.' : 'Permite el uso del micrófono en el navegador.';
+            if (name === 'NotFoundError') return component === 'camera' ? 'No se encontró una cámara disponible.' : 'No se encontró un micrófono disponible.';
+            if (name === 'NotReadableError') return component === 'camera' ? 'La cámara está siendo utilizada o no responde.' : 'El micrófono está siendo utilizado o no responde.';
+            return component === 'camera' ? 'No fue posible validar la cámara.' : 'No fue posible validar el micrófono.';
+        };
+        var permissionState = function (name) {
+            if (!navigator.permissions || typeof navigator.permissions.query !== 'function') return Promise.resolve('unknown');
+            return navigator.permissions.query({name: name}).then(function (permission) {
+                return permission && permission.state ? permission.state : 'unknown';
+            }).catch(function () { return 'unknown'; });
+        };
+        var deviceCount = function (kind) {
+            if (!navigator.mediaDevices || typeof navigator.mediaDevices.enumerateDevices !== 'function') return Promise.resolve(null);
+            return navigator.mediaDevices.enumerateDevices().then(function (devices) {
+                return devices.filter(function (device) { return device.kind === kind; }).length;
+            }).catch(function () { return null; });
+        };
+        var diagnosticError = function (component, error, kind, permission, count) {
+            var name = error && error.name ? error.name : '';
+            var label = component === 'camera' ? 'cámara' : 'micrófono';
+            var code = 'unknown';
+            var message = 'No fue posible validar el ' + label + '.';
+            // La API Permissions puede devolver un estado desactualizado o no
+            // equivalente al permiso efectivo de getUserMedia. Prioriza siempre
+            // el error de la solicitud real y usa `permission` solo si no hay uno.
+            if (name === 'NotAllowedError' || name === 'SecurityError' || (!name && permission === 'denied')) {
+                code = 'permission_blocked';
+                message = 'El ' + label + ' está bloqueado para este sitio o por el sistema operativo. Activa el permiso y vuelve a intentar.';
+            } else if (name === 'NotFoundError' || count === 0) {
+                code = 'device_missing';
+                message = 'No se encontró un ' + label + ' disponible en este dispositivo.';
+            } else if (name === 'NotReadableError' || name === 'AbortError') {
+                code = 'device_busy';
+                message = 'El ' + label + ' está siendo utilizado por otra aplicación o no responde.';
+            } else if (name === 'OverconstrainedError') {
+                code = 'constraints_unsupported';
+                message = 'La configuración solicitada no es compatible con el ' + label + '.';
+            }
+            return Object.assign(error instanceof Error ? error : new Error(code), {
+                audioVisualComponent: component,
+                audioVisualCode: code,
+                audioVisualMessage: message
+            });
+        };
+        if (!window.isSecureContext || !navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
+            var unsupported = new Error('media_unsupported');
+            unsupported.audioVisualComponent = 'camera';
+            unsupported.audioVisualCode = 'not_supported';
+            unsupported.audioVisualMessage = 'Este navegador o contexto no permite acceder a cámara y micrófono.';
+            return Promise.reject(unsupported);
+        }
+        setAudioVisualCheck($form, 'camera', 'Cámara', 'pending', 'Solicitando acceso…');
+        // No uses navigator.permissions como bloqueo previo: en algunos
+        // navegadores su estado no refleja el permiso efectivo del sitio.
+        return navigator.mediaDevices.getUserMedia({video: constraints.video}).catch(function (error) {
+            return Promise.all([permissionState('camera'), deviceCount('videoinput')]).then(function (diagnostics) {
+                return Promise.reject(diagnosticError('camera', error, 'videoinput', diagnostics[0], diagnostics[1]));
+            });
+        }).then(function (cameraStream) {
+            var cameraTrack = cameraStream.getVideoTracks()[0];
+            if (!cameraTrack || cameraTrack.readyState !== 'live') {
+                cameraStream.getTracks().forEach(function (track) { track.stop(); });
+                throw diagnosticError('camera', new Error('camera_not_operational'), 'videoinput', 'unknown', 1);
+            }
+            setAudioVisualCheck($form, 'camera', 'Cámara', 'ok', 'Acceso concedido y cámara activa.');
+            setAudioVisualCheck($form, 'microphone', 'Micrófono', 'pending', 'Solicitando acceso…');
+            var microphoneStream = null;
+            return navigator.mediaDevices.getUserMedia({audio: constraints.audio}).catch(function (error) {
+                return Promise.all([permissionState('microphone'), deviceCount('audioinput')]).then(function (diagnostics) {
+                    return Promise.reject(diagnosticError('microphone', error, 'audioinput', diagnostics[0], diagnostics[1]));
+                });
+            }).then(function (audioStream) {
+                microphoneStream = audioStream;
+                var microphoneTrack = audioStream.getAudioTracks()[0];
+                if (!microphoneTrack || microphoneTrack.readyState !== 'live') {
+                    audioStream.getTracks().forEach(function (track) { track.stop(); });
+                    throw diagnosticError('microphone', new Error('microphone_not_operational'), 'audioinput', 'unknown', 1);
+                }
+                setAudioVisualCheck($form, 'microphone', 'Micrófono', 'ok', 'Acceso concedido y micrófono activo.');
+                return new MediaStream(cameraStream.getVideoTracks().concat(audioStream.getAudioTracks()));
+            }).catch(function (error) {
+                cameraStream.getTracks().forEach(function (track) { track.stop(); });
+                if (microphoneStream) microphoneStream.getTracks().forEach(function (track) { track.stop(); });
+                error.audioVisualComponent = error.audioVisualComponent || 'microphone';
+                setAudioVisualCheck($form, error.audioVisualComponent, error.audioVisualComponent === 'camera' ? 'Cámara' : 'Micrófono', 'error', explain(error.audioVisualComponent, error));
+                throw error;
+            });
+        }).catch(function (error) {
+            var component = error.audioVisualComponent || 'camera';
+            setAudioVisualCheck($form, component, component === 'camera' ? 'Cámara' : 'Micrófono', 'error', explain(component, error));
+            throw error;
+        });
+    }
+
+    function requestAudioVisualPreflight($form, compatibility) {
+        var result = compatibility || getAudioVisualBrowserCompatibility();
+        var screenRequest = Promise.resolve(true);
+        // Solicitar pantalla sincrónicamente durante el mismo gesto que aceptó
+        // el consentimiento. getDisplayMedia pierde la activación si esperamos
+        // a que el usuario cierre primero los diálogos de cámara/micrófono.
+        if (result.source === 'canvas' || !navigator.mediaDevices || typeof navigator.mediaDevices.getDisplayMedia !== 'function') {
+            setAudioVisualCheck($form, 'screen', 'Captura', 'ok', 'Captura alternativa disponible para el contenido visible.');
+        } else {
+            setAudioVisualCheck($form, 'screen', 'Captura', 'pending', 'Solicitando acceso a pantalla completa…');
+            screenRequest = navigator.mediaDevices.getDisplayMedia({
+                video: {displaySurface: 'monitor'},
+                audio: false,
+                monitorTypeSurfaces: 'include',
+                selfBrowserSurface: 'exclude',
+                preferCurrentTab: false,
+            }).then(function (screenStream) {
+                var track = screenStream.getVideoTracks()[0];
+                if (!track || track.readyState !== 'live') {
+                    screenStream.getTracks().forEach(function (item) { item.stop(); });
+                    throw new Error('screen_capture_not_operational');
+                }
+                var displaySurface = typeof track.getSettings === 'function' ? String(track.getSettings().displaySurface || '') : '';
+                if (displaySurface && displaySurface !== 'monitor') {
+                    screenStream.getTracks().forEach(function (item) { item.stop(); });
+                    throw new Error('full_screen_required');
+                }
+                setAudioVisualCheck($form, 'screen', 'Captura', 'ok', 'Captura de pantalla autorizada.');
+                $form.data('audio-visual-preflight-screen-stream', screenStream);
+                return true;
+            }).catch(function (error) {
+                var pendingStream = $form.data('audio-visual-preflight-screen-stream');
+                if (pendingStream && pendingStream.getTracks) pendingStream.getTracks().forEach(function (item) { item.stop(); });
+                $form.removeData('audio-visual-preflight-screen-stream');
+                error.audioVisualComponent = 'screen';
+                setAudioVisualCheck($form, 'screen', 'Captura', 'error', error.name === 'NotAllowedError' || error.message === 'full_screen_required' ? 'Selecciona “Pantalla completa” y autoriza la captura.' : 'No fue posible validar la captura de pantalla.');
+                throw error;
+            });
+        }
+        var audioRequest = requestAudioVisualDevices($form).then(function (stream) {
+            stream.getTracks().forEach(function (track) { track.stop(); });
+            return true;
+        });
+        return Promise.all([
+            audioRequest.then(function () { return {ok: true}; }, function (error) { return {ok: false, error: error}; }),
+            screenRequest.then(function () { return {ok: true}; }, function (error) { return {ok: false, error: error}; })
+        ]).then(function (outcomes) {
+            var failed = outcomes.find(function (outcome) { return !outcome.ok; });
+            if (!failed) return true;
+            var screenStream = $form.data('audio-visual-preflight-screen-stream');
+            if (screenStream && screenStream.getTracks) screenStream.getTracks().forEach(function (track) { track.stop(); });
+            $form.removeData('audio-visual-preflight-screen-stream');
+            throw failed.error;
+        });
+    }
+
+    function runAudioVisualConsentPreflight($form, $consent, $startButton, statusNode, compatibility, namespace) {
+        var generation = Number($form.data('audio-visual-consent-generation') || 0) + 1;
+        $form.data('audio-visual-consent-generation', generation);
+        if (!$consent.prop('checked')) {
+            $startButton.prop('disabled', true);
+            var staleStream = $form.data('audio-visual-preflight-screen-stream');
+            if (staleStream && staleStream.getTracks) staleStream.getTracks().forEach(function (track) { track.stop(); });
+            $form.removeData('audio-visual-preflight-screen-stream');
+            return;
+        }
+        $startButton.prop('disabled', true);
+        $form.find('[data-audio-visual-preflight-retry]').addClass('d-none');
+        var preflight = createAssessmentFlowComponent({}).preflight($form, compatibility);
+        $form.data('audio-visual-preflight-promise', preflight);
+        preflight.then(function () {
+            if (Number($form.data('audio-visual-consent-generation') || 0) !== generation || !$consent.prop('checked')) {
+                var stream = $form.data('audio-visual-preflight-screen-stream');
+                if (stream && stream.getTracks) stream.getTracks().forEach(function (track) { track.stop(); });
+                $form.removeData('audio-visual-preflight-screen-stream');
+                return;
+            }
+            $startButton.prop('disabled', false);
+        }).catch(function () {
+            if (Number($form.data('audio-visual-consent-generation') || 0) !== generation || !$consent.prop('checked')) return;
+            $startButton.prop('disabled', true);
+            $form.find('[data-audio-visual-preflight-retry]').removeClass('d-none');
+            $(statusNode).removeClass('d-none alert-secondary alert-success').addClass('alert-danger').text('Completa la autorización de cámara, micrófono y captura para continuar.');
+        });
+    }
+
+    // Contrato único para las tres capacidades transversales del flujo: eventos
+    // de actividad, transporte de evidencia audiovisual y capturas de pantalla.
+    // Las rutas/payloads siguen siendo adaptadores del tipo de sesión (test o evaluación).
+    function createAssessmentFlowComponent(options) {
+        options = options || {};
+        var activityUrl = String(options.activityUrl || '');
+        var csrfToken = String(options.csrfToken || '');
+        return {
+            sendActivity: function (eventType, metadata, keepalive, expectJson) {
+                if (!activityUrl || !csrfToken) return Promise.resolve({ok: false});
+                var body = new URLSearchParams();
+                body.set('csrf_token', csrfToken);
+                body.set('event_type', String(eventType || ''));
+                if (typeof options.appendActivityMetadata === 'function') {
+                    options.appendActivityMetadata(body, metadata || {});
+                }
+                return window.fetch(activityUrl, {
+                    method: 'POST', credentials: 'same-origin',
+                    headers: {'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8', 'Accept': 'application/json'},
+                    body: body.toString(), keepalive: Boolean(keepalive)
+                }).then(function (response) {
+                    if (options.requireActivityJson !== true && expectJson !== true) return {ok: response.ok};
+                    return response.json().then(function (payload) {
+                        return {ok: response.ok && payload && payload.ok === true, payload: payload};
+                    });
+                }).catch(function () { return {ok: false}; });
+            },
+            createMediaTransport: function (mediaOptions) {
+                mediaOptions = mediaOptions || {};
+                var maxAttempts = Number(mediaOptions.maxAttempts) || 3;
+                var waitMs = Number(mediaOptions.retryDelayMs) || 1000;
+                var requestChunk = function (blob, number) {
+                    var evidenceId = typeof mediaOptions.getEvidenceId === 'function' ? mediaOptions.getEvidenceId() : '';
+                    var chunkUrl = typeof mediaOptions.getChunkUrl === 'function' ? mediaOptions.getChunkUrl() : mediaOptions.chunkUrl;
+                    if (!chunkUrl || !evidenceId) return Promise.reject(new Error('media_transport_not_ready'));
+                    var formData = new FormData();
+                    formData.append('csrf_token', csrfToken);
+                    formData.append('evidence_id', String(evidenceId));
+                    formData.append('chunk_number', String(number));
+                    formData.append('mime_type', typeof mediaOptions.getMimeType === 'function' ? (mediaOptions.getMimeType(blob) || blob.type || 'video/webm') : (blob.type || 'video/webm'));
+                    formData.append('chunk', blob, 'chunk-' + number + '.bin');
+                    return window.fetch(chunkUrl, {method: 'POST', credentials: 'same-origin', headers: {'Accept': 'application/json'}, body: formData})
+                        .then(function (response) {
+                            if (!response.ok) throw new Error('chunk_upload_failed');
+                            return response.json().then(function (payload) {
+                                if (!payload || payload.ok !== true) throw new Error((payload && payload.reason) || 'chunk_upload_rejected');
+                                return payload;
+                            });
+                        });
+                };
+                return {
+                    upload: function (blob, number) {
+                        var attempt = function (index) {
+                            return requestChunk(blob, number).catch(function (error) {
+                                if (index >= maxAttempts) throw error;
+                                if (typeof mediaOptions.onRetry === 'function') mediaOptions.onRetry(number, index, error);
+                                return new Promise(function (resolve) { window.setTimeout(resolve, waitMs); }).then(function () { return attempt(index + 1); });
+                            });
+                        };
+                        return attempt(1);
+                    },
+                    reportFailure: function (number, error) {
+                        var failureUrl = typeof mediaOptions.getFailureUrl === 'function' ? mediaOptions.getFailureUrl() : mediaOptions.failureUrl;
+                        if (!failureUrl) return Promise.resolve();
+                        var payload = new URLSearchParams();
+                        payload.set('csrf_token', csrfToken);
+                        payload.set('evidence_id', String(typeof mediaOptions.getEvidenceId === 'function' ? mediaOptions.getEvidenceId() : ''));
+                        payload.set('chunk_number', String(number));
+                        payload.set('reason', error && error.message || 'chunk_upload_failed');
+                        return window.fetch(failureUrl, {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8', 'Accept': 'application/json'}, body: payload.toString(), keepalive: true}).then(function (response) {
+                            return response.json().then(function (result) {
+                                if (!response.ok || !result || result.ok !== true) throw new Error('media_failure_report_failed');
+                                return result;
+                            });
+                        });
+                    }
+                };
+            },
+            startRecorder: function (recorder, timesliceMs) {
+                if (!recorder || recorder.state !== 'inactive' || typeof recorder.start !== 'function') return false;
+                try {
+                    recorder.start(Number(timesliceMs) > 0 ? Number(timesliceMs) : 15000);
+                    return recorder.state === 'recording';
+                } catch (error) {
+                    return false;
+                }
+            },
+            stopRecorder: function (recorder) {
+                if (!recorder || recorder.state === 'inactive' || typeof recorder.stop !== 'function') return false;
+                try { recorder.stop(); return true; } catch (error) { return false; }
+            },
+            createScreenCapture: function ($form, getEvidenceId, screenOptions) {
+                return createAudioVisualScreenCapture($form, csrfToken, getEvidenceId, screenOptions || {});
+            },
+            preflight: function ($form, compatibility) {
+                return requestAudioVisualPreflight($form, compatibility);
+            }
+        };
+    }
+
+    function createAudioVisualScreenCapture($form, csrfToken, getEvidenceId) {
+        var options = arguments[3] || {};
+        var controller = {
+            source: null,
+            stream: null,
+            timer: null,
+            frameTimer: null,
+            captureNumber: 0,
+            validFrames: 0,
+            started: false,
+            lastHash: '',
+            captureInFlight: false,
+            pendingUploads: [],
+            initialTimer: null,
+            preferCanvas: Boolean(options.preferCanvas),
+            fallbackReason: '',
+            fallbackLogged: false,
+            onDiagnostic: typeof options.onDiagnostic === 'function' ? options.onDiagnostic : function () {}
+        };
+        var captureUrl = $form.attr('data-media-screenshot-url') || '';
+        var uploadFailurePolicy = $form.attr('data-audio-visual-upload-failure-policy') || 'continue';
+        var qualityProfile = $form.attr('data-audio-visual-quality-profile') || 'economical';
+        var quality = {economical: 0.45, standard: 0.60, high: 0.75}[qualityProfile] || 0.45;
+        var captureMime = null;
+        var screenErrorMessage = function (error) {
+            var name = error && error.name ? error.name : '';
+            var reason = error && error.message ? error.message : '';
+            if (reason === 'full_screen_required') return 'Selecciona “Toda la pantalla” para continuar.';
+            if (reason === 'screen_capture_ended') return 'La selección de pantalla se cerró. Vuelve a compartir toda la pantalla.';
+            if (reason === 'screen_capture_muted') return 'El navegador pausó la captura de pantalla. Vuelve a compartir toda la pantalla.';
+            if (reason === 'screen_capture_cancelled' || error && error.audioVisualCancelled) return 'Debes compartir una pantalla para continuar. Pulsa reintentar y selecciona “Toda la pantalla”.';
+            if (name === 'NotAllowedError') return 'Debes autorizar la captura y seleccionar una pantalla completa.';
+            if (name === 'AbortError') return 'Debes compartir una pantalla para continuar. Pulsa reintentar y selecciona “Toda la pantalla”.';
+            if (name === 'NotFoundError') return 'No hay una pantalla disponible para compartir.';
+            if (reason === 'html2canvas_load_failed' || reason === 'html2canvas_unavailable') return 'No se pudo activar la captura alternativa del contenido.';
+            if (reason === 'screen_capture_upload_failed') return 'La captura se generó, pero no pudo enviarse al servidor.';
+            return 'No fue posible validar la captura de pantalla.';
+        };
+        var $preview = $form.find('[data-audio-visual-preview]').first();
+        var $status = $form.find('[data-audio-visual-status]').first();
+        var $check = function (name, label, state, message) {
+            setAudioVisualCheck($form, name, label, state, message || '');
+        };
+        var wait = function (ms) { return new Promise(function (resolve) { window.setTimeout(resolve, ms); }); };
+        var diagnostic = function (eventType, metadata) {
+            try { controller.onDiagnostic(eventType, Object.assign({source: controller.source || 'unknown'}, metadata || {})); } catch (error) {}
+        };
+        var loadHtml2Canvas = function () {
+            if (typeof window.html2canvas === 'function') return Promise.resolve(window.html2canvas);
+            var existing = document.querySelector('script[data-e_talent-html2canvas]');
+            if (existing) return new Promise(function (resolve, reject) { existing.addEventListener('load', function () { resolve(window.html2canvas); }); existing.addEventListener('error', reject); });
+            return new Promise(function (resolve, reject) {
+                var script = document.createElement('script'); script.src = 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js'; script.async = true; script.dataset.e_talentHtml2canvas = '1';
+                script.onload = function () { if (typeof window.html2canvas === 'function') resolve(window.html2canvas); else reject(new Error('html2canvas_unavailable')); };
+                script.onerror = function () { reject(new Error('html2canvas_load_failed')); }; document.head.appendChild(script);
+            });
+        };
+        var upload = function (blob, source, eventType) {
+            if (!captureUrl || !blob || !blob.size) return Promise.reject(new Error('screen_capture_upload_unavailable'));
+            var waitForEvidence = function (attempt) {
+                if (getEvidenceId()) return Promise.resolve(String(getEvidenceId()));
+                if (attempt >= 120) return Promise.reject(new Error('screen_capture_evidence_unavailable'));
+                return wait(250).then(function () { return waitForEvidence(attempt + 1); });
+            };
+            return waitForEvidence(0).then(function (evidenceId) {
+                var number = controller.captureNumber++;
+                var data = new FormData(); data.append('csrf_token', csrfToken); data.append('evidence_id', evidenceId); data.append('capture_source', source); data.append('capture_number', String(number)); data.append('event_type', eventType || 'periodic'); data.append('capture', blob, 'capture-' + number + (blob.type === 'image/webp' ? '.webp' : '.jpg'));
+                var maxAttempts = 3;
+                var send = function (attempt) { return window.fetch(captureUrl, {method: 'POST', credentials: 'same-origin', headers: {'Accept': 'application/json'}, body: data}).then(function (response) { return response.json().catch(function () { return {}; }).then(function (payload) { if (!response.ok || !payload.ok) throw new Error(payload.reason || 'screen_capture_upload_failed'); return payload; }); }).catch(function (error) { if (attempt < maxAttempts) return wait(700 * attempt).then(function () { return send(attempt + 1); }); throw error; }); };
+                var uploadPromise = send(1);
+                controller.pendingUploads.push(uploadPromise);
+                uploadPromise.then(function () { controller.pendingUploads = controller.pendingUploads.filter(function (item) { return item !== uploadPromise; }); }, function () { controller.pendingUploads = controller.pendingUploads.filter(function (item) { return item !== uploadPromise; }); });
+                return uploadPromise;
+            });
+        };
+        var resizeCanvas = function (canvas) {
+            var maxWidth = 960;
+            var maxHeight = 540;
+            if (canvas.width <= maxWidth && canvas.height <= maxHeight) return canvas;
+            var ratio = Math.min(maxWidth / canvas.width, maxHeight / canvas.height);
+            var resized = document.createElement('canvas');
+            resized.width = Math.max(1, Math.round(canvas.width * ratio));
+            resized.height = Math.max(1, Math.round(canvas.height * ratio));
+            resized.getContext('2d').drawImage(canvas, 0, 0, resized.width, resized.height);
+            return resized;
+        };
+        var canvasBlob = function (canvas) {
+            var target = resizeCanvas(canvas);
+            if (!captureMime) {
+                try { captureMime = target.toDataURL('image/webp', quality).indexOf('data:image/webp') === 0 ? 'image/webp' : 'image/jpeg'; } catch (error) { captureMime = 'image/jpeg'; }
+            }
+            var encode = function (mime, level) { return new Promise(function (resolve) { target.toBlob(function (blob) { resolve(blob); }, mime, level); }); };
+            var maxBytes = controller.source === 'canvas' ? 180 * 1024 : 250 * 1024;
+            var compress = function (level, attempt) {
+                return encode(captureMime, level).then(function (blob) {
+                    if (blob && blob.size > maxBytes && attempt < 4 && level > 0.28) return compress(Math.max(0.28, level * 0.78), attempt + 1);
+                    return blob;
+                });
+            };
+            return compress(quality, 0).then(function (blob) { if (!blob || !blob.size) throw new Error('screen_capture_encode_failed'); return blob; });
+        };
+        var sanitizeCanvasStyles = function (clonedDocument) {
+            var unsupported = /(?:color|oklch|lab|lch|hwb)\(/i;
+            var colorProperties = ['color', 'background-color', 'border-color', 'border-top-color', 'border-right-color', 'border-bottom-color', 'border-left-color', 'outline-color', 'text-decoration-color', 'column-rule-color', 'caret-color', 'fill', 'stroke'];
+            var fallbackFor = function (property) { return property === 'color' || property.indexOf('border') === 0 || property === 'outline-color' || property === 'text-decoration-color' ? '#1f2937' : '#ffffff'; };
+            var sanitized = 0;
+            var sanitizeStyle = function (style) {
+                if (!style) return;
+                colorProperties.forEach(function (property) {
+                    var value = style.getPropertyValue(property);
+                    if (value && unsupported.test(value)) { style.setProperty(property, fallbackFor(property), style.getPropertyPriority(property)); sanitized++; }
+                });
+                ['background-image', 'box-shadow', 'text-shadow'].forEach(function (property) {
+                    var value = style.getPropertyValue(property);
+                    if (value && unsupported.test(value)) { style.setProperty(property, 'none', style.getPropertyPriority(property)); sanitized++; }
+                });
+                for (var index = 0; index < style.length; index++) {
+                    var property = style[index];
+                    var value = style.getPropertyValue(property);
+                    if (property.indexOf('--') === 0 && value && unsupported.test(value)) { style.setProperty(property, '#ffffff'); sanitized++; }
+                }
+            };
+            Array.prototype.forEach.call(clonedDocument.querySelectorAll('*'), function (element) {
+                sanitizeStyle(element.style);
+                try {
+                    var computed = clonedDocument.defaultView.getComputedStyle(element);
+                    colorProperties.forEach(function (property) {
+                        var value = computed.getPropertyValue(property);
+                        if (value && unsupported.test(value)) { element.style.setProperty(property, fallbackFor(property)); sanitized++; }
+                    });
+                    ['background-image', 'box-shadow', 'text-shadow'].forEach(function (property) {
+                        var value = computed.getPropertyValue(property);
+                        if (value && unsupported.test(value)) { element.style.setProperty(property, 'none'); sanitized++; }
+                    });
+                } catch (error) {}
+            });
+            var walkRules = function (rules) {
+                if (!rules) return;
+                Array.prototype.forEach.call(rules, function (rule) {
+                    if (rule.style) sanitizeStyle(rule.style);
+                    if (rule.cssRules) walkRules(rule.cssRules);
+                });
+            };
+            Array.prototype.forEach.call(clonedDocument.styleSheets || [], function (sheet) { try { walkRules(sheet.cssRules); } catch (error) {} });
+            diagnostic('audio_visual_canvas_styles_sanitized', {replacements: sanitized, unsupported_color_functions: ['color', 'oklch', 'lab', 'lch', 'hwb']});
+            return sanitized;
+        };
+        var buildCanvasSafeRoot = function (root) {
+            var clone = root.cloneNode(true);
+            var rootRect = root.getBoundingClientRect();
+            var rootWidth = Math.max(1, Math.ceil(rootRect.width));
+            var rootHeight = Math.max(1, Math.ceil(rootRect.height));
+            var frame = document.createElement('iframe');
+            frame.setAttribute('title', '');
+            frame.setAttribute('aria-hidden', 'true');
+            frame.style.cssText = 'position:fixed;left:-100000px;top:0;width:' + rootWidth + 'px;height:' + rootHeight + 'px;border:0;opacity:0;pointer-events:none;';
+            document.body.appendChild(frame);
+            var safeDocument = frame.contentDocument;
+            safeDocument.documentElement.style.margin = '0';
+            safeDocument.documentElement.style.width = rootWidth + 'px';
+            safeDocument.body.style.margin = '0';
+            safeDocument.body.style.width = rootWidth + 'px';
+            // No insertar <base> en el iframe about:blank. La CSP de la
+            // aplicación aplica base-uri="self" y el origen de about:blank
+            // no coincide con el origen de la página; además, el clon ya
+            // conserva las URLs absolutas necesarias para la captura.
+            clone.style.width = rootWidth + 'px';
+            clone.style.minHeight = rootHeight + 'px';
+            safeDocument.body.appendChild(clone);
+            var originalElements = [root].concat(Array.prototype.slice.call(root.querySelectorAll('*')));
+            var clonedElements = [clone].concat(Array.prototype.slice.call(clone.querySelectorAll('*')));
+            var unsupported = /(?:color|oklch|lab|lch|hwb)\(/i;
+            var fallbackFor = function (property) { return property === 'color' || property.indexOf('border') === 0 || property === 'outline-color' || property === 'text-decoration-color' ? '#1f2937' : '#ffffff'; };
+            var sanitized = 0;
+            originalElements.forEach(function (originalElement, index) {
+                var clonedElement = clonedElements[index];
+                if (!clonedElement) return;
+                try {
+                    var computed = window.getComputedStyle(originalElement);
+                    for (var propertyIndex = 0; propertyIndex < computed.length; propertyIndex++) {
+                        var property = computed[propertyIndex];
+                        var value = computed.getPropertyValue(property);
+                        if (!value) continue;
+                        if (unsupported.test(value)) {
+                            if (property === 'background-image' || property === 'box-shadow' || property === 'text-shadow' || property === 'filter') value = 'none';
+                            else if (property.indexOf('color') !== -1 || property === 'fill' || property === 'stroke' || property.indexOf('--') === 0) value = fallbackFor(property);
+                            else continue;
+                            sanitized++;
+                        }
+                        clonedElement.style.setProperty(property, value, computed.getPropertyPriority(property));
+                    }
+                } catch (error) {}
+            });
+            Array.prototype.forEach.call(clone.querySelectorAll('style,link[rel="stylesheet"]'), function (styleNode) { styleNode.remove(); });
+            diagnostic('audio_visual_canvas_safe_clone_ready', {replacements: sanitized, isolated_document: true, width: rootWidth, height: rootHeight});
+            return {root: clone, cleanup: function () { frame.remove(); }};
+        };
+        var captureFrame = function (eventType, uploadEvidence) {
+            if (controller.captureInFlight) return Promise.reject(new Error('screen_capture_busy'));
+            controller.captureInFlight = true;
+            var root = $form.closest('.evaluation-take-panel, .test-fullscreen-stage, .test-taking-shell')[0] || document.body;
+            var capturePromise;
+            if (controller.source === 'screen' && controller.stream) {
+                if (!$preview.length) { $preview = $('<video muted playsinline autoplay class="d-none" data-audio-visual-preview></video>').appendTo($form); }
+                $preview[0].srcObject = controller.stream; capturePromise = $preview[0].play().catch(function () {}).then(function () {
+                    var canvas = document.createElement('canvas'); canvas.width = $preview[0].videoWidth || 1280; canvas.height = $preview[0].videoHeight || 720; canvas.getContext('2d').drawImage($preview[0], 0, 0, canvas.width, canvas.height); return canvasBlob(canvas);
+                }).then(function (blob) { return uploadEvidence === false ? blob : upload(blob, 'screen', eventType); });
+            } else if (controller.source === 'canvas') {
+                capturePromise = loadHtml2Canvas().then(function (html2canvas) {
+                    var safeClone = buildCanvasSafeRoot(root);
+                    return html2canvas(safeClone.root, {useCORS: false, allowTaint: false, backgroundColor: '#ffffff', scale: Math.min(1, window.devicePixelRatio || 1), logging: false}).then(function (canvas) { safeClone.cleanup(); return canvasBlob(canvas); }, function (error) { safeClone.cleanup(); throw error; });
+                }).then(function (blob) { return uploadEvidence === false ? blob : upload(blob, 'canvas', eventType); });
+            } else {
+                capturePromise = Promise.reject(new Error('screen_capture_not_started'));
+            }
+            var captureOperation = capturePromise.then(function (result) { controller.captureInFlight = false; diagnostic('audio_visual_capture_succeeded', {event_type: eventType || 'periodic', uploaded: uploadEvidence !== false, bytes: result && result.size ? result.size : null}); return result; }, function (error) { controller.captureInFlight = false; diagnostic('audio_visual_capture_failed', {event_type: eventType || 'periodic', reason: error && (error.message || error.name) || 'capture_failed'}); throw error; });
+            controller.currentCapture = captureOperation;
+            return captureOperation;
+        };
+        // La validación previa solo confirma que se pueden generar imágenes localmente.
+        // Nunca las envía ni las encola antes de entrar a responder.
+        var validateFrames = function () { return captureFrame('preflight', false).then(function () { controller.validFrames++; return wait(350); }).then(function () { return captureFrame('preflight', false); }).then(function () { controller.validFrames++; return controller; }); };
+        var startCanvas = function (deferValidation, reason) {
+            diagnostic('audio_visual_canvas_requested', {reason: reason || 'screen_capture_unavailable'});
+            return loadHtml2Canvas().then(function () {
+                controller.source = 'canvas';
+                controller.fallbackReason = reason || controller.fallbackReason || 'screen_capture_unavailable';
+                diagnostic('audio_visual_canvas_ready', {reason: controller.fallbackReason});
+                return deferValidation ? controller : validateFrames();
+            }).catch(function (error) {
+                diagnostic('audio_visual_canvas_failed', {reason: error && (error.message || error.name) || 'canvas_unavailable'});
+                throw error;
+            });
+        };
+        var start = function (options) {
+            var deferValidation = Boolean(options && options.deferValidation);
+            controller.validFrames = 0;
+            $check('screen', 'Captura', 'pending');
+            if (controller.preferCanvas || !navigator.mediaDevices || typeof navigator.mediaDevices.getDisplayMedia !== 'function' || !window.isSecureContext) {
+                return startCanvas(deferValidation, controller.preferCanvas ? 'browser_capability' : 'screen_capture_unavailable');
+            }
+            var preflightStream = $form.data('audio-visual-preflight-screen-stream');
+            if (preflightStream) {
+                $form.removeData('audio-visual-preflight-screen-stream');
+                var preflightTrack = preflightStream.getVideoTracks && preflightStream.getVideoTracks()[0];
+                if (!preflightTrack || preflightTrack.readyState !== 'live') {
+                    if (preflightStream.getTracks) preflightStream.getTracks().forEach(function (item) { item.stop(); });
+                    return Promise.reject(new Error('screen_capture_ended'));
+                }
+                controller.source = 'screen';
+                controller.stream = preflightStream;
+                var markPrefetchedScreenUnavailable = function (reason) {
+                    if (!controller.started && controller.validFrames === 0) return;
+                    controller.started = false;
+                    controller.validFrames = 0;
+                    $check('screen', 'Captura de pantalla', 'error', screenErrorMessage({message: reason}));
+                    if (controller.onInterrupted) controller.onInterrupted(reason);
+                };
+                preflightTrack.addEventListener('ended', function () { markPrefetchedScreenUnavailable('screen_capture_ended'); });
+                preflightTrack.addEventListener('mute', function () { markPrefetchedScreenUnavailable('screen_capture_muted'); });
+                return deferValidation ? Promise.resolve(controller) : validateFrames();
+            }
+            diagnostic('audio_visual_screen_requested', {reason: 'browser_capability'});
+            return navigator.mediaDevices.getDisplayMedia({video: {displaySurface: 'monitor'}, audio: false}).then(function (stream) {
+                var track = stream.getVideoTracks()[0]; var surface = track && track.getSettings ? track.getSettings().displaySurface : null;
+                if (!track || track.readyState !== 'live' || (surface && surface !== 'monitor')) { stream.getTracks().forEach(function (item) { item.stop(); }); throw new Error('full_screen_required'); }
+                controller.source = 'screen'; controller.stream = stream;
+                var markScreenUnavailable = function (reason) {
+                    if (!controller.started && controller.validFrames === 0) return;
+                    controller.started = false;
+                    controller.validFrames = 0;
+                    $check('screen', 'Captura de pantalla', 'error', screenErrorMessage({message: reason}));
+                    if (controller.onInterrupted) controller.onInterrupted(reason);
+                };
+                track.addEventListener('ended', function () { markScreenUnavailable('screen_capture_ended'); });
+                track.addEventListener('mute', function () { markScreenUnavailable('screen_capture_muted'); });
+                return deferValidation ? controller : validateFrames();
+            }).catch(function (error) {
+                var errorName = error && error.name || '';
+                var cancelled = errorName === 'AbortError' || errorName === 'NotAllowedError';
+                if (cancelled) {
+                    diagnostic('audio_visual_screen_capture_cancelled', {reason: errorName || 'screen_capture_cancelled'});
+                    error = error || new Error('screen_capture_cancelled');
+                    error.audioVisualCancelled = true;
+                } else {
+                    diagnostic('audio_visual_screen_failed', {reason: errorName || error && error.message || 'screen_capture_failed'});
+                }
+                // En un navegador compatible, cancelar o rechazar no significa
+                // que Canvas sea una alternativa válida: el usuario debe volver
+                // a autorizar una pantalla para mantener la evidencia requerida.
+                throw error;
+            });
+        };
+        controller.start = function (options) { return start(options).then(function () { controller.started = true; if (!(options && options.deferValidation)) $check('screen', controller.source === 'screen' ? 'Pantalla completa' : 'Captura Canvas', 'ok', controller.source === 'screen' ? 'Pantalla completa autorizada.' : 'Captura alternativa activa.'); return controller; }).catch(function (error) { error = error || new Error('screen_capture_failed'); error.audioVisualComponent = 'screen'; error.audioVisualMessage = screenErrorMessage(error); $check('screen', 'Captura', 'error', error.audioVisualMessage); throw error; }); };
+        controller.validate = function () { return validateFrames().then(function () { $check('screen', controller.source === 'screen' ? 'Pantalla completa' : 'Captura Canvas', 'ok', controller.source === 'screen' ? 'Pantalla completa autorizada.' : 'Captura alternativa activa.'); return controller; }); };
+        controller.startPeriodic = function () {
+            if (controller.timer || controller.initialTimer) return;
+            var capturePeriodic = function (eventType) {
+                if (!controller.started || controller.captureInFlight) return;
+                captureFrame(eventType || 'periodic').catch(function (error) {
+                    if (error && error.message === 'screen_capture_busy') return;
+                    if (controller.onFailure) controller.onFailure('screen_capture_upload_failed', error);
+                });
+            };
+            // La primera captura real debe ocurrir durante una evaluación breve,
+            // pero después de que el inicio audiovisual ya fue confirmado.
+            controller.initialTimer = window.setTimeout(function () {
+                controller.initialTimer = null;
+                capturePeriodic('initial');
+            }, 3000);
+            controller.timer = window.setInterval(function () { capturePeriodic('periodic'); }, 20000);
+        };
+        controller.capture = captureFrame;
+        controller.flushUploads = function () {
+            return Promise.resolve(controller.currentCapture).then(function () {
+                return Promise.all(controller.pendingUploads.slice());
+            });
+        };
+        controller.stopScheduling = function () {
+            controller.started = false;
+            if (controller.timer) window.clearInterval(controller.timer);
+            if (controller.initialTimer) window.clearTimeout(controller.initialTimer);
+            controller.timer = null;
+            controller.initialTimer = null;
+        };
+        controller.stop = function () { controller.started = false; if (controller.timer) window.clearInterval(controller.timer); if (controller.initialTimer) window.clearTimeout(controller.initialTimer); if (controller.stream) controller.stream.getTracks().forEach(function (track) { track.stop(); }); controller.timer = null; controller.initialTimer = null; controller.stream = null; controller.captureInFlight = false; };
+        controller.hasLiveCapture = function () {
+            if (!controller.started) return false;
+            if (controller.source === 'canvas') return true;
+            return Boolean(controller.stream && controller.stream.getVideoTracks().some(function (track) { return track.readyState === 'live' && !track.muted && track.enabled; }));
+        };
+        controller.isReady = function () { return controller.hasLiveCapture() && controller.validFrames >= 2; };
+        return controller;
+    }
+
+    function setAssessmentWizardStage($form, stage) {
+        var root = $form.find('[data-assessment-wizard], [data-evaluation-supervised-gate]').first();
+        var stages = $form.find('[data-assessment-stage]');
+        var stepper = $form.find('[data-assessment-stepper]').first();
+        var activeStep = stepper.find('[data-assessment-step="' + stage + '"]').first();
+        var step = activeStep.length ? activeStep.index() + 1 : Math.max(1, stepper.find('li').length);
+        var panel = root.find('.supervised-gate-panel, .evaluation-supervised-gate-panel').first();
+        var content = $form.find('[data-test-fullscreen-scroll], [data-evaluation-instrument-content]').first();
+        if (stage === 'assessment' && content.length && stepper.length) content.prepend(stepper);
+        else if (panel.length && stepper.length && !$.contains(panel[0], stepper[0])) panel.prepend(stepper);
+        stages.each(function () {
+            var active = this.getAttribute('data-assessment-stage') === stage;
+            this.hidden = !active;
+            this.inert = !active;
+            $(this).toggleClass('d-none', !active).attr('aria-hidden', active ? 'false' : 'true');
+        });
+        stepper.attr('data-current-step', String(step));
+        stepper.find('li').each(function (index) {
+            var current = this.getAttribute('data-assessment-step') === stage;
+            var complete = index + 1 < step;
+            var marker = this.querySelector('.assessment-stepper-marker');
+            $(this).toggleClass('is-complete', complete).toggleClass('is-current', current).removeAttr('aria-current');
+            if (current) this.setAttribute('aria-current', 'step');
+            if (marker) marker.innerHTML = complete ? '<i class="bi bi-check-lg" aria-hidden="true"></i>' : String(index + 1);
+        });
+        if (stage === 'assessment') {
+            root.addClass('d-none').attr('aria-hidden', 'true');
+            content.prop('inert', false).removeAttr('aria-hidden');
+            stepper.removeClass('d-none');
+        } else {
+            root.removeClass('d-none').attr('aria-hidden', 'false');
+        }
+        var heading = $form.find('[data-assessment-stage="' + stage + '"] h1, [data-assessment-stage="' + stage + '"] h2').first()[0];
+        if (!heading && stage === 'assessment' && content.length) {
+            content.attr('tabindex', '-1');
+            heading = content[0];
+        }
+        if (heading) { heading.setAttribute('tabindex', '-1'); try { heading.focus({preventScroll: true}); } catch (error) { heading.focus(); } }
+    }
+
+    function initAssessmentWizardIdentity($form) {
+        var identityStage = $form.find('[data-assessment-stage="identity"]');
+        if ($form.data('assessment-identity-ready')) return;
+        $form.data('assessment-identity-ready', true);
+        var activeStage = $form.find('[data-assessment-stage]').filter(function () { return !this.hidden && !this.classList.contains('d-none'); }).first();
+        if (activeStage.length) setAssessmentWizardStage($form, String(activeStage.attr('data-assessment-stage') || 'instructions'));
+        if (!identityStage.length) return;
+        $form.on('click.assessmentIdentity', '[data-assessment-face-submit]', function () {
+            var button = this;
+            var embedding = $form.find('[name="face_embedding"]').val();
+            var liveness = parseFloat($form.find('[name="face_liveness"]').val() || '0');
+            var threshold = parseFloat($form.attr('data-face-liveness-threshold') || '0.60');
+            var file = $form.find('[name="face_image"]')[0];
+            var errorBox = identityStage.find('[data-assessment-face-error]');
+            if (!embedding || !file || !file.files || !file.files.length || !Number.isFinite(liveness) || liveness < threshold) {
+                errorBox.text('Completa la prueba de vida con la cámara antes de continuar.').removeClass('d-none');
+                return;
+            }
+            errorBox.addClass('d-none').text('');
+            $(button).prop('disabled', true).data('original-text', $(button).text()).text('Verificando identidad…');
+            var refreshChallenge = window.FaceRecognitionChallenges && window.FaceRecognitionChallenges.refresh;
+            Promise.resolve().then(function () {
+                if (typeof refreshChallenge !== 'function') throw new Error('No se pudo preparar una nueva verificación facial. Recarga la página e inténtalo otra vez.');
+                return refreshChallenge($form[0]);
+            }).then(function () {
+                return fetch(String($form.attr('data-assessment-entry-url') || ''), {
+                    method: 'POST', credentials: 'same-origin', headers: {'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest'}, body: new FormData($form[0])
+                });
+            }).then(function (response) {
+                return response.json().then(function (payload) { if (!response.ok || !payload || payload.ok !== true) throw new Error((payload && payload.message) || 'No fue posible validar la identidad.'); return payload; });
+            }).then(function () {
+                var camera = identityStage.find('[data-face-camera]')[0];
+                if (camera) {
+                    var video = camera.querySelector('[data-face-video]');
+                    var stream = video && video.srcObject;
+                    if (stream && stream.getTracks) stream.getTracks().forEach(function (track) { track.stop(); });
+                    if (video) video.srcObject = null;
+                    var photo = camera.querySelector('[data-face-photo]'); if (photo) { photo.removeAttribute('src'); photo.classList.add('d-none'); }
+                    if (file) file.value = '';
+                }
+                $form.attr('data-assessment-identity-verified', '1');
+                var next = $form.find('[data-assessment-stage="components"]').length ? 'components' : 'instructions';
+                setAssessmentWizardStage($form, next);
+            }).catch(function (error) {
+                errorBox.text(error.message || 'No fue posible validar la identidad.').removeClass('d-none');
+                $(button).prop('disabled', false).text($(button).data('original-text') || 'Verificar identidad y continuar');
+            });
+        });
+    }
+
     function initTestActivityTracking($form) {
         if (!$form.length) {
             return;
@@ -1710,10 +2690,32 @@ $(function () {
             return;
         }
 
+        initAssessmentWizardIdentity($form);
+
         var supervisedMode = $form.attr('data-supervised-mode') === '1';
         var audioVisualMode = $form.attr('data-audio-visual-mode') === '1';
+        var assessmentFlow = createAssessmentFlowComponent({
+            activityUrl: activityUrl,
+            csrfToken: csrfToken,
+            appendActivityMetadata: function (payload, metadata) {
+                payload.append('block_number', String(currentBlock()));
+                payload.append('remaining_seconds', String(remainingSeconds()));
+                payload.append('url_path', window.location.pathname);
+                $.each(metadata || {}, function (key, value) {
+                    if (value !== null && typeof value !== 'undefined' && value !== '') payload.append(key, String(value));
+                });
+            }
+        });
+        var screenController = null;
+        var audioVisualBrowserLog = initAudioVisualBrowserLog($form);
         var $audioVisualReconnectPanel = $form.find('[data-audio-visual-reconnect-panel]');
         var audioVisualReconnect = null;
+        var audioVisualCompatibility = audioVisualMode ? applyAudioVisualBrowserCompatibility($form) : {ok: true};
+        if (audioVisualMode) audioVisualBrowserLog('audio_visual_browser_compatibility', {source: audioVisualCompatibility.source, ok: audioVisualCompatibility.ok, user_agent: String(window.navigator && window.navigator.userAgent || '').slice(0, 160)});
+        var $supervisedStart = $form.find('[data-supervised-start]');
+        if (audioVisualMode && $supervisedStart.length && !audioVisualCompatibility.ok) {
+            $supervisedStart.prop('disabled', true);
+        }
 
         function setAudioVisualSecurityPause(paused, statusMessage) {
             if (!audioVisualMode) return;
@@ -1729,6 +2731,10 @@ $(function () {
             if (!audioVisualMode) {
                 return $.Deferred().resolve().promise();
             }
+            if (!audioVisualCompatibility.ok) {
+                $form.find('[data-audio-visual-status]').removeClass('d-none').text(audioVisualCompatibility.message);
+                return $.Deferred().reject('screen_capture_browser_unsupported').promise();
+            }
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) {
                 showNotification('error', 'Este navegador no permite iniciar el control audiovisual.');
                 return $.Deferred().reject('media_unsupported').promise();
@@ -1736,17 +2742,36 @@ $(function () {
 
             var mediaInitUrl = $form.attr('data-media-init-url') || '';
             var mediaChunkUrl = $form.attr('data-media-chunk-url') || '';
+            var mediaFailureUrl = $form.attr('data-media-failure-url') || '';
             var csrf = csrfToken;
             var policy = $form.find('[data-audio-visual-policy]').val() || 'pause';
             var interruptionPolicy = $form.attr('data-audio-visual-interruption-policy') || policy;
             var voicePolicy = $form.attr('data-audio-visual-voice-policy') || 'warn';
             var permissionPolicy = $form.attr('data-audio-visual-permission-policy') || interruptionPolicy;
-            var qualityProfile = $form.attr('data-audio-visual-quality-profile') || 'standard';
+            var qualityProfile = $form.attr('data-audio-visual-quality-profile') || 'economical';
             var consented = $form.find('[data-audio-visual-consent]').is(':checked');
             if (!consented || !mediaInitUrl || !mediaChunkUrl) {
                 showNotification('warning', 'Debes aceptar la captura audiovisual antes de comenzar.');
                 return $.Deferred().reject('media_consent_required').promise();
             }
+
+            var audioVisualDiagnostic = function (eventType, metadata) {
+                audioVisualBrowserLog(eventType, metadata);
+                var riskUrl = $form.attr('data-media-risk-url') || '';
+                if (!riskUrl) return;
+                var payload = new URLSearchParams();
+                payload.append('csrf_token', csrfToken);
+                payload.append('event_type', eventType);
+                payload.append('severity', 'info');
+                payload.append('evidence_id', $form.attr('data-media-evidence-id') || '');
+                payload.append('metadata', JSON.stringify(metadata || {}));
+                window.fetch(riskUrl, {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'}, body: payload.toString(), keepalive: true}).catch(function () {});
+            };
+            screenController = assessmentFlow.createScreenCapture($form, function () { return $form.attr('data-media-evidence-id') || ''; }, {preferCanvas: audioVisualCompatibility.source === 'canvas', onDiagnostic: audioVisualDiagnostic});
+            audioVisualDiagnostic('audio_visual_browser_compatibility', {source: audioVisualCompatibility.source, ok: audioVisualCompatibility.ok, user_agent: String(window.navigator && window.navigator.userAgent || '').slice(0, 160)});
+            setAudioVisualCheck($form, 'screen', 'Captura', 'pending', 'Solicitando acceso a pantalla completa…');
+            var screenCapturePromise = screenController.start({deferValidation: true});
+            $form.data('audio-visual-screen', screenController);
 
             var initPayload = new URLSearchParams();
             initPayload.append('csrf_token', csrf);
@@ -1767,26 +2792,28 @@ $(function () {
                 });
             }).then(function (payload) {
                 $form.attr('data-media-evidence-id', String(payload.evidence_id || ''));
-                return navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: { ideal: 'user' }, width: { ideal: 640, max: 1280 }, height: { ideal: 360, max: 720 }, frameRate: { ideal: 15, max: 20 } },
-                    audio: { channelCount: { ideal: 1 }, echoCancellation: true, noiseSuppression: true, autoGainControl: true }
-                });
+                return requestAudioVisualDevices($form);
             }).then(function (stream) {
                 var activeStream = stream;
                 var mediaRecorder;
                 var chunkNumber = 0;
                 var uploadChain = Promise.resolve();
-                var mediaStartedAt = Date.now();
+                var pendingChunks = 0;
+                var maxPendingChunks = 4;
+                var mediaStartedAt = 0;
+                var mediaIntegrityFailure = null;
                 var mimeCandidates = ['video/webm;codecs=vp8,opus', 'video/webm;codecs=vp9,opus', 'video/webm', 'video/mp4'];
                 var mimeType = mimeCandidates.find(function (candidate) { return MediaRecorder.isTypeSupported(candidate); }) || '';
                 var quality = {
                     economical: { video: 400000, audio: 48000 },
                     standard: { video: 700000, audio: 80000 },
                     high: { video: 1200000, audio: 128000 }
-                }[qualityProfile] || { video: 700000, audio: 80000 };
+                }[qualityProfile] || { video: 400000, audio: 48000 };
                 var recorderOptions = mimeType ? { mimeType: mimeType, videoBitsPerSecond: quality.video, audioBitsPerSecond: quality.audio } : {};
+                mediaRisk('audio_visual_recorder_format_selected', 'info', null, {mime_type: mimeType || 'browser_default', quality_profile: qualityProfile});
 
                 function mediaRisk(eventType, severity, confidence, metadata) {
+                    audioVisualBrowserLog(eventType, Object.assign({severity: severity || 'attention'}, metadata || {}));
                     var riskUrl = $form.attr('data-media-risk-url') || '';
                     if (!riskUrl) return;
                     var payload = new URLSearchParams();
@@ -1799,25 +2826,30 @@ $(function () {
                     window.fetch(riskUrl, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' }, body: payload.toString(), keepalive: true }).catch(function () {});
                 }
 
-                function uploadChunk(blob, number) {
-                    var formData = new FormData();
-                    formData.append('csrf_token', csrf);
-                    formData.append('evidence_id', $form.attr('data-media-evidence-id') || '');
-                    formData.append('chunk_number', String(number));
-                    formData.append('mime_type', mimeType || blob.type || 'video/webm');
-                    formData.append('chunk', blob, 'chunk-' + number + '.bin');
-                    return window.fetch(mediaChunkUrl, { method: 'POST', credentials: 'same-origin', headers: { 'Accept': 'application/json' }, body: formData }).then(function (response) {
-                        if (!response.ok) throw new Error('chunk_upload_failed');
-                        return response.json();
-                    });
-                }
+                var mediaTransport = assessmentFlow.createMediaTransport({
+                    getEvidenceId: function () { return $form.attr('data-media-evidence-id') || ''; },
+                    getChunkUrl: function () { return mediaChunkUrl; },
+                    getFailureUrl: function () { return mediaFailureUrl; },
+                    getMimeType: function (blob) { return mimeType || blob.type || 'video/webm'; },
+                    onRetry: function (number, attempt, error) { mediaRisk('upload_retry_requested', 'attention', null, { chunk_number: number, attempt: attempt, reason: error.message || 'network_error' }); }
+                });
 
                 function queueChunk(blob) {
                     if (!blob || !blob.size) return;
+                    if (pendingChunks >= maxPendingChunks) {
+                        mediaRisk('recording_upload_backlog', 'risk', null, { pending_chunks: pendingChunks, limit: maxPendingChunks });
+                        var droppedNumber = chunkNumber++;
+                        mediaIntegrityFailure = new Error('recording_upload_backlog');
+                        uploadChain = uploadChain.then(function () { return mediaTransport.reportFailure(droppedNumber, mediaIntegrityFailure); }).catch(function (error) { mediaIntegrityFailure = error; });
+                        return;
+                    }
+                    pendingChunks++;
                     var number = chunkNumber++;
-                    uploadChain = uploadChain.then(function () { return uploadChunk(blob, number); }).catch(function (error) {
-                        mediaRisk('recording_upload_failed', 'risk', null, { chunk_number: number, reason: error.message || 'upload_failed' });
-                    });
+                    uploadChain = uploadChain.then(function () { return mediaTransport.upload(blob, number); }).catch(function (error) {
+                        mediaRisk('recording_upload_failed', 'risk', null, { chunk_number: number, attempts: 3, reason: error.message || 'upload_failed' });
+                        mediaIntegrityFailure = error;
+                        return mediaTransport.reportFailure(number, error).catch(function (reportError) { mediaIntegrityFailure = reportError; });
+                    }).then(function () { pendingChunks = Math.max(0, pendingChunks - 1); });
                 }
 
                 var interruptedTracks = {};
@@ -1826,6 +2858,8 @@ $(function () {
                         track.addEventListener(eventName, function () {
                             interruptedTracks[kind] = true;
                             mediaRisk(kind + '_' + (eventName === 'mute' ? 'muted' : 'track_ended'), 'risk', null, { ready_state: track.readyState });
+                            setAudioVisualCheck($form, kind, kind === 'camera' ? 'Cámara' : 'Micrófono', 'error', kind === 'camera' ? 'La cámara se interrumpió o dejó de responder.' : 'El micrófono se interrumpió o dejó de responder.');
+                            setAudioVisualReconnectStatus($form, kind, 'interrumpido o sin respuesta');
                             showNotification('warning', (kind === 'camera' ? 'La camara' : 'El microfono') + ' se interrumpio. Esta accion quedara registrada.');
                             $form.addClass('is-audio-visual-interrupted');
                             if (permissionPolicy === 'pause' || interruptionPolicy === 'pause') setAudioVisualSecurityPause(true, 'La cámara o el micrófono se interrumpieron. Presiona el botón para reconectar.');
@@ -1834,6 +2868,7 @@ $(function () {
                     });
                     track.addEventListener('unmute', function () {
                         mediaRisk(kind + '_recovered', 'info', null, {});
+                        setAudioVisualCheck($form, kind, kind === 'camera' ? 'Cámara' : 'Micrófono', 'ok', kind === 'camera' ? 'Cámara activa nuevamente.' : 'Micrófono activo nuevamente.');
                         delete interruptedTracks[kind];
                         if (Object.keys(interruptedTracks).length === 0) {
                             $form.removeClass('is-audio-visual-interrupted');
@@ -1848,39 +2883,103 @@ $(function () {
                     interruptedTracks = {};
                     nextStream.getVideoTracks().forEach(function (track) { monitorTrack(track, 'camera'); });
                     nextStream.getAudioTracks().forEach(function (track) { monitorTrack(track, 'microphone'); });
-                    try { mediaRecorder = new MediaRecorder(nextStream, recorderOptions); } catch (error) {
+                    try { mediaRecorder = new MediaRecorder(nextStream, recorderOptions); mediaRisk('audio_visual_recorder_created', 'info', null, {mime_type: mimeType || 'browser_default'}); } catch (error) {
                         nextStream.getTracks().forEach(function (track) { track.stop(); });
+                        mediaRisk('audio_visual_recorder_failed', 'risk', null, {mime_type: mimeType || 'browser_default', reason: error && (error.name || error.message) || 'recorder_error'});
                         mediaRisk('recording_error', 'risk', null, { reason: error.message || 'recorder_error' });
                         throw error;
                     }
                     mediaRecorder.ondataavailable = function (event) { queueChunk(event.data); };
-                    mediaRecorder.onerror = function () { mediaRisk('recording_error', 'risk', null, {}); };
-                    mediaRecorder.start(5000);
+                    mediaRecorder.onerror = function (event) { mediaIntegrityFailure = new Error('recording_error'); mediaRisk('recording_error', 'risk', null, {reason: event && event.error && (event.error.name || event.error.message) || 'recorder_error'}); };
+                    // Quince segundos equilibra frecuencia de envío y tamaño de fragmento.
                     $form.data('audio-visual-stream', nextStream).data('audio-visual-recorder', mediaRecorder);
                 }
 
-                startRecorderForStream(stream);
-                $form.data('audio-visual-upload-chain', function () { return uploadChain; }).data('audio-visual-started-at', mediaStartedAt);
-                $form.find('[data-audio-visual-status]').removeClass('d-none alert-secondary alert-danger').addClass('alert-success').text('Cámara y micrófono activados correctamente. El control audiovisual está activo.');
+                var cameraTrack = stream.getVideoTracks()[0];
+                var microphoneTrack = stream.getAudioTracks()[0];
+                if (!cameraTrack || cameraTrack.readyState !== 'live') throw new Error('camera_not_operational');
+                if (!microphoneTrack || microphoneTrack.readyState !== 'live') throw new Error('microphone_not_operational');
+                setAudioVisualCheck($form, 'camera', 'Cámara', 'ok', 'Acceso concedido y cámara activa.');
+                setAudioVisualCheck($form, 'microphone', 'Micrófono', 'ok', 'Acceso concedido y micrófono activo.');
+                var preview = $form.find('[data-audio-visual-preview]').first()[0];
+                if (preview) { preview.srcObject = stream; preview.classList.remove('d-none'); preview.play().catch(function () {}); }
+                $form.find('[data-audio-visual-status]').removeClass('d-none alert-secondary alert-danger').addClass('alert-success').text('Cámara y micrófono activados correctamente. Verificando captura de pantalla.');
+                screenController.onInterrupted = function (reason) {
+                    mediaRisk(reason, 'risk', null, { source: screenController.source });
+                    setAudioVisualCheck($form, 'screen', 'Captura', 'error', 'La selección de pantalla se interrumpió.');
+                    $form.addClass('is-audio-visual-interrupted');
+                    if (permissionPolicy === 'pause' || interruptionPolicy === 'pause') setAudioVisualSecurityPause(true, 'La captura de pantalla se interrumpió. Vuelve a autorizarla para continuar.');
+                    if (permissionPolicy === 'block' || interruptionPolicy === 'block' || permissionPolicy === 'pause' || interruptionPolicy === 'pause') $form.find('[data-test-submit-actions] button').prop('disabled', true);
+                };
+                screenController.onFailure = function (reason, error) {
+                    var detail = error && (error.message || error.name) || 'capture_failed';
+                    mediaIntegrityFailure = error || new Error('screen_capture_failed');
+                    mediaRisk(reason, 'risk', null, { source: screenController.source || 'unknown', detail: detail });
+                    // Un fallo puntual de generación/subida no implica que la
+                    // pista getDisplayMedia haya terminado. Esa interrupción
+                    // real se atiende exclusivamente en onInterrupted.
+                    setAudioVisualCheck($form, 'screen', 'Captura', 'warning', 'Una captura puntual no pudo guardarse; la captura continúa activa.');
+                    $form.find('[data-audio-visual-status]').removeClass('alert-success alert-danger').addClass('alert-warning').text('Una captura puntual no pudo guardarse. La captura de pantalla continúa activa.');
+                };
+                screenCapturePromise = screenCapturePromise.then(function () { return screenController.validate(); }).then(function () {
+                    if (screenController.source === 'canvas' && !screenController.fallbackLogged) {
+                        screenController.fallbackLogged = true;
+                        mediaRisk('screen_capture_fallback_canvas', 'attention', null, {reason: screenController.fallbackReason || 'screen_capture_unavailable'});
+                    }
+                    startRecorderForStream(stream);
+                    $form.data('audio-visual-upload-chain', function () { return uploadChain; }).data('audio-visual-started-at', mediaStartedAt);
+                    $form.data('audio-visual-begin-recording', function () {
+                        if (!mediaRecorder || mediaRecorder.state !== 'inactive') return false;
+                        mediaStartedAt = Date.now();
+                        if (!assessmentFlow.startRecorder(mediaRecorder, 15000)) { mediaStartedAt = 0; return false; }
+                        $form.data('audio-visual-started-at', mediaStartedAt);
+                        return true;
+                    });
+                    return true;
+                }).catch(function (error) {
+                    setAudioVisualReconnectStatus($form, 'screen', error && error.message === 'full_screen_required' ? 'debes seleccionar toda la pantalla' : 'no disponible');
+                    $form.find('[data-audio-visual-status]').removeClass('alert-success alert-secondary').addClass('alert-danger').text(error && error.message === 'full_screen_required' ? 'Selecciona “Toda la pantalla” para continuar.' : 'No se pudo activar la captura de pantalla.');
+                    setAudioVisualSecurityPause(true, 'La captura de pantalla no está disponible. Revisa el permiso indicado y vuelve a intentarlo.');
+                    throw error;
+                });
                 audioVisualReconnect = function () {
-                    var constraints = {
-                        video: { facingMode: { ideal: 'user' }, width: { ideal: 640, max: 1280 }, height: { ideal: 360, max: 720 }, frameRate: { ideal: 15, max: 20 } },
-                        audio: { channelCount: { ideal: 1 }, echoCancellation: true, noiseSuppression: true, autoGainControl: true }
-                    };
-                    return navigator.mediaDevices.getUserMedia(constraints).then(function (newStream) {
-                        if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+                    // No volver a abrir el selector si la pantalla sigue activa:
+                    // una incidencia de cámara/micrófono no debe crear un ciclo
+                    // de permisos de pantalla en cada reintento.
+                    var screenIsLive = Boolean(screenController && screenController.hasLiveCapture());
+                    if (!screenIsLive && screenController) screenController.stop();
+                    setAudioVisualCheck($form, screenIsLive ? 'camera' : 'screen', screenIsLive ? 'Cámara y micrófono' : 'Captura', 'pending', screenIsLive ? 'Reconectando cámara y micrófono…' : 'Solicitando acceso a pantalla completa…');
+                    var screenRecovery = screenIsLive
+                        ? (screenController.isReady() ? Promise.resolve(screenController) : screenController.validate())
+                        : screenController.start();
+                    var reconnectStream = null;
+                    return screenRecovery.then(function () { return requestAudioVisualDevices($form); }).then(function (newStream) {
+                        reconnectStream = newStream;
+                        assessmentFlow.stopRecorder(mediaRecorder);
                         if (activeStream) activeStream.getTracks().forEach(function (track) { track.stop(); });
                         startRecorderForStream(newStream);
+                        var beginRecording = $form.data('audio-visual-begin-recording');
+                        if (beginRecording && !beginRecording()) throw new Error('recorder_not_ready');
                         mediaRisk('audio_visual_reconnected', 'info', null, { source: 'user_action' });
                         $form.removeClass('is-audio-visual-interrupted');
                         setAudioVisualSecurityPause(false);
+                        if (screenController) screenController.startPeriodic();
                         if (permissionPolicy === 'block' || permissionPolicy === 'pause' || interruptionPolicy === 'block' || interruptionPolicy === 'pause') {
                             $form.find('[data-test-submit-actions] button').prop('disabled', false);
                         }
                         return true;
                     }).catch(function (error) {
-                        mediaRisk('audio_visual_reconnect_failed', 'risk', null, { reason: error.name || 'permission_denied' });
-                        setAudioVisualSecurityPause(true, 'No se pudo reconectar. Revisa los permisos y vuelve a intentarlo.');
+                        // Si el stream nuevo llegó a crearse pero falló el inicio
+                        // del recorder, libéralo ahora y no dejes cámara/micrófono
+                        // abiertos mientras el usuario vuelve a intentar.
+                        if (reconnectStream) {
+                            assessmentFlow.stopRecorder(mediaRecorder);
+                            reconnectStream.getTracks().forEach(function (track) { track.stop(); });
+                            if (activeStream === reconnectStream) activeStream = null;
+                            mediaRecorder = null;
+                        }
+                        mediaRisk('audio_visual_reconnect_failed', 'risk', null, { component: error.audioVisualComponent || 'unknown', reason: error.name || error.message || 'permission_denied' });
+                        setAudioVisualSecurityPause(true, error.audioVisualMessage || 'No se pudo reconectar. Revisa los permisos y vuelve a intentarlo.');
                         throw error;
                     });
                 };
@@ -1891,6 +2990,9 @@ $(function () {
                 var voiceTimer = null;
                 try {
                     audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    if (audioContext.state === 'suspended' && typeof audioContext.resume === 'function') {
+                        audioContext.resume().catch(function () {});
+                    }
                     var audioSource = audioContext.createMediaStreamSource(stream);
                     analyser = audioContext.createAnalyser();
                     analyser.fftSize = 1024;
@@ -1915,12 +3017,7 @@ $(function () {
                             lastVoiceRisk = Date.now();
                             lastVoiceSignal = Date.now();
                             mediaRisk('multiple_voice_possible', voicePolicy === 'log' ? 'info' : 'attention', null, { rms: Number(rms.toFixed(4)), strong_bands: strongBands, source: 'browser_preliminary', configured_action: voicePolicy });
-                            if (voicePolicy === 'warn') showNotification('warning', 'Se detecto una posible multiplicidad de voces. El evento quedo registrado.');
-                            if (voicePolicy === 'pause') {
-                                $form.addClass('is-audio-visual-interrupted');
-                                $form.find('[data-test-submit-actions] button').prop('disabled', true);
-                                setAudioVisualSecurityPause(true, 'Se detectó una posible multiplicidad de voces. Revisa el entorno y reconecta el control para continuar.');
-                            }
+                            showNotification('warning', 'Se detectó una posible multiplicidad de voces. El evento quedó registrado como atención.');
                         }
                         if (voicePolicy === 'pause' && $form.hasClass('is-audio-visual-interrupted') && Object.keys(interruptedTracks).length === 0 && Date.now() - lastVoiceSignal > 5000) {
                             $form.removeClass('is-audio-visual-interrupted');
@@ -1934,54 +3031,89 @@ $(function () {
                     if (voiceTimer) window.clearInterval(voiceTimer);
                     if (audioContext) audioContext.close().catch(function () {});
                     activeStream.getTracks().forEach(function (track) { track.stop(); });
+                    screenController.stop();
                 });
                 return true;
             });
         }
 
-        function finalizeAudioVisual() {
+        function finalizeAudioVisual(progress) {
             if (!audioVisualMode) return Promise.resolve();
             var recorder = $form.data('audio-visual-recorder');
-            var uploadChain = $form.data('audio-visual-upload-chain');
+            var getUploadChain = $form.data('audio-visual-upload-chain');
             var finalizeUrl = $form.attr('data-media-finalize-url') || '';
             var evidenceId = $form.attr('data-media-evidence-id') || '';
             var uploadFailurePolicy = $form.attr('data-audio-visual-upload-failure-policy') || 'continue';
-            if (!recorder || !finalizeUrl || !evidenceId) return Promise.resolve();
-            return new Promise(function (resolve) {
-                var stopped = false;
-                recorder.addEventListener('stop', function () {
-                    if (stopped) return;
-                    stopped = true;
-                    function requestFinalize(attempt) {
+            if (!recorder || !finalizeUrl || !evidenceId || !screenController || !screenController.capture || !screenController.flushUploads) return Promise.reject(new Error('audio_visual_recorder_or_evidence_missing'));
+            if (screenController && screenController.stopScheduling) screenController.stopScheduling();
+            var update = function (percent, label, detail, eta) { if (progress && progress.update) progress.update(percent, label, detail, eta); };
+            var startedScreenCapture = $form.data('audio-visual-started-screen-capture');
+            update(55, 'Guardando capturas de pantalla…', 'Se generará una captura final y se confirmarán las capturas pendientes.', 12);
+            return Promise.resolve(startedScreenCapture).then(function () {
+                if (mediaIntegrityFailure || $form.data('audio-visual-integrity-failure')) throw new Error('audio_visual_evidence_incomplete');
+                return screenController && screenController.flushUploads ? screenController.flushUploads() : null;
+            }).then(function () {
+                return screenController && screenController.flushUploads ? screenController.flushUploads().catch(function (error) {
+                    mediaRisk('screen_capture_upload_failed', 'risk', null, {reason: error && error.message || 'capture_upload_failed', attempts: 3});
+                    mediaIntegrityFailure = error || new Error('screen_capture_upload_failed');
+                    throw mediaIntegrityFailure;
+                }) : null;
+            }).then(function () {
+                return screenController && screenController.capture ? screenController.capture('assessment_finished').catch(function (error) {
+                    if (!error || error.message !== 'screen_capture_busy') throw error;
+                    return screenController.flushUploads().then(function () { return screenController.capture('assessment_finished'); });
+                }) : null;
+            }).then(function () {
+                update(72, 'Cerrando la grabación de video…', 'Las capturas se guardaron. Esperando el último fragmento del video.', 8);
+                return new Promise(function (resolve, reject) {
+                    if (recorder.state === 'inactive') { resolve(); return; }
+                    var timeout = window.setTimeout(function () { reject(new Error('recorder_stop_timeout')); }, 10000);
+                    recorder.addEventListener('stop', function () { window.clearTimeout(timeout); resolve(); }, {once: true});
+                    try { recorder.stop(); } catch (error) { window.clearTimeout(timeout); reject(error); }
+                });
+            }).then(function () {
+                update(82, 'Confirmando fragmentos del video…', 'Los fragmentos se envían durante la evaluación; ahora se espera el envío final pendiente.', Math.max(5, pendingChunks * 3 + 5));
+                var uploadChain = typeof getUploadChain === 'function' ? getUploadChain() : null;
+                return Promise.resolve(uploadChain);
+            }).then(function () {
+                if (mediaIntegrityFailure || $form.data('audio-visual-integrity-failure')) throw new Error('audio_visual_evidence_incomplete');
+                update(94, 'Finalizando evidencia audiovisual…', 'El servidor está verificando las capturas y el video recibidos.', 5);
+                function requestFinalize(attempt) {
                         var payload = new URLSearchParams();
                         payload.append('csrf_token', csrfToken);
                         payload.append('evidence_id', evidenceId);
                         payload.append('duration_seconds', String(Math.max(0, Math.round((Date.now() - ($form.data('audio-visual-started-at') || Date.now())) / 1000))));
                         return window.fetch(finalizeUrl, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8', 'Accept': 'application/json' }, body: payload.toString() }).then(function (response) {
                             return response.json().catch(function () { return { ok: false, reason: 'invalid_finalize_response' }; }).then(function (result) {
-                                if (!result.ok && uploadFailurePolicy === 'retry_once' && attempt < 2) {
+                                if (!result.ok && attempt < 3) {
                                     mediaRisk('upload_retry_requested', 'attention', null, { attempt: attempt, reason: result.reason || 'finalize_failed' });
                                     return requestFinalize(attempt + 1);
                                 }
                                 return result;
                             });
                         }).catch(function (error) {
-                            if (uploadFailurePolicy === 'retry_once' && attempt < 2) {
+                            if (attempt < 3) {
                                 mediaRisk('upload_retry_requested', 'attention', null, { attempt: attempt, reason: error.message || 'network_error' });
                                 return requestFinalize(attempt + 1);
                             }
                             return { ok: false, reason: error.message || 'network_error' };
                         });
+                }
+                return requestFinalize(1).then(function (result) {
+                    if (!result || !result.ok) {
+                        var finalizeError = new Error((result && result.reason) || 'audio_visual_finalize_failed');
+                        finalizeError.payload = result || {};
+                        throw finalizeError;
                     }
-                    Promise.resolve(uploadChain ? uploadChain() : null).then(function () {
-                        return requestFinalize(1);
-                    }).then(function () {
-                        var cleanup = $form.data('audio-visual-cleanup');
-                        if (cleanup) cleanup();
-                        resolve();
-                    });
+                    var cleanup = $form.data('audio-visual-cleanup');
+                    if (cleanup) cleanup();
+                    update(100, 'Envío recibido', 'Respuestas, actividad, capturas y video fueron confirmados; el procesamiento final puede continuar en segundo plano.', 0);
+                    return result;
                 });
-                if (recorder.state !== 'inactive') recorder.stop(); else resolve();
+            }).catch(function (error) {
+                var cleanup = $form.data('audio-visual-cleanup');
+                if (cleanup) cleanup();
+                throw error;
             });
         }
 
@@ -2061,28 +3193,7 @@ $(function () {
         }
 
         function postActivity(eventType, metadata) {
-            var payload = new URLSearchParams();
-            payload.append('csrf_token', csrfToken);
-            payload.append('event_type', eventType);
-            payload.append('block_number', String(currentBlock()));
-            payload.append('remaining_seconds', String(remainingSeconds()));
-            payload.append('url_path', window.location.pathname);
-
-            $.each(metadata || {}, function (key, value) {
-                if (value !== null && typeof value !== 'undefined' && value !== '') {
-                    payload.append(key, String(value));
-                }
-            });
-
-            window.fetch(activityUrl, {
-                method: 'POST',
-                credentials: 'same-origin',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'
-                },
-                body: payload.toString(),
-                keepalive: true
-            }).catch(function () {});
+            assessmentFlow.sendActivity(eventType, metadata, true);
         }
 
         function sendHeartbeat() {
@@ -2188,11 +3299,52 @@ $(function () {
 
         resetInactivityTimer();
 
+        var componentValidationRequired = $form.attr('data-assessment-components-required') === '1';
         if (!supervisedMode) {
+            var $instructionsGate = $form.find('[data-assessment-stage="instructions"]');
+            var $componentStage = $form.find('[data-assessment-stage="components"]');
+            var $componentConsent = $componentStage.find('[data-audio-visual-consent]');
+            var $componentStart = $componentStage.find('[data-supervised-start]');
+            var $componentStatus = $componentStage.find('[data-audio-visual-status]');
+            if ($form.attr('data-assessment-needs-activation') === '1' && $instructionsGate.length) {
+                $form.addClass('is-supervised-locked');
+                if (componentValidationRequired && $componentStage.length && $componentConsent.length && $componentStart.length) {
+                    var componentCompatibility = getAudioVisualBrowserCompatibility();
+                    $componentStart.prop('disabled', !$componentConsent.is(':checked'));
+                    $componentConsent.on('change.assessmentComponentPreflight', function () {
+                        runAudioVisualConsentPreflight($form, $componentConsent, $componentStart, $componentStatus[0], componentCompatibility);
+                    });
+                    $form.on('click.assessmentComponentPreflightRetry', '[data-audio-visual-preflight-retry]', function () {
+                        $componentConsent.prop('checked', true);
+                        runAudioVisualConsentPreflight($form, $componentConsent, $componentStart, $componentStatus[0], componentCompatibility);
+                    });
+                    $componentStart.on('click.assessmentComponentContinue', function () {
+                        if ($componentStart.prop('disabled')) return;
+                        var stream = $form.data('audio-visual-preflight-screen-stream');
+                        if (stream && stream.getTracks) stream.getTracks().forEach(function (track) { track.stop(); });
+                        $form.removeData('audio-visual-preflight-screen-stream');
+                        setAssessmentWizardStage($form, 'instructions');
+                    });
+                }
+                $form.on('click.assessmentStart', '[data-assessment-begin]', function () {
+                    var $button = $(this).prop('disabled', true);
+                    assessmentFlow.sendActivity('supervised_started', {remaining_seconds: remainingSeconds()}, false, true).then(function (result) {
+                        if (!result || result.ok !== true) throw new Error('No se pudo activar la sesión.');
+                        $form.removeClass('is-supervised-locked').addClass('is-supervised-active');
+                        $form.closest('.test-taking-shell').removeClass('is-assessment-preparing');
+                        $form.data('evaluation-countdown-started', true).trigger('evaluation:activated');
+                        setAssessmentWizardStage($form, 'assessment');
+                        resetInactivityTimer();
+                    }).catch(function () {
+                        $button.prop('disabled', false);
+                        showNotification('error', 'No se pudo iniciar. Verifica la conexión e inténtalo nuevamente.');
+                    });
+                });
+            }
             return;
         }
 
-        var $gate = $form.find('[data-supervised-gate]');
+        var $gate = $form.find('[data-assessment-wizard], [data-supervised-gate]').first();
         var $exitWarning = $form.find('[data-supervised-exit-warning]');
         var fullscreenAttempt = 0;
         var supervisedStarted = false;
@@ -2294,9 +3446,66 @@ $(function () {
         }
 
         function startSupervisedEvaluation() {
+            // Si el proceso deshabilitó la validación de componentes, solicita
+            // pantalla completa desde esta confirmación (gesto del usuario).
+            // Así la etapa omitida no elimina el requisito independiente del
+            // modo supervisado.
+            // El paso de instrucciones se mantiene en la ventana normal. La
+            // pantalla completa se solicita desde este clic final, justo antes
+            // de activar el test.
+            var needsFullscreen = supervisedMode;
+            var fullscreenPromise = needsFullscreen ? requestFormFullscreen('fullscreen_entered') : $.Deferred().resolve().promise();
+            Promise.resolve(fullscreenPromise).then(function () { return true; }).catch(function () {
+                // La evaluación sigue en el último paso del stepper, dentro de
+                // la ventana normal; el rechazo no debe bloquear ni reiniciar
+                // la preparación.
+                $form.addClass('is-evaluation-control-warning');
+                showNotification('warning', 'No se pudo activar pantalla completa. La actividad continuará dentro de esta pantalla y la incidencia quedará registrada.');
+                return false;
+            }).then(function () {
+                // Inicia el grabador al confirmar instrucciones. Si fullscreen
+                // no está disponible, la actividad continúa en el paso actual.
+                var beginRecording = audioVisualMode ? $form.data('audio-visual-begin-recording') : null;
+                if (audioVisualMode && (!beginRecording || !beginRecording())) {
+                    throw new Error('No se pudo iniciar la grabación audiovisual. Revisa los componentes e inténtalo nuevamente.');
+                }
+                return assessmentFlow.sendActivity('supervised_started', {
+                    remaining_seconds: remainingSeconds(),
+                    evidence_id: audioVisualMode ? String($form.attr('data-media-evidence-id') || '') : ''
+                }, false, true);
+            }).then(function (result) {
+                if (!result || result.ok !== true) throw new Error('No se pudo activar la sesión.');
+                if (audioVisualMode) {
+                    sendActivity('audio_visual_recording_started', {source: 'supervised_preflight'});
+                    var screen = $form.data('audio-visual-screen');
+                    if (screen) {
+                        screen.startPeriodic();
+                        $form.data('audio-visual-started-screen-capture', screen.capture('assessment_started').catch(function (error) { $form.data('audio-visual-integrity-failure', error); return null; }));
+                    }
+                }
+                activateSupervisedInterface();
+            }).catch(function (error) {
+                var recorder = $form.data('audio-visual-recorder');
+                if (audioVisualMode && recorder && recorder.state !== 'inactive') recorder.stop();
+                supervisedStarted = false;
+                $form.removeClass('is-supervised-active');
+                setAssessmentWizardStage($form, 'instructions');
+                showNotification('error', error && error.message ? error.message : 'No se pudo iniciar la sesión. Revisa la conexión e inténtalo nuevamente.');
+            });
+        }
+
+        function showInstructionsStage() {
+            setAssessmentWizardStage($form, 'instructions');
+        }
+
+        function activateSupervisedInterface() {
             var pane = fullscreenScrollPane();
             supervisedStarted = true;
             $gate.addClass('d-none');
+            $form.removeClass('is-assessment-preparing');
+            $form.closest('.test-taking-shell').removeClass('is-assessment-preparing');
+            if (pane) { pane.inert = false; pane.removeAttribute('aria-hidden'); }
+            setAssessmentWizardStage($form, 'assessment');
             $form.addClass('is-supervised-active');
             scrollFullscreenPaneToTop('auto');
             if (pane && pane.focus) {
@@ -2464,11 +3673,13 @@ $(function () {
 
         $form.on('click.testSupervised', '[data-supervised-start]', function () {
             var startMedia = audioVisualMode && $form.data('audio-visual-init') ? $form.data('audio-visual-init')() : $.Deferred().resolve().promise();
-            startMedia.then(function () {
-                requestFormFullscreen('fullscreen_entered').then(startSupervisedEvaluation, function () {
-                    showContinueWithoutFullscreen();
-                    showNotification('warning', 'No se pudo activar pantalla completa. Puedes reintentar o continuar con advertencia registrada.');
-                });
+            Promise.resolve(startMedia).then(function () {
+                if (!audioVisualMode) {
+                    var preflightScreen = $form.data('audio-visual-preflight-screen-stream');
+                    if (preflightScreen && preflightScreen.getTracks) preflightScreen.getTracks().forEach(function (track) { track.stop(); });
+                    $form.removeData('audio-visual-preflight-screen-stream');
+                }
+                showInstructionsStage();
             }).catch(function () {
                 $form.find('[data-audio-visual-status]').removeClass('d-none alert-secondary alert-success').addClass('alert-danger').text('No se pudo activar la cámara y el micrófono. Revisa los permisos del navegador e inténtalo nuevamente.');
             });
@@ -2479,39 +3690,97 @@ $(function () {
                 reason: 'continued_without_fullscreen',
                 attempt: fullscreenAttempt
             });
-            startSupervisedEvaluation();
+            showInstructionsStage();
         });
 
-        if (audioVisualMode) {
+        $form.on('click.testAssessmentBegin', '[data-assessment-begin]', startSupervisedEvaluation);
+
+        if (componentValidationRequired) {
             var $consent = $form.find('[data-audio-visual-consent]');
             var $startButton = $form.find('[data-supervised-start]');
             $startButton.prop('disabled', !$consent.is(':checked'));
             $consent.on('change.audioVisual', function () {
-                $startButton.prop('disabled', !this.checked);
+                runAudioVisualConsentPreflight($form, $consent, $startButton, $form.find('[data-audio-visual-status]')[0], audioVisualCompatibility);
+            });
+            $form.on('click.audioVisualPreflightRetry', '[data-audio-visual-preflight-retry]', function () {
+                $consent.prop('checked', true);
+                runAudioVisualConsentPreflight($form, $consent, $startButton, $form.find('[data-audio-visual-status]')[0], audioVisualCompatibility);
             });
         }
 
         $form.on('submit.testAudioVisual', function (event) {
-            if (!audioVisualMode || $form.data('audio-visual-finalizing') || $form.data('audio-visual-finalized')) {
+            if (!audioVisualMode) return;
+            if ($form.data('audio-visual-finalizing') || $form.data('audio-visual-finalized')) {
+                event.preventDefault();
+                event.stopImmediatePropagation();
                 return;
             }
             var submitter = event.originalEvent && event.originalEvent.submitter;
             var action = submitter && submitter.name === 'test_action' ? submitter.value : '';
-            if (action.indexOf('save_block') === 0) {
+            if (action.indexOf('save_block') === 0 && action !== 'save_block_finish') {
                 return;
             }
             event.preventDefault();
             $form.data('audio-visual-finalizing', true);
+            var progress = createAssessmentSubmissionProgress('Guardando test');
+            var answersWereConfirmed = false;
             $form.find('button[type="submit"]').prop('disabled', true);
-            Promise.resolve(saveDraftAnswers($form, { immediate: true, force: true, reason: 'before_audio_visual_finalize' }))
-                .then(function () { return $form.data('audio-visual-finalize') ? $form.data('audio-visual-finalize')() : null; })
+            progress.update(10, 'Guardando respuestas…', 'El servidor guardará y verificará cada respuesta antes de registrar la actividad.', 8);
+            Promise.resolve()
                 .then(function () {
-                    $form.data('audio-visual-finalized', true).data('test-allow-exit', true);
-                    $form[0].submit();
+                    var finalData = new FormData($form[0]);
+                    var postedActions = finalData.getAll('test_action');
+                    finalData.delete('test_action');
+                    var finalAction = postedActions.length ? String(postedActions[postedActions.length - 1]) : (action || 'complete');
+                    finalData.set('test_action', finalAction);
+                    return window.fetch($form.attr('action') || window.location.href, {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                        body: finalData
+                    }).then(function (response) {
+                        return response.json().catch(function () { return {}; }).then(function (payload) {
+                            answersWereConfirmed = payload.answers_saved === true && payload.answers_verified === true;
+                            if (!response.ok || payload.ok !== true || !answersWereConfirmed || payload.activity_recorded !== true) {
+                                var error = new Error(payload.reason || 'answers_save_failed');
+                                error.payload = payload;
+                                throw error;
+                            }
+                            return payload;
+                        });
+                    });
                 })
-                .catch(function () {
+                .then(function (payload) {
+                    progress.update(34, 'Respuestas guardadas y verificadas', 'El servidor confirmó ' + Number(payload.answers_saved_count || 0) + ' respuestas antes de avanzar.', 14);
+                    return new Promise(function (resolve) { window.setTimeout(resolve, 350); }).then(function () {
+                        progress.update(44, 'Registro de actividad confirmado', 'La actividad de cierre se registró después de verificar las respuestas.', 12);
+                        return $form.data('audio-visual-finalize')
+                            ? Promise.resolve($form.data('audio-visual-finalize')(progress)).then(function () { return payload; })
+                            : payload;
+                    });
+                })
+                .then(function (payload) {
+                    progress.update(100, 'Guardado completado', 'Respuestas, actividad, capturas y video confirmados.', 0);
                     $form.data('audio-visual-finalized', true).data('test-allow-exit', true);
-                    $form[0].submit();
+                    window.setTimeout(function () { progress.remove(); window.location.href = String($form.attr('data-my-tests-url') || payload.redirect_url || '/my-tests'); }, 500);
+                })
+                .catch(function (error) {
+                    progress.remove();
+                    if (answersWereConfirmed) {
+                        if (error && error.payload && error.payload.reason === 'activity_persistence_unavailable') {
+                            $form.data('audio-visual-finalizing', false).find('button[type="submit"]').prop('disabled', false);
+                            showNotification('error', 'Las respuestas quedaron guardadas, pero no se confirmó el registro de actividad. El test sigue abierto; puedes reintentar el envío. No se han enviado aún las capturas finales ni se ha cerrado el video.');
+                            return;
+                        }
+                        $form.data('audio-visual-finalizing', true);
+                        showNotification('error', 'Las respuestas y la actividad están guardadas, pero la evidencia audiovisual no se confirmó. No vuelvas a enviar el test; solicita asistencia.');
+                        return;
+                    }
+                    $form.removeData('test-saving-exit').removeData('test-allow-exit');
+                    $form.data('audio-visual-finalizing', false).find('button[type="submit"]').prop('disabled', false);
+                    showNotification('error', error && error.payload && error.payload.message
+                        ? error.payload.message
+                        : 'No se pudo confirmar el guardado de todas las respuestas. No se iniciará el envío de capturas ni el cierre del video; inténtalo nuevamente.');
                 });
         });
 
@@ -2631,6 +3900,8 @@ $(function () {
         var $form = $timer.closest('form');
         var remaining = parseInt($timer.attr('data-test-countdown'), 10) || 0;
         var submittedByTimer = false;
+        var waitingForActivation = $form.attr('data-assessment-needs-activation') === '1';
+        $form.on('evaluation:activated.testCountdown', function () { waitingForActivation = false; });
 
         function submitExpiredEvaluation() {
             if (submittedByTimer || !$form.length) {
@@ -2638,7 +3909,7 @@ $(function () {
             }
 
             submittedByTimer = true;
-            showNotification('warning', 'Se acabo el tiempo de la evaluacion. Guardaremos tus respuestas registradas hasta este momento.');
+            showNotification('warning', $form.attr('data-expired-message') || 'El tiempo finalizo. Se guardaron las respuestas registradas hasta este momento.');
             $form.data('test-allow-exit', true);
             $form.find('button[type="submit"]').prop('disabled', true);
             $form.find('input[name="test_action"]').remove();
@@ -2650,7 +3921,11 @@ $(function () {
 
             window.setTimeout(function () {
                 markFormProcessing($form);
-                $form[0].submit();
+                if (typeof $form[0].requestSubmit === 'function') {
+                    $form[0].requestSubmit();
+                } else {
+                    $form[0].submit();
+                }
             }, 1200);
         }
 
@@ -2664,6 +3939,7 @@ $(function () {
             $timer.toggleClass('is-warning', remaining <= 60);
             $form.find('.supervised-gate-countdown').toggleClass('is-warning', remaining <= 60);
 
+            if (waitingForActivation) return;
             if (remaining <= 0) {
                 window.clearInterval(intervalId);
                 $timer.addClass('is-expired');
@@ -2683,6 +3959,280 @@ $(function () {
 
         var intervalId = window.setInterval(renderCountdown, 1000);
         renderCountdown();
+    });
+
+    function initEvaluationAnswerFlow($form) {
+        function questionHasAnswer($question) {
+            var radioGroups = {};
+            $question.find('input[type="radio"]').each(function () {
+                radioGroups[this.name] = true;
+            });
+            var radioGroupNames = Object.keys(radioGroups);
+            if (radioGroupNames.length) {
+                return radioGroupNames.every(function (name) {
+                    return $question.find('input[type="radio"][name="' + name.replace(/"/g, '\\"') + '"]:checked').length > 0;
+                });
+            }
+
+            var answered = false;
+            $question.find('input, textarea, select').each(function () {
+                var $field = $(this);
+                if ($field.is(':radio, :checkbox')) {
+                    answered = answered || $field.is(':checked');
+                } else {
+                    answered = answered || $.trim(String($field.val() || '')) !== '';
+                }
+            });
+            return answered;
+        }
+
+        function focusPending() {
+            var $pending = $form.find('fieldset[data-question-required]').filter(function () { return !questionHasAnswer($(this)); }).first();
+            if (!$pending.length) return;
+            $pending.addClass('is-incomplete');
+            $pending[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+            var $focus = $pending.find('input, textarea, select').first();
+            if ($focus.length) window.setTimeout(function () { $focus.trigger('focus'); }, 250);
+        }
+
+        $form.on('click.evaluationIncomplete', 'button[type="submit"], input[type="submit"]', function () {
+            $form.data('evaluation-last-submitter', this);
+        });
+
+        $form.on('submit.evaluationIncomplete', function (event) {
+            if ($form.data('evaluation-time-expired-submitting') || $form.data('allow-incomplete-submit')) return;
+            var submitter = event.originalEvent && event.originalEvent.submitter;
+            submitter = submitter || $form.data('evaluation-last-submitter');
+            var action = submitter && submitter.name === 'evaluation_survey_action' ? submitter.value : 'complete';
+            if (action !== 'complete') return;
+            if ($form.data('evaluation-countdown-started') && ($form.data('evaluation-remaining-now') || 0) <= 0) return;
+            var $pending = $form.find('fieldset[data-question-required]').filter(function () { return !questionHasAnswer($(this)); });
+            if (!$pending.length) return;
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            appSwalConfirm({
+                title: $form.attr('data-incomplete-confirm-title') || 'Evaluacion incompleta',
+                text: $form.attr('data-incomplete-confirm-message') || 'Aun quedan preguntas sin responder. Deseas contestarlas antes de finalizar?',
+                icon: 'warning',
+                confirmButtonText: $form.attr('data-incomplete-confirm-button') || 'Si, contestar pendientes',
+                cancelButtonText: $form.attr('data-incomplete-cancel-button') || 'No, guardar y finalizar',
+                focusCancel: true
+            }).then(function (goToPending) {
+                if (goToPending) {
+                    focusPending();
+                    return;
+                }
+                $form.data('allow-incomplete-submit', true);
+                $form.find('input[name="evaluation_survey_action"][type="hidden"]').remove();
+                $('<input>', { type: 'hidden', name: 'evaluation_survey_action', value: 'complete_incomplete' }).appendTo($form);
+                if (typeof $form[0].requestSubmit === 'function') $form[0].requestSubmit();
+                else $form[0].submit();
+            });
+        });
+    }
+
+    $('form.evaluation-take-form[data-evaluation-control-form]').each(function () { initEvaluationAnswerFlow($(this)); });
+
+    function createStandardEvaluationProgress() {
+        var $panel = $('<div class="position-fixed top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center bg-dark bg-opacity-75" style="z-index: 2400" role="dialog" aria-modal="true" aria-labelledby="evaluation-standard-save-progress-title"><div class="bg-white rounded-3 shadow p-4" style="width:min(92vw,520px)"><h2 id="evaluation-standard-save-progress-title" class="h5 mb-2">Guardando evaluación</h2><p class="mb-3" data-evaluation-standard-progress-label>Guardando respuestas…</p><div class="progress" role="progressbar" aria-label="Progreso del guardado"><div class="progress-bar progress-bar-striped progress-bar-animated" data-evaluation-standard-progress-bar style="width:10%">10%</div></div><p class="small text-muted mt-2 mb-0">No cierres ni recargues esta ventana.</p></div></div>');
+        $(document.fullscreenElement || document.body).append($panel);
+        return {
+            update: function (percent, label) { var value = Math.max(0, Math.min(100, Math.round(percent))); $panel.find('[data-evaluation-standard-progress-bar]').css('width', value + '%').text(value + '%'); $panel.find('[data-evaluation-standard-progress-label]').text(label); },
+            remove: function () { $panel.remove(); }
+        };
+    }
+
+    function createAssessmentSubmissionProgress(title) {
+        var startedAt = Date.now();
+        var $panel = $('<div class="position-fixed top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center bg-dark bg-opacity-75" style="z-index:2400" role="dialog" aria-modal="true" aria-labelledby="assessment-save-progress-title"><div class="bg-white rounded-3 shadow p-4" style="width:min(92vw,520px)"><h2 id="assessment-save-progress-title" class="h5 mb-2"></h2><p class="mb-3" data-assessment-save-progress-label>Preparando el guardado…</p><div class="progress" role="progressbar" aria-label="Progreso del guardado"><div class="progress-bar progress-bar-striped progress-bar-animated" data-assessment-save-progress-bar style="width:5%">5%</div></div><p class="small fw-semibold mt-2 mb-1" data-assessment-save-progress-eta>Tiempo aproximado: calculando…</p><p class="small text-muted mb-0" data-assessment-save-progress-detail>No cierres ni recargues esta ventana. La estimación puede variar según la conexión y el tamaño de la evidencia.</p></div></div>');
+        $panel.find('#assessment-save-progress-title').text(title || 'Guardando evaluación');
+        $(document.fullscreenElement || document.body).append($panel);
+        return {
+            update: function (percent, label, detail, remainingSeconds) {
+                var value = Math.max(0, Math.min(100, Math.round(percent)));
+                var eta = Number(remainingSeconds);
+                if (!Number.isFinite(eta) || eta < 0) {
+                    eta = value >= 100 ? 0 : Math.max(2, Math.ceil((60000 * (100 - value) / 100) / Math.max(1000, Date.now() - startedAt)));
+                }
+                var etaText = eta <= 0 ? 'Finalizando…' : eta < 60 ? 'Aproximadamente ' + eta + ' s restantes' : 'Aproximadamente ' + Math.ceil(eta / 60) + ' min restantes';
+                $panel.find('[data-assessment-save-progress-bar]').css('width', value + '%').text(value + '%');
+                $panel.find('[data-assessment-save-progress-label]').text(label);
+                $panel.find('[data-assessment-save-progress-eta]').text('Tiempo aproximado: ' + etaText);
+                if (detail) $panel.find('[data-assessment-save-progress-detail]').text(detail);
+            },
+            remove: function () { $panel.remove(); }
+        };
+    }
+
+    $('form.evaluation-take-form[data-evaluation-control-form]').on('submit.evaluationStandardSave', function (event) {
+        var $form = $(this);
+        if ($form.attr('data-audio-visual-mode') === '1' || $form.data('evaluation-standard-submitting')) return;
+
+        var form = this;
+        var submitter = event.originalEvent && event.originalEvent.submitter;
+        var action = submitter && submitter.name === 'evaluation_survey_action'
+            ? String(submitter.value || '')
+            : String($form.find('input[name="evaluation_survey_action"][type="hidden"]').last().val() || 'complete');
+        if (!['complete', 'complete_incomplete', 'time_expired', 'process_expired'].includes(action)) return;
+
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        syncAnswerSnapshot($form);
+        var formData = new FormData(form);
+        formData.delete('evaluation_survey_action');
+        formData.append('evaluation_survey_action', action);
+        $form.data('evaluation-standard-submitting', true).data('test-allow-exit', true);
+        clearFormProcessing($form);
+        var progress = createStandardEvaluationProgress();
+        $form.find('button, input, textarea, select').prop('disabled', true);
+        progress.update(10, ['time_expired', 'process_expired'].includes(action) ? 'Guardando respuestas antes de cerrar…' : 'Guardando respuestas…');
+
+        fetch(form.action || window.location.href, {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest'},
+            body: formData
+        }).then(function (response) {
+            return response.json().then(function (payload) {
+                if (!response.ok || !payload.ok) {
+                    var error = new Error(payload.message || 'answers_save_failed');
+                    error.payload = payload;
+                    throw error;
+                }
+                return payload;
+            });
+        }).then(function (payload) {
+            progress.update(100, 'Sus respuestas han sido guardadas con éxito');
+            window.setTimeout(function () { window.location.href = payload.redirect_url || window.AppBackUrl || window.location.href; }, 250);
+        }).catch(function (error) {
+            progress.remove();
+            $form.removeData('evaluation-standard-submitting').removeData('test-allow-exit');
+            $form.find('button, input, textarea, select').prop('disabled', false);
+            showNotification('error', error && error.payload && error.payload.message ? error.payload.message : 'No se pudieron guardar las respuestas. Intenta nuevamente.');
+        });
+    });
+
+    $('form.evaluation-take-form[data-evaluation-control-form][data-draft-url]').each(function () {
+        var $form = $(this);
+        if ($form.attr('data-evaluation-preview') === '1') return;
+
+        var abandonOnExit = function () {
+            if (!$form.data('evaluation-supervised-active') || $form.data('test-allow-exit')) return;
+            var prepared = draftFormData($form, 'page_exit');
+            prepared.formData.set('evaluation_survey_action', 'abandon');
+            if (navigator.sendBeacon && window.URLSearchParams && window.Blob) {
+                var params = new URLSearchParams();
+                prepared.formData.forEach(function (value, key) { params.append(key, value); });
+                var url = String($form.attr('data-draft-url') || '');
+                var blob = new Blob([params.toString()], { type: 'application/x-www-form-urlencoded; charset=UTF-8' });
+                if (navigator.sendBeacon(url, blob)) return;
+            }
+            if (window.fetch) window.fetch(String($form.attr('data-draft-url') || ''), { method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'}, body: new URLSearchParams(prepared.formData).toString(), keepalive: true }).catch(function () {});
+        };
+
+        var historyExitArmed = false;
+        var armHistoryExitGuard = function () {
+            if (historyExitArmed || !window.history || !window.history.pushState) return;
+            historyExitArmed = true;
+            window.history.replaceState($.extend({}, window.history.state || {}, { evaluationTaking: true }), '', window.location.href);
+            window.history.pushState({ evaluationTakingGuard: true }, '', window.location.href);
+        };
+        $form.on('evaluation:activated', armHistoryExitGuard);
+        $(window).on('popstate.evaluationDraft', function () {
+            if (!$form.data('evaluation-supervised-active') || $form.data('test-allow-exit')) return;
+            window.history.pushState({ evaluationTakingGuard: true }, '', window.location.href);
+            confirmAudiovisualExit(false);
+        });
+
+        $(window).on('beforeunload.evaluationDraft', function (event) {
+            if ($form.attr('data-audio-visual-mode') !== '1' || !$form.data('evaluation-supervised-active') || $form.data('test-allow-exit') || $form.data('evaluation-submission-in-progress')) return;
+            var message = 'Si recargas o sales ahora, la evaluación se cerrará y no podrás ingresar nuevamente.';
+            event.preventDefault();
+            event.originalEvent.returnValue = message;
+            return message;
+        });
+
+        var confirmAudiovisualExit = function (reload) {
+            appSwalConfirm({
+                title: 'Evaluación audiovisual en curso',
+                text: 'Si recargas o sales ahora, la evaluación se cerrará y no podrás ingresar nuevamente.',
+                icon: 'warning',
+                confirmButtonText: 'Cerrar evaluación',
+                cancelButtonText: 'Continuar respondiendo',
+                focusCancel: true
+            }).then(function (confirmed) {
+                if (!confirmed) return;
+                abandonOnExit();
+                $form.data('test-allow-exit', true);
+                if (reload) window.location.reload();
+                else window.history.back();
+            });
+        };
+
+        $(document).on('keydown.evaluationDraft', function (event) {
+            if ($form.attr('data-audio-visual-mode') !== '1' || !$form.data('evaluation-supervised-active') || $form.data('test-allow-exit')) return;
+            var key = String(event.key || '').toLowerCase();
+            if (key === 'f5' || ((event.ctrlKey || event.metaKey) && key === 'r')) {
+                event.preventDefault();
+                confirmAudiovisualExit(true);
+            }
+        });
+
+        $form.on('input.evaluationDraft change.evaluationDraft', 'input, textarea, select', function () {
+            if ($form.attr('data-audio-visual-mode') === '1' && !$form.data('evaluation-supervised-active')) return;
+            scheduleDraftSave($form, 'answer_changed');
+        });
+
+        $(window).on('pagehide.evaluationDraft', function () {
+            if ($form.data('test-allow-exit')) return;
+            if ($form.attr('data-audio-visual-mode') === '1' && !$form.data('evaluation-supervised-active')) return;
+            if ($form.attr('data-audio-visual-mode') === '1') abandonOnExit();
+            else saveDraftAnswers($form, { immediate: true, beacon: true, force: true, reason: 'page_exit' });
+        });
+    });
+
+    $('form.evaluation-take-form[data-evaluation-remaining-seconds]').each(function () {
+        var $form = $(this);
+        if ($form.attr('data-evaluation-preview') === '1') return;
+        var raw = $form.attr('data-evaluation-remaining-seconds');
+        if (raw === '') return;
+        var remaining = Math.max(0, parseInt(raw, 10) || 0);
+        var countdownStarted = $form.attr('data-assessment-needs-activation') !== '1';
+        var deadlineAt = Date.now() + (remaining * 1000);
+        $form.data('evaluation-countdown-started', countdownStarted);
+        var $badge = $form.find('[data-evaluation-countdown]');
+        var expired = false;
+        $form.on('evaluation:activated.evaluationCountdown', function () {
+            deadlineAt = Date.now() + (remaining * 1000);
+        });
+        function render() {
+            if ($form.data('evaluation-countdown-started')) {
+                remaining = Math.max(0, Math.ceil((deadlineAt - Date.now()) / 1000));
+            }
+            $form.data('evaluation-remaining-now', remaining);
+            var hours = Math.floor(remaining / 3600);
+            var minutes = Math.floor((remaining % 3600) / 60);
+            var seconds = remaining % 60;
+            var label = [hours, minutes, seconds].map(function (part) { return String(part).padStart(2, '0'); }).join(':');
+            $badge.text(label);
+            $form.toggleClass('is-time-warning', remaining <= 60);
+            if (!$form.data('evaluation-countdown-started')) {
+                return;
+            }
+            if (remaining <= 0 && !expired) {
+                expired = true;
+                $form.data('evaluation-time-expired-submitting', true).data('test-allow-exit', true);
+                showNotification('warning', $form.attr('data-expired-message') || 'El tiempo finalizo. Se guardaron las respuestas registradas hasta este momento.');
+                $('<input>', { type: 'hidden', name: 'evaluation_survey_action', value: 'time_expired' }).appendTo($form);
+                window.setTimeout(function () {
+                    if (typeof $form[0].requestSubmit === 'function') $form[0].requestSubmit();
+                    else $form[0].submit();
+                }, 1200);
+                return;
+            }
+        }
+        render();
+        window.setInterval(render, 1000);
     });
 
     function processDeadlineRemaining($form) {
@@ -2715,7 +4265,7 @@ $(function () {
         handleUnavailableEvaluation($form, {
             http_status: 403,
             reason: String(availability.reason || 'process_ended'),
-            message: String(availability.message || 'Ya termino el tiempo para el proceso completo'),
+            message: String(availability.message || 'El proceso ha finalizado. Se guardarán tus respuestas y la evidencia audiovisual antes de cerrar.'),
             redirect_url: String(availability.redirect_url || $form.attr('data-my-tests-url') || window.AppBackUrl || ''),
             before_redirect: saveProcessExpiredForm($form)
         });
@@ -2826,6 +4376,26 @@ $(function () {
         }, 10000);
     });
 
+    // Las evaluaciones del módulo evaluaciones_encuestas usan otro formulario
+    // y no pasan por .test-taking-shell. Su plazo de proceso debe disparar el
+    // mismo submit de cierre para conservar el pipeline audiovisual.
+    $('form.evaluation-take-form[data-evaluation-control-form][data-process-remaining-seconds]').each(function () {
+        var $form = $(this);
+        if ($form.attr('data-evaluation-preview') === '1') return;
+        window.setInterval(function () {
+            if (isProcessDeadlineEnded($form)) {
+                if ($form.data('process-deadline-message-shown') || $form.data('evaluation-submission-in-progress') || $form.data('evaluation-standard-submitting')) return;
+                $form.data('process-deadline-message-shown', true).data('evaluation-time-expired-submitting', true).data('test-allow-exit', true);
+                showNotification('warning', $form.attr('data-process-expired-message') || 'El proceso ha finalizado. Se guardarán tus respuestas y la evidencia audiovisual antes de cerrar.');
+                $form.find('input[name="evaluation_survey_action"][type="hidden"]').remove();
+                $('<input>', {type: 'hidden', name: 'evaluation_survey_action', value: 'process_expired'}).appendTo($form);
+                window.setTimeout(function () {
+                    if (typeof $form[0].requestSubmit === 'function') $form[0].requestSubmit(); else $form[0].submit();
+                }, 1200);
+            }
+        }, 1000);
+    });
+
     $('[data-server-clock]').each(function () {
         var $clock = $(this);
         if ($clock.data('server-clock-ready')) {
@@ -2928,13 +4498,13 @@ $(function () {
         $panel.data('my-tests-status-ready', true);
 
         var statusUrl = String($panel.attr('data-my-tests-status-url') || '');
-        var $finalizedMessage = $panel.find('[data-assigned-tests-finalized-message]');
-        var finalized = String($panel.attr('data-assigned-tests-finalized') || '0') === '1';
+        var $finalizedMessage = $panel.find('[data-assigned-activities-completed-message]');
+        var finalized = String($panel.attr('data-assigned-activities-completed') || '0') === '1';
         var reloadScheduled = false;
 
         function setFinalized(nextFinalized) {
             nextFinalized = !!nextFinalized;
-            $panel.attr('data-assigned-tests-finalized', nextFinalized ? '1' : '0');
+            $panel.attr('data-assigned-activities-completed', nextFinalized ? '1' : '0');
             $finalizedMessage.toggleClass('d-none', !nextFinalized);
 
             if (nextFinalized && !finalized && !reloadScheduled) {
@@ -2966,7 +4536,7 @@ $(function () {
                 return response.json();
             }).then(function (payload) {
                 if (payload && payload.ok) {
-                    setFinalized(payload.assigned_tests_finalized === true || payload.assigned_tests_finalized === 1);
+                    setFinalized(payload.assigned_activities_completed === true || payload.assigned_activities_completed === 1);
                 }
             }).catch(function () {
                 // La grilla sigue siendo util si esta validacion temporal falla.
@@ -3049,9 +4619,11 @@ $(function () {
 
     function handleUnavailableEvaluation($form, error) {
         var reason = String(error && error.reason ? error.reason : '');
-        var message = reason === 'process_ended'
-            ? 'Ya termino el tiempo para el proceso completo'
-            : (error && error.message ? String(error.message) : 'La evaluacion ya no esta disponible para responder.');
+        var message = error && error.message
+            ? String(error.message)
+            : (reason === 'process_ended'
+                ? 'El proceso ha finalizado. Se guardarán tus respuestas y la evidencia audiovisual antes de cerrar.'
+                : 'La evaluacion ya no esta disponible para responder.');
         var redirectUrl = error && error.redirect_url
             ? String(error.redirect_url)
             : String($form.attr('data-my-tests-url') || window.AppBackUrl || '');
@@ -3121,12 +4693,28 @@ $(function () {
             },
             body: formData
         }).then(function (response) {
-            return readJsonResponse(response, String($form.attr('data-my-tests-url') || window.AppBackUrl || ''));
-        }).catch(function (error) {
-            if (error && error.saved) {
-                return error;
+            return response.text().then(function (text) {
+                var payload = {};
+                if (text) {
+                    try { payload = JSON.parse(text); } catch (error) { payload = {}; }
+                }
+                if ((!response.ok || !payload.ok) && !payload.saved) {
+                    throw payload;
+                }
+                return payload;
+            });
+        }).then(function (payload) {
+            var finalize = $form.data('audio-visual-finalize');
+            if ($form.attr('data-audio-visual-mode') !== '1' || typeof finalize !== 'function') {
+                return payload;
             }
-            throw error;
+
+            $form.data('audio-visual-finalizing', true);
+            showNotification('info', 'Respuestas guardadas. Finalizando video y capturas…');
+            return Promise.resolve(finalize()).then(function () {
+                $form.data('audio-visual-finalized', true);
+                return payload;
+            });
         });
 
         $form.data('process-expired-save-pending', true);
@@ -3227,9 +4815,13 @@ $(function () {
 
         appendCurrentAnswerControls($form, formData);
         formData.set('answers_snapshot_json', JSON.stringify(answerSnapshot));
-        formData.set('test_action', 'draft');
+        var draftActionName = String($form.attr('data-draft-action-name') || 'test_action');
+        var draftActionValue = String($form.attr('data-draft-action-value') || 'draft');
+        formData.delete('test_action');
+        formData.delete('evaluation_survey_action');
+        formData.set(draftActionName, draftActionValue);
         formData.set('block', String($form.attr('data-current-block') || formData.get('block') || '1'));
-        formData.set('remaining_seconds', String($form.attr('data-remaining-seconds') || ''));
+        formData.set('remaining_seconds', String($form.attr('data-remaining-seconds') || $form.attr('data-evaluation-remaining-seconds') || ''));
         if (reason) {
             formData.set('reason', String(reason));
         }
@@ -3368,6 +4960,17 @@ $(function () {
             event.preventDefault();
             event.stopImmediatePropagation();
 
+            // El autoguardado pertenece al mismo bloque. Antes de cambiar o
+            // cerrar el bloque, evita que una petición atrasada llegue después
+            // de que la sesión ya haya quedado completada (409 de /draft).
+            var draftTimer = $currentForm.data('draft-save-timer');
+            if (draftTimer) {
+                window.clearTimeout(draftTimer);
+                $currentForm.removeData('draft-save-timer');
+            }
+            $currentForm.data('draft-save-queued', false);
+            var pendingDraft = $currentForm.data('draft-save-promise') || Promise.resolve();
+
             if (isProcessDeadlineEnded($currentForm)) {
                 showProcessDeadlineEnded($currentForm);
                 return;
@@ -3415,11 +5018,11 @@ $(function () {
 
             function requestIncompleteFinishConfirmation(message) {
                 return appSwalConfirm({
-                    title: 'Evaluacion incompleta',
-                    text: message || 'Aun te quedan preguntas sin contestar en la evaluacion. Deseas finalizarla de todas formas?',
+                    title: $currentForm.attr('data-incomplete-confirm-title') || 'Evaluacion incompleta',
+                    text: message || $currentForm.attr('data-incomplete-confirm-message') || 'Aun quedan preguntas sin contestar en la evaluacion. Deseas contestarlas antes de finalizar?',
                     icon: 'warning',
-                    confirmButtonText: 'Si, finalizar evaluacion',
-                    cancelButtonText: 'No, quiero responder las pendientes',
+                    confirmButtonText: $currentForm.attr('data-incomplete-confirm-button') || 'Si, contestar pendientes',
+                    cancelButtonText: $currentForm.attr('data-incomplete-cancel-button') || 'No, guardar y finalizar',
                     focusCancel: true
                 });
             }
@@ -3480,7 +5083,7 @@ $(function () {
                 $saving.removeClass('d-none');
                 $buttons.prop('disabled', true);
 
-                window.fetch(form.action || window.location.href, {
+                Promise.resolve(pendingDraft).catch(function () {}).then(function () { return window.fetch(form.action || window.location.href, {
                     method: 'POST',
                     credentials: 'same-origin',
                     headers: {
@@ -3488,7 +5091,7 @@ $(function () {
                         'X-Requested-With': 'XMLHttpRequest'
                     },
                     body: formData
-                }).then(function (response) {
+                }); }).then(function (response) {
                     return readJsonResponse(response, fallbackRedirectUrl);
                 }).then(function (payload) {
                     if (payload.finished) {
@@ -3498,7 +5101,7 @@ $(function () {
                         return Promise.resolve(finalizePromise).then(function () {
                             $currentForm.data('test-allow-exit', true);
                             if (payload.redirect_url) {
-                                window.location.href = payload.redirect_url;
+                                window.location.href = String($currentForm.attr('data-my-tests-url') || payload.redirect_url || '/my-tests');
                             }
                         });
                     }
@@ -3517,23 +5120,14 @@ $(function () {
 
                     if (error && error.reason === 'missing_answers_before_finish') {
                         requestIncompleteFinishConfirmation(error.message).then(function (confirmed) {
-                            if (confirmed) {
-                                submitBlockAction('complete_incomplete');
-                                return;
-                            }
-                            if (error.html) {
-                                applyBlockPayload(error);
-                                return;
-                            }
-                            if (error.redirect_url) {
-                                $currentForm.data('test-allow-exit', true);
-                                window.location.href = String(error.redirect_url);
-                                return;
-                            }
+                        if (confirmed) {
                             var $incomplete = firstIncompleteQuestion();
                             if ($incomplete.length) {
                                 focusIncompleteQuestion($incomplete);
                             }
+                            return;
+                        }
+                        submitBlockAction('complete_incomplete');
                         });
                         return;
                     }
@@ -3619,12 +5213,56 @@ $(function () {
         return url + (url.indexOf('?') === -1 ? '?' : '&') + '_=' + Date.now();
     }
 
-    function openDrawer(options) {
+    var drawerHistory = [];
+
+    function initializeDrawerBody($body) {
+        initNotifications($body);
+        initDataTables($body);
+        initPromptEditors($body);
+        initRutInputs($body);
+        initBootstrapPopovers($body);
+        initCaptureGalleries($body);
+    }
+
+    function initCaptureGalleries($scope) {
+        $scope.find('.capture-gallery').each(function () {
+            var $gallery = $(this);
+            if ($gallery.data('capture-gallery-ready')) return;
+            var items = [];
+            $gallery.find('[data-screen-capture-view]').each(function () {
+                var $item = $(this);
+                var source = $item.attr('href') || $item.data('screen-capture-view');
+                if (source) items.push({source: source, alt: $item.find('img').attr('alt') || 'Captura de pantalla'});
+                $item.closest('.col-6').addClass('d-none');
+            });
+            if (!items.length) return;
+            $gallery.data('capture-gallery-ready', true).prepend($('<button type="button" class="btn btn-sm btn-outline-primary capture-gallery-trigger" data-screen-capture-gallery="1"><i class="bi bi-images me-1"></i>Ver ' + items.length + ' capturas</button>').data('capture-gallery-items', items));
+        });
+    }
+
+    function syncDrawerBackButton() {
+        $('[data-app-drawer-back]').toggleClass('d-none', drawerHistory.length === 0);
+        $('.app-drawer-close').toggleClass('d-none', drawerHistory.length > 0);
+        $('#appDrawerBody [data-app-drawer-close]').toggleClass('d-none', drawerHistory.length > 0);
+    }
+
+    function openDrawer(options, preserveCurrent) {
         updateAppViewportHeight();
         var size = ['sm', 'md', 'lg'].indexOf(options.size) !== -1 ? options.size : 'md';
         var $drawer = $('#appDrawer');
         var $backdrop = $('.app-drawer-backdrop');
         var $body = $('#appDrawerBody');
+
+        if (preserveCurrent && $drawer.hasClass('is-open')) {
+            drawerHistory.push({
+                title: $('#appDrawerTitle').text(),
+                size: size,
+                html: $body.html(),
+                scrollTop: $body.scrollTop()
+            });
+        } else if (!preserveCurrent) {
+            drawerHistory = [];
+        }
 
         $('#appDrawerTitle').text(options.title || 'Detalle');
         $drawer.removeClass('app-drawer-sm app-drawer-md app-drawer-lg').addClass('app-drawer-' + size);
@@ -3633,6 +5271,7 @@ $(function () {
             $body.addClass(options.bodyClass);
         }
         $body.html('<div class="drawer-loading"><span class="spinner-border spinner-border-sm" aria-hidden="true"></span><span>Cargando...</span></div>');
+        syncDrawerBackButton();
         $backdrop.prop('hidden', false);
         $('body').addClass('drawer-open');
 
@@ -3643,11 +5282,8 @@ $(function () {
 
         if (options.html) {
             $body.html(options.html);
-            initNotifications($body);
-            initDataTables($body);
-            initPromptEditors($body);
-            initRutInputs($body);
-            initBootstrapPopovers($body);
+            initializeDrawerBody($body);
+            syncDrawerBackButton();
             return;
         }
 
@@ -3657,11 +5293,8 @@ $(function () {
             dataType: 'html'
         }).done(function (html) {
             $body.html(html);
-            initNotifications($body);
-            initDataTables($body);
-            initPromptEditors($body);
-            initRutInputs($body);
-            initBootstrapPopovers($body);
+            initializeDrawerBody($body);
+            syncDrawerBackButton();
         }).fail(function () {
             var message = 'No se pudo cargar el contenido solicitado.';
             $body.html('<div class="drawer-error"><i class="bi bi-exclamation-triangle"></i><p>' + message + '</p></div>');
@@ -3676,6 +5309,8 @@ $(function () {
         $drawer.removeClass('is-open').attr('aria-hidden', 'true');
         $backdrop.removeClass('is-open');
         $('body').removeClass('drawer-open');
+        drawerHistory = [];
+        syncDrawerBackButton();
 
         window.setTimeout(function () {
             if (!$drawer.hasClass('is-open')) {
@@ -3683,6 +5318,19 @@ $(function () {
                 $('#appDrawerBody').html('');
             }
         }, 220);
+    }
+
+    function restorePreviousDrawer() {
+        var previous = drawerHistory.pop();
+        if (!previous) return;
+        var $drawer = $('#appDrawer');
+        var $body = $('#appDrawerBody');
+        $('#appDrawerTitle').text(previous.title);
+        $drawer.removeClass('app-drawer-sm app-drawer-md app-drawer-lg').addClass('app-drawer-' + previous.size);
+        $body.html(previous.html);
+        initializeDrawerBody($body);
+        $body.scrollTop(previous.scrollTop || 0);
+        syncDrawerBackButton();
     }
 
     window.AppDrawer = {
@@ -3699,6 +5347,33 @@ $(function () {
         });
     });
 
+    $(document).on('submit', '[data-password-recovery-form]', function (event) {
+        event.preventDefault();
+
+        var $form = $(this);
+        var $body = $('#appDrawerBody');
+        var $submit = $form.find('button[type="submit"]');
+        clearFormProcessing($form);
+        $submit.prop('disabled', true).prepend('<span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>');
+
+        $.ajax({
+            url: $form.attr('action'),
+            method: 'POST',
+            data: $form.serialize(),
+            dataType: 'html'
+        }).done(function (html) {
+            clearFormProcessing($form);
+            $body.html(html);
+            initNotifications($body);
+            initDataTables($body);
+            initBootstrapPopovers($body);
+        }).fail(function () {
+            clearFormProcessing($form);
+            showNotification('danger', 'No se pudo solicitar la recuperación. Intenta nuevamente.');
+            $submit.prop('disabled', false).find('.spinner-border').remove();
+        });
+    });
+
     $(document).on('click', '[data-import-row-drawer]', function (event) {
         var selector = $(this).data('import-row-drawer');
         var template = selector ? document.querySelector(selector) : null;
@@ -3710,10 +5385,21 @@ $(function () {
             return;
         }
 
-        openDrawer({
-            html: template.innerHTML,
-            title: $(this).data('import-row-title') || 'Corregir fila',
-            size: 'lg'
+            openDrawer({
+                html: template.innerHTML,
+                title: $(this).data('import-row-title') || 'Corregir fila',
+                size: 'lg'
+            }, true);
+        $('#appDrawerBody img[loading="lazy"]').removeAttr('loading');
+        $('#appDrawerBody video').each(function () {
+            this.load();
+        });
+        var attentionEventPatterns = ['posible multiplicidad de voces', 'multiple_voice_possible', 'pestaña oculta', 'tab_hidden', 'ventana sin foco', 'window_blurred', 'inactividad detectada', 'inactive_detected', 'salida de pantalla completa', 'fullscreen_exited', 'pantalla completa rechazada', 'fullscreen_denied', 'tecla de captura detectada', 'suspicious_key_printscreen', 'intento de imprimir', 'print_blocked', 'intento de guardar pagina', 'suspicious_key_save', 'copia bloqueada', 'copy_blocked', 'corte bloqueado', 'cut_blocked', 'pegado bloqueado', 'paste_blocked', 'arrastre bloqueado', 'drag_blocked', 'impresión bloqueada'];
+        $('#appDrawerBody table tbody tr').each(function () {
+            var eventText = String($(this).find('td').first().text() || '').toLowerCase();
+            if (attentionEventPatterns.some(function (pattern) { return eventText.indexOf(pattern) !== -1; })) {
+                $(this).addClass('activity-attention-row');
+            }
         });
     });
 
@@ -3827,7 +5513,96 @@ $(function () {
         });
     });
 
+    $(document).on('submit', '[data-evaluation-question-form]', function (event) {
+        event.preventDefault();
+
+        var $form = $(this);
+        var $submit = $form.find('button[type="submit"]');
+        var form = $form[0];
+
+        if (window.tinymce && typeof tinymce.triggerSave === 'function') {
+            tinymce.triggerSave();
+        }
+
+        if (!form.checkValidity()) {
+            $form.addClass('was-validated');
+            return;
+        }
+
+        $submit.prop('disabled', true);
+
+        $.ajax({
+            url: $form.attr('action') || window.location.href,
+            method: 'POST',
+            dataType: 'json',
+            data: $form.serialize(),
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        }).done(function (payload) {
+            closeDrawer();
+            showNotification('success', payload.message || 'Pregunta guardada correctamente.');
+            window.setTimeout(function () {
+                window.location.reload();
+            }, 450);
+        }).fail(function (xhr) {
+            var payload = xhr.responseJSON || {};
+            showNotification('error', payload.message || 'No se pudo guardar la pregunta.');
+        }).always(function () {
+            clearFormProcessing($form);
+            $submit.prop('disabled', false);
+        });
+    });
+
     $(document).on('click', '[data-app-drawer-close]', closeDrawer);
+    $(document).on('click', '[data-app-drawer-back]', restorePreviousDrawer);
+
+    $(document).on('toggle', '.user-result-accordion[open]', function () {
+        if (!this.open) return;
+        $(this).siblings('.user-result-accordion[open]').each(function () { this.open = false; });
+    });
+
+    function showCaptureInLightbox($modal, items, index) {
+        var item = items[index];
+        $modal.find('[data-screen-capture-viewer-image]').attr({src: item.source, alt: item.alt});
+        $modal.find('[data-screen-capture-prev]').prop('disabled', index <= 0);
+        $modal.find('[data-screen-capture-next]').prop('disabled', index >= items.length - 1);
+        $modal.find('[data-screen-capture-position]').text((index + 1) + ' / ' + items.length);
+        $modal.data('capture-index', index).data('capture-items', items);
+    }
+
+    $(document).on('click', '[data-screen-capture-gallery]', function () {
+        var items = $(this).data('capture-gallery-items') || [];
+        if (!items.length) return;
+        var $modal = $('#app-screen-capture-viewer');
+        if (!$modal.length) {
+            $modal = $('<div class="modal fade" id="app-screen-capture-viewer" tabindex="-1" aria-labelledby="app-screen-capture-viewer-title" aria-hidden="true"><div class="modal-dialog modal-xl modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h2 class="modal-title h6" id="app-screen-capture-viewer-title">Capturas de pantalla</h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button></div><div class="modal-body text-center position-relative"><button type="button" class="btn btn-light capture-lightbox-nav capture-lightbox-prev" data-screen-capture-prev aria-label="Captura anterior"><i class="bi bi-chevron-left"></i></button><img class="img-fluid rounded app-screen-capture-viewer-image" data-screen-capture-viewer-image alt=""><button type="button" class="btn btn-light capture-lightbox-nav capture-lightbox-next" data-screen-capture-next aria-label="Captura siguiente"><i class="bi bi-chevron-right"></i></button><div class="small text-muted mt-2" data-screen-capture-position></div></div></div></div>');
+            $('body').append($modal);
+        }
+        showCaptureInLightbox($modal, items, 0);
+        if (window.bootstrap && window.bootstrap.Modal) window.bootstrap.Modal.getOrCreateInstance($modal[0]).show();
+    });
+
+    $(document).on('click', '[data-screen-capture-prev], [data-screen-capture-next]', function () {
+        var $modal = $('#app-screen-capture-viewer');
+        var items = $modal.data('capture-items') || [];
+        var index = ($modal.data('capture-index') || 0) + ($(this).is('[data-screen-capture-next]') ? 1 : -1);
+        if (index >= 0 && index < items.length) showCaptureInLightbox($modal, items, index);
+    });
+
+    $(document).on('click', '[data-screen-capture-view]', function (event) {
+        event.preventDefault();
+        var source = $(this).attr('href') || $(this).data('screen-capture-view');
+        var alt = $(this).find('img').attr('alt') || 'Captura de pantalla';
+        if (!source) return;
+        var $modal = $('#app-screen-capture-viewer');
+        if (!$modal.length) {
+            $modal = $('<div class="modal fade" id="app-screen-capture-viewer" tabindex="-1" aria-labelledby="app-screen-capture-viewer-title" aria-hidden="true"><div class="modal-dialog modal-xl modal-dialog-centered"><div class="modal-content"><div class="modal-header"><h2 class="modal-title h6" id="app-screen-capture-viewer-title">Captura de pantalla</h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button></div><div class="modal-body text-center"><img class="img-fluid rounded" data-screen-capture-viewer-image alt=""></div></div></div></div>');
+            $('body').append($modal);
+        }
+        $modal.find('[data-screen-capture-viewer-image]').attr({src: source, alt: alt}).addClass('app-screen-capture-viewer-image');
+        if (window.bootstrap && window.bootstrap.Modal) {
+            window.bootstrap.Modal.getOrCreateInstance($modal[0]).show();
+        }
+    });
 
     function syncAdvancedOptions($form) {
         $form.find('[data-advanced-option-list]').each(function () {
@@ -3895,6 +5670,13 @@ $(function () {
 
     function textToSafeHtml(text) {
         return $('<div/>').text(String(text || '')).html().replace(/\r?\n/g, '<br>');
+    }
+
+    function normalizeLineBreaks(text) {
+        return String(text || '')
+            .replace(/\\r\\n/g, '\n')
+            .replace(/\\n/g, '\n')
+            .replace(/\\r/g, '\n');
     }
 
     function replaceTemplateTokens(text, replacements) {
@@ -4000,6 +5782,7 @@ $(function () {
     $(document).on('click', '[data-test-entry-confirm]', function (event) {
         var link = this;
         var $link = $(link);
+        if ($link.is('[data-assessment-sequenced-entry]')) return;
         var requiredEntry = $link.attr('data-test-entry-required') === '1';
 
         if ($link.data('test-entry-confirmed')) {
@@ -4078,6 +5861,23 @@ $(function () {
         }
 
         $form.data('test-saving-exit', true);
+        if ($form.attr('data-audio-visual-mode') === '1'
+            && typeof $form.data('audio-visual-finalize') === 'function'
+            && typeof $form[0].requestSubmit === 'function') {
+            // El cierre audiovisual debe conservar el orden de guardado:
+            // respuestas, video y capturas. Un submit nativo lo omite.
+            $form.data('test-allow-exit', true);
+            $form.find('button[type="submit"]').prop('disabled', true);
+            $form.find('input[name="test_action"]').remove();
+            $('<input>', {
+                type: 'hidden',
+                name: 'test_action',
+                value: 'save_exit'
+            }).appendTo($form);
+            $form[0].requestSubmit();
+            return;
+        }
+
         $form.data('test-allow-exit', true);
         $form.find('button[type="submit"]').prop('disabled', true);
         $form.find('input[name="test_action"]').remove();
@@ -4176,7 +5976,9 @@ $(function () {
                 return undefined;
             }
 
-            var message = 'La evaluacion esta en curso. Si sales, se guardara el avance y podras continuar con el tiempo restante.';
+            var message = $form.attr('data-audio-visual-mode') === '1'
+                ? 'La evaluación audiovisual está en curso. Si sales o recargas, el intento quedará cerrado y no podrás ingresar nuevamente.'
+                : 'La evaluacion esta en curso. Si sales, se guardara el avance y podras continuar con el tiempo restante.';
             event.preventDefault();
             event.originalEvent.returnValue = message;
             return message;
@@ -4203,7 +6005,7 @@ $(function () {
     $(document).on('submit', 'form[data-confirm-submit]', function (event) {
         var form = this;
         var $form = $(form);
-        var message = $form.data('confirm-submit') || 'Deseas continuar?';
+        var message = normalizeLineBreaks($form.data('confirm-submit') || 'Deseas continuar?');
 
         if ($form.data('confirm-submitted')) {
             return;
@@ -4213,7 +6015,7 @@ $(function () {
 
         appSwalConfirm({
             title: 'Confirmar accion',
-            text: message,
+            html: '<div class="text-start">' + textToSafeHtml(message) + '</div>',
             confirmButtonText: 'Aceptar',
             cancelButtonText: 'Cancelar',
             focusCancel: true
@@ -4252,9 +6054,674 @@ $(function () {
         });
     });
 
-    $(document).on('keydown', function (event) {
-        if (event.key === 'Escape' && $('#appDrawer').hasClass('is-open')) {
-            closeDrawer();
+    function initEvaluationSurveyControl($form) {
+        if (!$form.length || $form.data('evaluation-control-ready')) {
+            return;
         }
-    });
+
+        $form.data('evaluation-control-ready', true);
+        var mode = String($form.data('evaluation-control-mode') || 'off');
+        var componentValidationRequired = $form.attr('data-assessment-components-required') === '1';
+        var activityUrl = String($form.data('evaluation-activity-url') || '');
+        if (!activityUrl) {
+            return;
+        }
+
+        var csrf = String($form.find('input[name="csrf_token"]').val() || '');
+        initAssessmentWizardIdentity($form);
+        var assessmentFlow = createAssessmentFlowComponent({
+            activityUrl: activityUrl,
+            csrfToken: csrf,
+            requireActivityJson: true,
+            appendActivityMetadata: function (payload, metadata) { payload.set('metadata', JSON.stringify(metadata || {})); }
+        });
+        var sendHeartbeat = function () {
+            return assessmentFlow.sendActivity('heartbeat', {}, true);
+        };
+        sendHeartbeat();
+        window.setInterval(sendHeartbeat, 25000);
+        if (mode === 'off') {
+            var $plainInstructions = $form.find('[data-assessment-stage="instructions"]');
+            var $plainContent = $form.find('[data-evaluation-instrument-content]');
+            if ($form.attr('data-evaluation-preview') !== '1' && $form.attr('data-assessment-needs-activation') === '1' && $plainInstructions.length) {
+                $form.addClass('is-evaluation-supervised-locked');
+                if (componentValidationRequired) {
+                    var $plainComponentStage = $form.find('[data-assessment-stage="components"]');
+                    var $plainConsent = $plainComponentStage.find('[data-audio-visual-consent]');
+                    var $plainStart = $plainComponentStage.find('[data-evaluation-supervised-start]');
+                    var $plainStatus = $plainComponentStage.find('[data-audio-visual-status]');
+                    var plainCompatibility = getAudioVisualBrowserCompatibility();
+                    $plainStart.prop('disabled', !$plainConsent.is(':checked'));
+                    $plainConsent.on('change.evaluationComponentPreflight', function () {
+                        runAudioVisualConsentPreflight($form, $plainConsent, $plainStart, $plainStatus[0], plainCompatibility);
+                    });
+                    $form.on('click.evaluationComponentRetry', '[data-audio-visual-preflight-retry]', function () {
+                        $plainConsent.prop('checked', true);
+                        runAudioVisualConsentPreflight($form, $plainConsent, $plainStart, $plainStatus[0], plainCompatibility);
+                    });
+                    $plainStart.on('click.evaluationComponentContinue', function () {
+                        if ($plainStart.prop('disabled')) return;
+                        var stream = $form.data('audio-visual-preflight-screen-stream');
+                        if (stream && stream.getTracks) stream.getTracks().forEach(function (track) { track.stop(); });
+                        $form.removeData('audio-visual-preflight-screen-stream');
+                        setAssessmentWizardStage($form, 'instructions');
+                    });
+                }
+                $form.on('click.evaluationPlainStart', '[data-assessment-begin]', function () {
+                    var button = this; $(button).prop('disabled', true);
+                    assessmentFlow.sendActivity('supervised_started', {}, false, true).then(function (result) {
+                        if (!result || result.ok !== true) throw new Error('start_failed');
+                        $form.removeClass('is-evaluation-supervised-locked').data('evaluation-supervised-active', true).data('evaluation-countdown-started', true).trigger('evaluation:activated');
+                        $form.removeClass('is-assessment-preparing');
+                        $plainContent.removeAttr('aria-hidden').prop('inert', false);
+                        setAssessmentWizardStage($form, 'assessment');
+                    }).catch(function () { $(button).prop('disabled', false); showNotification('error', 'No se pudo iniciar. Verifica la conexión e inténtalo nuevamente.'); });
+                });
+            }
+            return;
+        }
+
+        var audioVisualBrowserLog = initAudioVisualBrowserLog($form);
+        var strictMode = mode === 'supervised' || mode === 'supervised_audio_visual';
+        var sendEvent = function (eventType, metadata, keepalive) {
+            if (!activityUrl) {
+                return Promise.resolve({ok: false});
+            }
+            if (mode === 'supervised_audio_visual'
+                && !$form.data('evaluation-supervised-active')
+                && eventType !== 'supervised_started'
+                && eventType !== 'audio_visual_recording_started') {
+                return;
+            }
+            return assessmentFlow.sendActivity(eventType, metadata, keepalive);
+        };
+
+        var gate = $form.find('[data-evaluation-supervised-gate]');
+        var fullscreenTarget = $form.closest('.evaluation-take-panel')[0] || $form[0];
+        var showInstructionsStage = function () {
+            setAssessmentWizardStage($form, 'instructions');
+        };
+        var setActive = function (warning) {
+            $form.removeClass('is-evaluation-supervised-locked');
+            $form.removeClass('is-assessment-preparing');
+            $form.find('[data-evaluation-instrument-content]').removeAttr('aria-hidden').prop('inert', false);
+            setAssessmentWizardStage($form, 'assessment');
+            $form.find('[data-evaluation-exit-before-start]').addClass('d-none');
+            $form.data('evaluation-supervised-active', true).data('evaluation-countdown-started', true);
+            $form.trigger('evaluation:activated');
+            if (warning) {
+                $form.addClass('is-evaluation-control-warning');
+            }
+        };
+
+        if (mode === 'supervised' && gate.length) {
+            var start = gate.find('[data-evaluation-supervised-start]');
+            var continueButton = gate.find('[data-evaluation-supervised-continue]');
+            var status = gate.find('[data-evaluation-supervised-status]');
+            start.on('click.evaluationControl', function () {
+                // La etapa de instrucciones no requiere pantalla completa.
+                // El navegador la solicitará desde «Entendido, comenzar».
+                if (!audioVisualMode) {
+                    var preflightScreen = $form.data('audio-visual-preflight-screen-stream');
+                    if (preflightScreen && preflightScreen.getTracks) preflightScreen.getTracks().forEach(function (track) { track.stop(); });
+                    $form.removeData('audio-visual-preflight-screen-stream');
+                }
+                showInstructionsStage();
+            });
+            continueButton.on('click.evaluationControl', function () {
+                showInstructionsStage();
+            });
+            $form.on('click.evaluationAssessmentBegin', '[data-assessment-begin]', function () {
+                // La pantalla completa pertenece al modo supervisado, no al
+                // step opcional de validación de componentes.
+                // Las instrucciones se leen fuera de fullscreen; se solicita
+                // desde el gesto explícito de comenzar la evaluación.
+                var needsFullscreen = true;
+                var fullscreenPromise = needsFullscreen
+                    ? (fullscreenTarget.requestFullscreen ? fullscreenTarget.requestFullscreen() : Promise.reject(new Error('fullscreen_unavailable')))
+                    : Promise.resolve();
+                Promise.resolve(fullscreenPromise).then(function () { return true; }).catch(function () {
+                    sendEvent(document.fullscreenEnabled ? 'fullscreen_denied' : 'fullscreen_unavailable');
+                    $form.addClass('is-evaluation-control-warning');
+                    showNotification('warning', 'No se pudo activar pantalla completa. La evaluación continuará dentro de esta pantalla y la incidencia quedará registrada.');
+                    return false;
+                }).then(function (fullscreenEnabled) {
+                    if (needsFullscreen && fullscreenEnabled) sendEvent('fullscreen_entered');
+                    return sendEvent('supervised_started');
+                }).then(function (started) {
+                    if (!started || !started.ok) { status.text('No fue posible iniciar la evaluación. Verifica tu identidad y vuelve a intentarlo.'); return; }
+                    setActive(false);
+                }).catch(function (error) {
+                    gate.find('[data-assessment-begin-status]').text(error && error.message === 'fullscreen_unavailable'
+                        ? 'Este navegador no permite iniciar la evaluación en pantalla completa.'
+                        : 'No se pudo activar la pantalla completa. Revisa el permiso e inténtalo nuevamente.');
+                });
+            });
+            document.addEventListener('fullscreenchange', function () {
+                if (document.fullscreenElement === fullscreenTarget) {
+                    sendEvent('fullscreen_entered');
+                } else if (!$form.hasClass('is-evaluation-supervised-locked')) {
+                    sendEvent('fullscreen_exited');
+                    $form.addClass('is-evaluation-control-warning');
+                }
+            });
+        }
+
+        if (componentValidationRequired && mode === 'supervised' && gate.length) {
+            var $componentStart = gate.find('[data-evaluation-supervised-start]');
+            var $componentConsent = gate.find('[data-audio-visual-consent]');
+            var $componentStatus = gate.find('[data-audio-visual-status]');
+            var componentCompatibility = getAudioVisualBrowserCompatibility();
+            $componentStart.prop('disabled', !$componentConsent.is(':checked'));
+            $componentConsent.on('change.evaluationComponentPreflight', function () {
+                runAudioVisualConsentPreflight($form, $componentConsent, $componentStart, $componentStatus[0], componentCompatibility);
+            });
+            $form.on('click.evaluationComponentRetry', '[data-audio-visual-preflight-retry]', function () {
+                $componentConsent.prop('checked', true);
+                runAudioVisualConsentPreflight($form, $componentConsent, $componentStart, $componentStatus[0], componentCompatibility);
+            });
+        }
+
+        if (mode === 'supervised_audio_visual' && gate.length) {
+            $form.addClass('is-evaluation-supervised-locked');
+            var mediaStream = null;
+            var mediaRecorder = null;
+            var mediaEvidenceId = '';
+            var mediaChunkNumber = 0;
+            var mediaUploadChain = Promise.resolve();
+            var mediaPendingChunks = 0;
+            var mediaMaxPendingChunks = 4;
+            var mediaIntegrityFailure = null;
+            var answersSaved = false;
+            var startedScreenCapture = Promise.resolve();
+            var mediaQualityProfile = 'economical';
+            var voicePolicy = String($form.data('audio-visual-voice-policy') || 'warn');
+            var mediaStartedAt = 0;
+            var mediaFinalized = false;
+            var mediaStart = gate.find('[data-evaluation-supervised-start]');
+            var mediaContinue = gate.find('[data-evaluation-supervised-continue]');
+            var mediaConsent = gate.find('[data-audio-visual-consent]');
+            var mediaStatus = gate.find('[data-audio-visual-status]');
+            var submitStatus = $form.find('[data-evaluation-submit-status]').first();
+            var mediaReconnectPanel = $form.find('[data-audio-visual-reconnect-panel]');
+            var mediaReconnectButton = mediaReconnectPanel.find('[data-audio-visual-reconnect]');
+            var mediaFailureUrl = String($form.data('media-failure-url') || '');
+            var screenController = null;
+            var screenCapturePromise = null;
+            var voiceTimer = null;
+            var voiceContext = null;
+            var mediaBrowserCompatibility = applyAudioVisualBrowserCompatibility($form);
+            audioVisualBrowserLog('audio_visual_browser_compatibility', {source: mediaBrowserCompatibility.source, ok: mediaBrowserCompatibility.ok, user_agent: String(window.navigator && window.navigator.userAgent || '').slice(0, 160)});
+            var requestFullscreen = function () {
+                if (document.fullscreenElement === fullscreenTarget) return Promise.resolve();
+                if (!document.fullscreenEnabled || typeof fullscreenTarget.requestFullscreen !== 'function') {
+                    return Promise.reject(new Error(document.fullscreenEnabled ? 'fullscreen_unavailable' : 'fullscreen_denied'));
+                }
+                return Promise.resolve(fullscreenTarget.requestFullscreen());
+            };
+            mediaStart.prop('disabled', true);
+            mediaConsent.on('change.evaluationAudioVisual', function () {
+                runAudioVisualConsentPreflight($form, mediaConsent, mediaStart, mediaStatus[0], mediaBrowserCompatibility);
+            });
+            $form.on('click.evaluationAudioVisualPreflightRetry', '[data-audio-visual-preflight-retry]', function () {
+                mediaConsent.prop('checked', true);
+                runAudioVisualConsentPreflight($form, mediaConsent, mediaStart, mediaStatus[0], mediaBrowserCompatibility);
+            });
+            var mediaRisk = function (type, severity, metadata) {
+                audioVisualBrowserLog(type, Object.assign({severity: severity || 'attention'}, metadata || {}));
+                if (!$form.data('evaluation-supervised-active')) return;
+                var riskUrl = String($form.data('media-risk-url') || ''); if (!riskUrl) return;
+                var payload = new URLSearchParams(); payload.set('csrf_token', csrf); payload.set('event_type', type); payload.set('severity', severity || 'attention'); payload.set('evidence_id', mediaEvidenceId); payload.set('metadata', JSON.stringify(metadata || {}));
+                fetch(riskUrl, {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'}, body: payload.toString(), keepalive: true}).catch(function () {});
+            };
+            var createSubmissionProgress = function () {
+                return createAssessmentSubmissionProgress('Guardando evaluación');
+            };
+            var stopVoiceDetection = function () {
+                if (voiceTimer) window.clearInterval(voiceTimer);
+                voiceTimer = null;
+                if (voiceContext) voiceContext.close().catch(function () {});
+                voiceContext = null;
+            };
+            var startVoiceDetection = function (stream) {
+                stopVoiceDetection();
+                try {
+                    var AudioContextConstructor = window.AudioContext || window.webkitAudioContext;
+                    if (!AudioContextConstructor) throw new Error('audio_context_unavailable');
+                    voiceContext = new AudioContextConstructor();
+                    var analyser = voiceContext.createAnalyser();
+                    analyser.fftSize = 1024;
+                    voiceContext.createMediaStreamSource(stream).connect(analyser);
+                    var timeBuffer = new Uint8Array(analyser.fftSize);
+                    var frequencyBuffer = new Uint8Array(analyser.frequencyBinCount);
+                    var lastVoiceRisk = 0;
+                    voiceTimer = window.setInterval(function () {
+                        if (!$form.data('evaluation-supervised-active') || !voiceContext) return;
+                        analyser.getByteTimeDomainData(timeBuffer);
+                        analyser.getByteFrequencyData(frequencyBuffer);
+                        var sum = 0;
+                        for (var index = 0; index < timeBuffer.length; index++) {
+                            var centered = (timeBuffer[index] - 128) / 128;
+                            sum += centered * centered;
+                        }
+                        var rms = Math.sqrt(sum / timeBuffer.length);
+                        var strongBands = 0;
+                        var minBin = Math.max(1, Math.floor(85 * analyser.fftSize / voiceContext.sampleRate));
+                        var maxBin = Math.min(frequencyBuffer.length - 2, Math.ceil(3400 * analyser.fftSize / voiceContext.sampleRate));
+                        for (var bin = minBin; bin <= maxBin; bin++) {
+                            if (frequencyBuffer[bin] > 160 && frequencyBuffer[bin] >= frequencyBuffer[bin - 1] && frequencyBuffer[bin] >= frequencyBuffer[bin + 1]) strongBands++;
+                        }
+                        if (rms > 0.08 && strongBands >= 4 && Date.now() - lastVoiceRisk > 8000) {
+                            lastVoiceRisk = Date.now();
+                            mediaRisk('multiple_voice_possible', voicePolicy === 'log' ? 'info' : 'attention', {rms: Number(rms.toFixed(4)), strong_bands: strongBands, source: 'browser_preliminary', configured_action: voicePolicy});
+                            if (voicePolicy === 'warn') showNotification('warning', 'Se detectó una posible multiplicidad de voces. El evento quedó registrado.');
+                            if (voicePolicy === 'pause') {
+                                $form.addClass('is-audio-visual-interrupted');
+                                $form.find('button[type="submit"]').prop('disabled', true);
+                                mediaStatus.removeClass('alert-success alert-secondary').addClass('alert-danger').text('Se detectó una posible multiplicidad de voces. Revisa el entorno y reconecta el control para continuar.');
+                                mediaReconnectPanel.removeClass('d-none');
+                            }
+                        }
+                    }, 1000);
+                } catch (error) {
+                    mediaRisk('voice_analysis_unavailable', 'attention', {reason: error.message || 'audio_context_error'});
+                }
+            };
+            var mediaTransport = assessmentFlow.createMediaTransport({
+                getEvidenceId: function () { return mediaEvidenceId; },
+                getChunkUrl: function () { return String($form.data('media-chunk-url') || ''); },
+                getFailureUrl: function () { return mediaFailureUrl; },
+                onRetry: function (number, attempt, error) { mediaRisk('upload_retry_requested', 'attention', {chunk_number: number, attempt: attempt, reason: error.message || 'network_error'}); }
+            });
+            var queueChunk = function (blob) { if (!blob || !blob.size) return; if (mediaPendingChunks >= mediaMaxPendingChunks) { mediaRisk('recording_upload_backlog', 'risk', {pending_chunks: mediaPendingChunks, limit: mediaMaxPendingChunks}); var droppedNumber = mediaChunkNumber++; mediaIntegrityFailure = new Error('recording_upload_backlog'); mediaUploadChain = mediaUploadChain.then(function () { return mediaTransport.reportFailure(droppedNumber, mediaIntegrityFailure); }).catch(function (error) { mediaIntegrityFailure = error; }); return; } mediaPendingChunks++; var number = mediaChunkNumber++; mediaUploadChain = mediaUploadChain.then(function () { return mediaTransport.upload(blob, number); }).catch(function (error) { mediaRisk('recording_upload_failed', 'risk', {chunk_number: number, attempts: 3, reason: error.message}); mediaIntegrityFailure = error; return mediaTransport.reportFailure(number, error).catch(function (reportError) { mediaIntegrityFailure = reportError; }); }).then(function () { mediaPendingChunks = Math.max(0, mediaPendingChunks - 1); }); };
+            var startMedia = function () {
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) return Promise.reject(new Error('media_unsupported'));
+                var initPayload = new URLSearchParams(); initPayload.set('csrf_token', csrf); initPayload.set('consented', '1');
+                return fetch(String($form.data('media-init-url') || ''), {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8', 'Accept': 'application/json'}, body: initPayload.toString()}).then(function (response) { return response.json().then(function (payload) { if (!response.ok || !payload.ok) throw new Error(payload.reason || 'media_init_failed'); return payload; }); }).then(function (payload) {
+                    mediaEvidenceId = String(payload.evidence_id || '');
+                    mediaQualityProfile = String(payload.quality_profile || 'economical');
+                    return requestAudioVisualDevices($form);
+                }).then(function (stream) {
+                    mediaStream = stream; mediaStartedAt = 0; mediaChunkNumber = 0;
+                    var cameraTrack = stream.getVideoTracks()[0];
+                    var microphoneTrack = stream.getAudioTracks()[0];
+                    if (!cameraTrack || cameraTrack.readyState !== 'live') throw new Error('camera_not_operational');
+                    if (!microphoneTrack || microphoneTrack.readyState !== 'live') throw new Error('microphone_not_operational');
+                    setAudioVisualCheck($form, 'camera', 'Cámara', 'ok', 'Acceso concedido y cámara activa.');
+                    setAudioVisualCheck($form, 'microphone', 'Micrófono', 'ok', 'Acceso concedido y micrófono activo.');
+                    var preview = gate.find('[data-audio-visual-preview]').first()[0];
+                    if (preview) { preview.srcObject = stream; preview.classList.remove('d-none'); preview.play().catch(function () {}); }
+                    var candidates = ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4', 'video/webm;codecs=vp8,opus', 'video/webm;codecs=vp9,opus', 'video/webm']; var mime = candidates.find(function (candidate) { return typeof MediaRecorder.isTypeSupported !== 'function' || MediaRecorder.isTypeSupported(candidate); }) || '';
+                    var quality = {economical: {video: 400000, audio: 48000}, standard: {video: 700000, audio: 80000}, high: {video: 1200000, audio: 128000}}[mediaQualityProfile] || {video: 400000, audio: 48000};
+                    var recorderOptions = mime ? {mimeType: mime, videoBitsPerSecond: quality.video, audioBitsPerSecond: quality.audio} : {};
+                    mediaRisk('audio_visual_recorder_format_selected', 'info', {mime_type: mime || 'browser_default', quality_profile: mediaQualityProfile});
+                    try {
+                        mediaRecorder = new MediaRecorder(stream, recorderOptions);
+                        mediaRisk('audio_visual_recorder_created', 'info', {mime_type: mime || 'browser_default'});
+                    } catch (error) {
+                        mediaRisk('audio_visual_recorder_failed', 'risk', {mime_type: mime || 'browser_default', reason: error && (error.name || error.message) || 'recorder_error'});
+                        try { mediaRecorder = new MediaRecorder(stream); mediaRisk('audio_visual_recorder_created', 'info', {mime_type: 'browser_default', fallback: true}); } catch (fallbackError) {
+                            mediaRisk('audio_visual_recorder_failed', 'risk', {mime_type: 'browser_default', fallback: true, reason: fallbackError && (fallbackError.name || fallbackError.message) || 'recorder_error'});
+                            fallbackError.audioVisualComponent = 'recording';
+                            fallbackError.audioVisualMessage = 'El navegador no pudo iniciar la grabación audiovisual.';
+                            throw fallbackError;
+                        }
+                    }
+                mediaRecorder.ondataavailable = function (event) { queueChunk(event.data); }; mediaRecorder.onerror = function (event) { mediaIntegrityFailure = new Error('audio_visual_recorder_error'); mediaRisk('audio_visual_recorder_error', 'risk', {reason: event && (event.error && (event.error.name || event.error.message) || event.type) || 'recorder_error'}); };
+                    startVoiceDetection(stream);
+                    stream.getTracks().forEach(function (track) { ['mute', 'unmute', 'ended'].forEach(function (eventName) { track.addEventListener(eventName, function () { var kind = track.kind === 'video' ? 'camera' : 'microphone'; var label = kind === 'camera' ? 'Cámara' : 'Micrófono'; if (eventName === 'unmute' && track.readyState === 'live') { setAudioVisualCheck($form, kind, label, 'ok', label + ' activo nuevamente.'); if (mediaStream && mediaStream.getTracks().every(function (item) { return item.readyState === 'live'; }) && screenController && screenController.isReady() && mediaRecorder && mediaRecorder.state === 'recording') { $form.removeClass('is-audio-visual-interrupted'); mediaReconnectPanel.addClass('d-none'); $form.find('button[type="submit"]').prop('disabled', false); mediaStatus.removeClass('alert-danger').addClass('alert-success').text('Cámara, micrófono y captura activos.'); } return; } mediaRisk('audio_visual_' + eventName, 'risk', {kind: track.kind}); setAudioVisualCheck($form, kind, label, 'error', label + ' se interrumpió o dejó de responder.'); setAudioVisualReconnectStatus($form, kind, 'interrumpido o sin respuesta'); $form.addClass('is-audio-visual-interrupted'); mediaReconnectPanel.removeClass('d-none'); mediaStatus.removeClass('alert-success').addClass('alert-danger').text(label + ' interrumpido. Revisa el permiso indicado antes de continuar.'); if ($form.data('audio-visual-interruption-policy') !== 'continue') $form.find('button[type="submit"]').prop('disabled', true); }); }); });
+                    mediaStatus.removeClass('alert-secondary alert-danger').addClass('alert-success').text('Cámara y micrófono activos. Verificando captura de pantalla.');
+                });
+            };
+            var startRecording = function () {
+                if (!mediaRecorder || mediaRecorder.state !== 'inactive') return false;
+                mediaStartedAt = Date.now();
+                mediaChunkNumber = 0;
+                if (!assessmentFlow.startRecorder(mediaRecorder, 15000)) return false;
+                mediaRisk('audio_visual_recorder_started', 'info', {timeslice_ms: 15000});
+                return true;
+            };
+            mediaStart.on('click.evaluationAudioVisual', function () {
+                mediaStart.prop('disabled', true);
+                if (!screenController) {
+                    screenController = assessmentFlow.createScreenCapture($form, function () { return mediaEvidenceId; }, {preferCanvas: mediaBrowserCompatibility.source === 'canvas', onDiagnostic: function (eventType, metadata) { mediaRisk(eventType, 'info', metadata); }});
+                    mediaRisk('audio_visual_browser_compatibility', 'info', {source: mediaBrowserCompatibility.source, ok: mediaBrowserCompatibility.ok, user_agent: String(window.navigator && window.navigator.userAgent || '').slice(0, 160)});
+                    screenController.onInterrupted = function (reason) {
+                        mediaRisk(reason, 'risk', {source: screenController.source});
+                        setAudioVisualCheck($form, 'screen', 'Captura', 'error', 'La selección de pantalla se interrumpió.');
+                        setAudioVisualReconnectStatus($form, 'screen', 'interrumpida');
+                        $form.addClass('is-audio-visual-interrupted');
+                        mediaStatus.removeClass('alert-success').addClass('alert-danger').text('La captura de pantalla se interrumpió.');
+                        mediaReconnectPanel.removeClass('d-none');
+                        if ($form.data('audio-visual-interruption-policy') !== 'continue') $form.find('button[type="submit"]').prop('disabled', true);
+                    };
+                    screenController.onFailure = function (reason, error) {
+                        var detail = error && (error.message || error.name) || 'capture_failed';
+                        mediaIntegrityFailure = error || new Error('screen_capture_failed');
+                        mediaRisk(reason, 'risk', {source: screenController.source || 'unknown', detail: detail});
+                        // No abrir el panel de reconexión por un fallo puntual
+                        // de captura/subida: la pista de pantalla sigue activa.
+                        setAudioVisualCheck($form, 'screen', 'Captura', 'warning', 'Una captura puntual no pudo guardarse; la captura continúa activa.');
+                        mediaStatus.removeClass('alert-success alert-danger').addClass('alert-warning').text('Una captura puntual no pudo guardarse. La captura de pantalla continúa activa.');
+                    };
+                }
+                // getDisplayMedia debe invocarse directamente desde el gesto del
+                // usuario. Esperar primero a media-init/getUserMedia consume la
+                // activación transitoria del clic y el navegador rechaza pantalla.
+                setAudioVisualCheck($form, 'screen', 'Captura', 'pending', 'Solicitando acceso a pantalla completa…');
+                screenCapturePromise = screenController.start({deferValidation: true});
+                var audioVisualStartStage = 'screen';
+                var mediaRequest = screenCapturePromise.then(function () {
+                    audioVisualStartStage = 'recording';
+                    return startMedia();
+                }).then(function () {
+                    audioVisualStartStage = 'screen_validation';
+                    return screenController.validate().then(function () {
+                        if (!mediaRecorder || mediaRecorder.state !== 'inactive') return Promise.reject(new Error('recorder_not_ready'));
+                        return {ok: true};
+                    });
+                }).catch(function (error) {
+                    if (!error.audioVisualComponent) {
+                        error.audioVisualComponent = audioVisualStartStage === 'screen' || audioVisualStartStage === 'screen_validation' ? 'screen' : 'recording';
+                    }
+                    if (error.audioVisualComponent === 'recording' && !error.audioVisualMessage) {
+                        error.audioVisualMessage = 'No se pudo preparar la grabación audiovisual. Revisa los permisos e inténtalo nuevamente.';
+                    }
+                    mediaRisk('audio_visual_start_failed', 'risk', {component: error && error.audioVisualComponent || 'unknown', name: error && error.name || 'Error', reason: error && error.message || 'media_start_failed'});
+                    screenController.stop();
+                    assessmentFlow.stopRecorder(mediaRecorder);
+                    if (mediaStream) mediaStream.getTracks().forEach(function (track) { track.stop(); });
+                    mediaStream = null;
+                    mediaRecorder = null;
+                    stopVoiceDetection();
+                    var preview = gate.find('[data-audio-visual-preview]').first()[0];
+                    if (preview) { preview.pause(); preview.srcObject = null; preview.classList.add('d-none'); }
+                    return {ok: false, error: error};
+                });
+                Promise.resolve(mediaRequest).then(function (mediaOutcome) {
+                    if (!mediaOutcome.ok) {
+                        var failedComponent = mediaOutcome.error && mediaOutcome.error.audioVisualComponent;
+                        var failedLabel = failedComponent === 'camera' ? 'La cámara' : failedComponent === 'microphone' ? 'El micrófono' : failedComponent === 'screen' ? 'La captura de pantalla' : failedComponent === 'recording' ? 'La grabación audiovisual' : 'La configuración audiovisual';
+                        var failureMessage = (mediaOutcome.error && mediaOutcome.error.audioVisualMessage) || (failedLabel + ' no está disponible. Revisa el permiso indicado y vuelve a intentarlo.');
+                        setAudioVisualReconnectStatus($form, failedComponent, failureMessage);
+                        mediaRisk('permission_or_recording_failed', 'risk', {reason: mediaOutcome.error && mediaOutcome.error.message ? mediaOutcome.error.message : 'media_init_failed'});
+                        mediaStatus.removeClass('alert-secondary').addClass('alert-danger').text(failureMessage);
+                        mediaStart.prop('disabled', false);
+                        mediaContinue.addClass('d-none');
+                        mediaReconnectPanel.find('[data-evaluation-exit-before-start]').toggleClass('d-none', Boolean($form.data('evaluation-supervised-active')));
+                        mediaReconnectPanel.removeClass('d-none');
+                        return;
+                    }
+                    mediaStatus.removeClass('alert-secondary alert-warning').addClass('alert-success').text('Componentes autorizados. Revisa las instrucciones antes de comenzar.');
+                    showInstructionsStage();
+                });
+            });
+            mediaContinue.on('click.evaluationAudioVisual', function () {
+                if (!$(this).data('audio-visual-active')) {
+                    mediaStatus.removeClass('alert-success alert-secondary').addClass('alert-danger').text('Autoriza la cámara, el micrófono y la captura para poder comenzar.');
+                    return;
+                }
+                sendEvent('fullscreen_failed', {continued_without_fullscreen: true});
+                showInstructionsStage();
+            });
+            $form.on('click.evaluationAudioVisualBegin', '[data-assessment-begin]', function () {
+                var fullscreenPromise = requestFullscreen().then(function () {
+                    sendEvent('fullscreen_entered');
+                    return true;
+                }).catch(function (error) {
+                    var fullscreenEvent = error && error.message === 'fullscreen_unavailable' ? 'fullscreen_unavailable' : 'fullscreen_denied';
+                    sendEvent(fullscreenEvent);
+                    $form.addClass('is-evaluation-control-warning');
+                    showNotification('warning', 'No se pudo activar pantalla completa. La evaluación continuará dentro de esta pantalla y la incidencia quedará registrada.');
+                    return false;
+                });
+                Promise.resolve(fullscreenPromise).then(function () {
+                    if (!startRecording()) throw new Error('No se pudo iniciar la grabación audiovisual. Reintenta.');
+                    return sendEvent('supervised_started', {audio_visual: true, evidence_id: mediaEvidenceId});
+                }).then(function (started) {
+                    if (!started || !started.ok) { assessmentFlow.stopRecorder(mediaRecorder); throw new Error('No se pudo activar la evaluación. Reintenta el inicio.'); }
+                    sendEvent('audio_visual_recording_started', {evidence_id: mediaEvidenceId});
+                    setActive(false);
+                    if (screenController) { screenController.startPeriodic(); startedScreenCapture = screenController.capture('assessment_started').catch(function (error) { mediaIntegrityFailure = error; return null; }); }
+                }).catch(function (error) {
+                    $form.find('[data-assessment-begin-status]').text(error && error.message === 'fullscreen_unavailable'
+                        ? 'Este navegador no permite iniciar la actividad en pantalla completa. Cambia a un navegador compatible e inténtalo nuevamente.'
+                        : (error && error.message === 'fullscreen_denied' ? 'No se pudo activar la pantalla completa. Vuelve a intentarlo.' : (error && error.message || 'No se pudo iniciar la evaluación.')));
+                });
+            });
+            mediaReconnectButton.on('click.evaluationAudioVisual', function () {
+                var button = this; $(button).prop('disabled', true).text('Solicitando permisos...');
+                assessmentFlow.stopRecorder(mediaRecorder);
+                if (mediaStream) mediaStream.getTracks().forEach(function (track) { track.stop(); });
+                // Reusar el permiso/pista de pantalla si continúa viva. Solo
+                // pedir al usuario compartir otra vez cuando esa pista terminó.
+                var screenIsLive = Boolean(screenController && screenController.hasLiveCapture());
+                if (!screenIsLive && screenController) screenController.stop();
+                setAudioVisualCheck($form, screenIsLive ? 'camera' : 'screen', screenIsLive ? 'Cámara y micrófono' : 'Captura', 'pending', screenIsLive ? 'Reconectando cámara y micrófono…' : 'Solicitando acceso a pantalla completa…');
+                screenCapturePromise = screenController ? (screenIsLive ? Promise.resolve(screenController) : screenController.start({deferValidation: true})) : Promise.resolve(true);
+                var reconnectWasActive = Boolean($form.data('evaluation-supervised-active'));
+                var reconnectStage = 'screen';
+                screenCapturePromise.then(function () {
+                    reconnectStage = 'recording';
+                    return startMedia();
+                }).then(function () {
+                    reconnectStage = 'screen_validation';
+                    return screenController.validate();
+                }).then(function () {
+                    if (!mediaRecorder || mediaRecorder.state !== 'inactive') throw new Error('recorder_not_ready');
+                    if (!startRecording()) throw new Error('recorder_not_ready');
+                    reconnectStage = 'activation';
+                    if (reconnectWasActive) return {alreadyActive: true};
+                    return sendEvent('supervised_started', {audio_visual: true, recovered_before_start: true, evidence_id: mediaEvidenceId}).then(function (started) {
+                        if (!started || !started.ok) {
+                            var startError = new Error('supervised_start_rejected');
+                            startError.audioVisualComponent = 'recording';
+                            startError.audioVisualMessage = 'No se pudo activar la evaluación. Reintenta o sal a Mis evaluaciones.';
+                            throw startError;
+                        }
+                        setActive(false);
+                        sendEvent('audio_visual_recording_started', {evidence_id: mediaEvidenceId, recovered_before_start: true});
+                        return {alreadyActive: false};
+                    });
+                }).then(function (recoveryState) {
+                    mediaReconnectPanel.addClass('d-none'); mediaReconnectPanel.find('[data-evaluation-exit-before-start]').addClass('d-none'); $form.removeClass('is-audio-visual-interrupted'); $form.find('button[type="submit"]').prop('disabled', false);
+                    if (submitStatus.length) submitStatus.addClass('d-none').empty();
+                    if (recoveryState && recoveryState.alreadyActive) {
+                        mediaStatus.removeClass('alert-danger alert-secondary').addClass('alert-success').text('Cámara, micrófono y captura recuperados. Puedes continuar la evaluación.');
+                    }
+                    if (screenController) screenController.startPeriodic();
+                    $(button).prop('disabled', false).text('Reintentar conexión audiovisual');
+                }).catch(function (error) {
+                    mediaReconnectPanel.removeClass('d-none'); $(button).prop('disabled', false).text('Reintentar conexión audiovisual');
+                    // Si la pantalla ya fue autorizada en este intento, no la
+                    // cierres porque haya fallado cámara/micrófono: conservarla
+                    // evita que el siguiente intento vuelva al selector en bucle.
+                    if (screenController && !screenController.hasLiveCapture()) screenController.stop();
+                    assessmentFlow.stopRecorder(mediaRecorder);
+                    if (mediaStream) mediaStream.getTracks().forEach(function (track) { track.stop(); });
+                    mediaStream = null;
+                    mediaRecorder = null;
+                    stopVoiceDetection();
+                    var preview = gate.find('[data-audio-visual-preview]').first()[0];
+                    if (preview) { preview.pause(); preview.srcObject = null; preview.classList.add('d-none'); }
+                    mediaReconnectPanel.find('[data-evaluation-exit-before-start]').toggleClass('d-none', Boolean($form.data('evaluation-supervised-active')));
+                    if (!error.audioVisualComponent) error.audioVisualComponent = reconnectStage === 'recording' || reconnectStage === 'activation' ? 'recording' : 'screen';
+                    var reconnectComponent = error.audioVisualComponent;
+                    var reconnectMessage = (error && error.audioVisualMessage) || (reconnectComponent === 'screen' ? 'No se pudo autorizar la captura de pantalla. Reintenta y selecciona “Toda la pantalla”.' : reconnectStage === 'activation' ? 'No se pudo activar la evaluación. Reintenta o sal a Mis evaluaciones.' : 'No se pudo reconectar la cámara o el micrófono. Revisa el componente indicado e inténtalo nuevamente.');
+                    setAudioVisualReconnectStatus($form, reconnectComponent, reconnectMessage);
+                    mediaStatus.removeClass('alert-success').addClass('alert-danger').text(reconnectMessage);
+                });
+            });
+            document.addEventListener('fullscreenchange', function () {
+                if (document.fullscreenElement === fullscreenTarget) {
+                    sendEvent('fullscreen_entered');
+                } else if (!$form.hasClass('is-evaluation-supervised-locked')) {
+                    sendEvent('fullscreen_exited');
+                    $form.addClass('is-evaluation-control-warning');
+                }
+            });
+            $form.on('submit.evaluationAudioVisual', function (event) {
+                if (mediaFinalized) {
+                    event.preventDefault();
+                    event.stopImmediatePropagation();
+                    return;
+                }
+                if (!mediaRecorder || mediaRecorder.state === 'inactive' || !mediaEvidenceId || !$form.data('evaluation-supervised-active')) {
+                    event.preventDefault();
+                    var cameraIsLive = Boolean(mediaStream && mediaStream.getVideoTracks().some(function (track) { return track.readyState === 'live'; }));
+                    var microphoneIsLive = Boolean(mediaStream && mediaStream.getAudioTracks().some(function (track) { return track.readyState === 'live'; }));
+                    var screenIsReady = Boolean(screenController && screenController.isReady && screenController.isReady());
+                    var reconnectComponent = !screenIsReady ? 'screen' : !cameraIsLive ? 'camera' : !microphoneIsLive ? 'microphone' : 'recording';
+                    var reconnectMessage = reconnectComponent === 'screen'
+                        ? 'La captura de pantalla no está activa. Reintenta la conexión audiovisual.'
+                        : reconnectComponent === 'camera'
+                            ? 'La cámara no está activa. Reintenta la conexión audiovisual.'
+                            : reconnectComponent === 'microphone'
+                                ? 'El micrófono no está activo. Reintenta la conexión audiovisual.'
+                                : 'La grabación audiovisual no está lista o la evaluación no quedó activada. Reintenta la conexión audiovisual.';
+                    setAudioVisualReconnectStatus($form, reconnectComponent, reconnectMessage);
+                    mediaReconnectPanel.find('[data-evaluation-exit-before-start]').toggleClass('d-none', Boolean($form.data('evaluation-supervised-active')));
+                    mediaReconnectPanel.removeClass('d-none');
+                    mediaStatus.removeClass('alert-success alert-secondary').addClass('alert-warning').text(reconnectMessage);
+                    if (submitStatus.length) submitStatus.removeClass('d-none alert-success alert-danger').addClass('alert-warning').text(reconnectMessage);
+                    showNotification('warning', reconnectMessage);
+                    mediaReconnectPanel[0] && mediaReconnectPanel[0].scrollIntoView({behavior: 'smooth', block: 'center'});
+                    return;
+                }
+                var submitter = event.originalEvent && event.originalEvent.submitter; if (submitter && submitter.value === 'draft') return;
+                if (submitStatus.length) submitStatus.addClass('d-none').empty();
+                $form.data('evaluation-submission-in-progress', true);
+                event.preventDefault(); mediaFinalized = true;
+                clearFormProcessing($form);
+                var progress = createSubmissionProgress();
+                var answersPayload = new FormData($form[0]);
+                var submittedActions = answersPayload.getAll('evaluation_survey_action');
+                var finalAction = submittedActions.length ? String(submittedActions[submittedActions.length - 1]) : 'complete';
+                answersPayload.set('evaluation_survey_action', finalAction);
+                $form.find('button, input, textarea, select').prop('disabled', true);
+                progress.update(8, 'Guardando respuestas…', 'El servidor guardará y verificará todas las respuestas antes de registrar la actividad.', 10);
+                if (screenController && screenController.stopScheduling) screenController.stopScheduling();
+                fetch($form.attr('action') || window.location.href, {method: 'POST', credentials: 'same-origin', headers: {'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest'}, body: answersPayload}).then(function (response) { return response.json().then(function (result) { answersSaved = result.answers_saved === true && result.answers_verified === true; if (!response.ok || !result.ok || !answersSaved || result.activity_recorded !== true) { var error = new Error(result.message || 'answers_save_failed'); error.payload = result; throw error; } return result; }); }).then(function (result) {
+                    answersSaved = true;
+                    progress.update(34, 'Respuestas guardadas y verificadas', 'El servidor confirmó ' + Number(result.answers_saved_count || 0) + ' respuestas antes de avanzar.', 14);
+                    return new Promise(function (resolve) { window.setTimeout(resolve, 350); }).then(function () {
+                        progress.update(44, 'Registro de actividad confirmado', 'La actividad de cierre se registró después de verificar las respuestas.', 12);
+                        return Promise.resolve(startedScreenCapture);
+                    }).then(function () {
+                        if (!screenController || !screenController.capture || !screenController.flushUploads) throw new Error('screen_capture_controller_missing');
+                        if (mediaIntegrityFailure) throw new Error('audio_visual_evidence_incomplete');
+                        progress.update(52, 'Guardando capturas de pantalla…', 'Se envía una captura final y se confirman las que quedaron pendientes.', 12);
+                        return screenController && screenController.flushUploads ? screenController.flushUploads() : null;
+                    }).then(function () {
+                        return screenController && screenController.capture ? screenController.capture('assessment_finished').catch(function (error) { if (!error || error.message !== 'screen_capture_busy') throw error; return screenController.flushUploads().then(function () { return screenController.capture('assessment_finished'); }); }) : null;
+                    }).then(function () {
+                        return screenController && screenController.flushUploads ? screenController.flushUploads().catch(function (error) { mediaRisk('screen_capture_upload_failed', 'risk', {reason: error.message || 'capture_upload_failed', attempts: 3}); mediaIntegrityFailure = error || new Error('screen_capture_upload_failed'); throw mediaIntegrityFailure; }) : null;
+                    }).then(function () {
+                        if (mediaIntegrityFailure) throw new Error('audio_visual_evidence_incomplete');
+                        progress.update(74, 'Cerrando la grabación de video…', 'Las capturas están confirmadas; esperando el último fragmento del video.', 8);
+                        return mediaRecorder.state === 'inactive' ? Promise.resolve() : new Promise(function (resolve, reject) { var timeout = window.setTimeout(function () { reject(new Error('recorder_stop_timeout')); }, 10000); mediaRecorder.addEventListener('stop', function () { window.clearTimeout(timeout); resolve(); }, {once: true}); try { mediaRecorder.stop(); } catch (error) { window.clearTimeout(timeout); reject(error); } });
+                    }).then(function () {
+                        progress.update(84, 'Confirmando fragmentos del video…', 'El video se transmite durante la evaluación; ahora se espera la cola pendiente.', Math.max(5, mediaPendingChunks * 3 + 5));
+                        return Promise.resolve(mediaUploadChain);
+                    }).then(function () {
+                        if (mediaIntegrityFailure) throw new Error('audio_visual_evidence_incomplete');
+                        progress.update(94, 'Finalizando evidencia audiovisual…', 'El servidor verifica las capturas y todos los fragmentos recibidos.', 5);
+                        var payload = new URLSearchParams(); payload.set('csrf_token', csrf); payload.set('evidence_id', mediaEvidenceId); payload.set('duration_seconds', String(Math.max(0, Math.round((Date.now() - mediaStartedAt) / 1000))));
+                        var requestFinalize = function (attempt) { return fetch(String($form.data('media-finalize-url') || ''), {method: 'POST', credentials: 'same-origin', headers: {'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8', 'Accept': 'application/json'}, body: payload.toString()}).then(function (response) { return response.json().catch(function () { return {ok: false, reason: 'invalid_finalize_response'}; }).then(function (finalizeResult) { if (!finalizeResult.ok && attempt < 3) return new Promise(function (resolve) { window.setTimeout(resolve, 700 * attempt); }).then(function () { return requestFinalize(attempt + 1); }); if (!finalizeResult.ok) mediaRisk('finalize_failed', 'risk', {reason: finalizeResult.reason || 'finalize_rejected', attempts: 3}); return finalizeResult; }); }).catch(function (error) { if (attempt < 3) return new Promise(function (resolve) { window.setTimeout(resolve, 700 * attempt); }).then(function () { return requestFinalize(attempt + 1); }); mediaRisk('finalize_failed', 'risk', {reason: error.message || 'network_error', attempts: 3}); return {ok: false}; }); };
+                        return requestFinalize(1).then(function (finalizeResult) {
+                            if (!finalizeResult || finalizeResult.ok !== true) throw new Error((finalizeResult && finalizeResult.reason) || 'audio_visual_finalize_failed');
+                            progress.update(100, 'Envío recibido', 'Respuestas, actividad, capturas y video fueron confirmados; el procesamiento final puede continuar en segundo plano.', 0);
+                            return result;
+                        });
+                    });
+                }).then(function (result) { $form.data('test-allow-exit', true); if (mediaStream) mediaStream.getTracks().forEach(function (track) { track.stop(); }); if (screenController) screenController.stop(); window.setTimeout(function () { progress.remove(); window.location.href = String($form.attr('data-my-tests-url') || result.redirect_url || '/my-tests'); }, 500); }).catch(function (error) {
+                    progress.remove();
+                    if (error && error.payload && error.payload.reason === 'activity_persistence_unavailable' && answersSaved) {
+                        $form.removeData('evaluation-submission-in-progress');
+                        mediaFinalized = false;
+                        $form.find('button, input, textarea, select').prop('disabled', false);
+                        showNotification('error', 'Las respuestas quedaron guardadas, pero no se confirmó el registro de actividad. La evaluación sigue abierta; puedes reintentar. No se enviaron las capturas finales ni se cerró el video.');
+                        return;
+                    }
+                    if (answersSaved) {
+                        mediaFinalized = true;
+                        $form.data('evaluation-submission-in-progress', true);
+                        mediaRisk('finalize_failed', 'risk', {reason: error.message || 'evidence_finalize_failed'});
+                        var evidenceMessage = error && error.payload && error.payload.reason === 'activity_persistence_unavailable'
+                            ? 'Tus respuestas quedaron guardadas, pero no se confirmó el registro de actividad. No se enviaron capturas ni se cerró el video; solicita asistencia antes de continuar.'
+                            : 'Tus respuestas quedaron guardadas, pero la evidencia audiovisual está incompleta. No vuelvas a enviar la evaluación; solicita asistencia para revisar el registro.';
+                        mediaStatus.removeClass('alert-success alert-secondary').addClass('alert-danger').text(evidenceMessage);
+                        if (submitStatus.length) submitStatus.removeClass('d-none alert-warning alert-success').addClass('alert-danger').text(evidenceMessage);
+                        if (submitStatus.length) submitStatus[0].scrollIntoView({behavior: 'smooth', block: 'center'});
+                        showNotification('error', evidenceMessage);
+                        return;
+                    }
+                    $form.removeData('evaluation-submission-in-progress'); mediaFinalized = false; $form.find('button, input, textarea, select').prop('disabled', false);
+                    mediaReconnectPanel.find('[data-evaluation-exit-before-start]').toggleClass('d-none', Boolean($form.data('evaluation-supervised-active')));
+                    setAudioVisualReconnectStatus($form, 'recording', 'No se pudo confirmar el guardado. Reconecta la grabación audiovisual antes de volver a intentarlo.');
+                    mediaReconnectPanel.removeClass('d-none');
+                    if (error && error.payload && error.payload.message) {
+                        if (submitStatus.length) submitStatus.removeClass('d-none alert-warning alert-success').addClass('alert-danger').text(error.payload.message);
+                        showNotification('warning', error.payload.message);
+                    } else {
+                        mediaRisk('finalize_failed', 'risk', {reason: error.message || 'unknown'});
+                        var saveErrorMessage = 'No se pudo confirmar si las respuestas quedaron guardadas. Revisa la conexión y no vuelvas a enviar hasta reconectar o confirmar el estado.';
+                        mediaStatus.removeClass('alert-success').addClass('alert-danger').text(saveErrorMessage);
+                        if (submitStatus.length) submitStatus.removeClass('d-none alert-warning alert-success').addClass('alert-danger').text(saveErrorMessage);
+                        showNotification('error', saveErrorMessage);
+                    }
+                    mediaReconnectPanel[0] && mediaReconnectPanel[0].scrollIntoView({behavior: 'smooth', block: 'center'});
+                });
+            });
+        }
+
+        document.addEventListener('visibilitychange', function () { sendEvent(document.hidden ? 'tab_hidden' : 'tab_visible'); });
+        window.addEventListener('blur', function () { sendEvent('window_blurred'); });
+        window.addEventListener('focus', function () { sendEvent('window_focused'); });
+        ['copy', 'cut', 'paste', 'contextmenu', 'dragstart'].forEach(function (eventName) {
+            $form.on(eventName + '.evaluationControl', function (event) {
+                if (!strictMode) { return; }
+                event.preventDefault();
+                sendEvent(eventName === 'contextmenu' ? 'context_menu_blocked' : eventName + '_blocked');
+            });
+        });
+        $form.on('keydown.evaluationControl', function (event) {
+            if (!strictMode) { return; }
+            var key = String(event.key || '').toLowerCase();
+            var blocked = event.key === 'PrintScreen' ? 'suspicious_key_printscreen' : null;
+            if (!blocked && (event.ctrlKey || event.metaKey) && key === 'p') { blocked = 'print_blocked'; }
+            if (!blocked && (event.ctrlKey || event.metaKey) && key === 's') { blocked = 'suspicious_key_save'; }
+            if (!blocked && (event.ctrlKey || event.metaKey) && key === 'c') { blocked = 'suspicious_key_copy'; }
+            if (!blocked && (event.ctrlKey || event.metaKey) && key === 'u') { blocked = 'suspicious_key_devtools'; }
+            if (!blocked && event.key === 'F12') { blocked = 'suspicious_key_devtools'; }
+            if (blocked) { event.preventDefault(); sendEvent(blocked); }
+        });
+        window.addEventListener('beforeprint', function () { if (mode === 'supervised') { sendEvent('print_blocked'); } });
+        $form.on('change.evaluationControl', 'input, select, textarea', function () { sendEvent('answer_changed'); });
+    }
+
+    $('form[data-evaluation-control-form]').each(function () { initEvaluationSurveyControl($(this)); });
+
+    initPromptEditors(document);
+
+    function initEvaluationFormControlSettings() {
+        $('form.app-form-stack').each(function () {
+            var $form = $(this);
+            var $control = $form.find('#control_mode');
+            var $fields = $form.find('.evaluation-audio-visual-field');
+            if (!$control.length || !$fields.length || $form.data('audio-visual-settings-ready')) return;
+            $form.data('audio-visual-settings-ready', true);
+            var sync = function () {
+                var enabled = $control.val() === 'supervised_audio_visual';
+                $fields.toggleClass('d-none', !enabled).attr('aria-hidden', enabled ? 'false' : 'true');
+                $fields.find('select, input, textarea').prop('disabled', !enabled);
+                $control.prop('disabled', false);
+            };
+            $control.on('change.evaluationAudioVisualSettings', sync);
+            sync();
+        });
+    }
+
+    initEvaluationFormControlSettings();
+
 });

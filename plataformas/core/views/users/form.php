@@ -16,7 +16,7 @@
 <form method="post" action="<?= e($formAction ?? '') ?>" class="user-form-layout needs-validation <?= !empty($isDrawer) ? 'user-form-layout-drawer' : '' ?>" <?= !empty($isDrawer) ? 'data-user-drawer-form' : '' ?> novalidate>
     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
 
-    <section class="content-panel user-form-main">
+    <section class="card content-panel user-form-main">
         <div class="user-form-section">
             <div class="user-form-section-head">
                 <span><i class="bi bi-person-vcard"></i></span>
@@ -70,6 +70,7 @@
                             <option value="">Selecciona</option>
                             <option value="masculino" <?= ($values['sex'] ?? '') === 'masculino' ? 'selected' : '' ?>>Masculino</option>
                             <option value="femenino" <?= ($values['sex'] ?? '') === 'femenino' ? 'selected' : '' ?>>Femenino</option>
+                            <option value="no_informado" <?= ($values['sex'] ?? '') === 'no_informado' ? 'selected' : '' ?>>No informado</option>
                         </select>
                         <label for="sex">Sexo</label>
                     </div>
@@ -213,7 +214,7 @@
         </div>
     </section>
 
-    <aside class="content-panel user-form-aside">
+    <aside class="card content-panel user-form-aside">
         <div class="user-form-aside-header">
             <span><i class="bi bi-person-badge"></i></span>
             <div>

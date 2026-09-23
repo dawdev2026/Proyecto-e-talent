@@ -5,22 +5,32 @@ final class TestController extends Controller
 {
     private TestInstrumentModel $tests;
     private TestSessionModel $sessions;
+    private TestProcessModel $processes;
     private TestSettingsModel $settings;
     private RiasecRecommendationService $riasecRecommendations;
     private ProgressRankingSummaryService $progressRankingSummary;
     private InterviewProcessModel $interviews;
     private TestMediaEvidenceModel $mediaEvidence;
+    private EvaluationSurveyFormModel $evaluationForms;
+    private EvaluationSurveyAttemptModel $evaluationAttempts;
+    private EvaluationSurveyControlModel $evaluationControl;
+    private EvaluationSurveyMediaEvidenceModel $evaluationMediaEvidence;
 
     public function __construct(?Template $view = null, ?TestInstrumentModel $tests = null, ?TestSessionModel $sessions = null, ?TestSettingsModel $settings = null, ?RiasecRecommendationService $riasecRecommendations = null, ?ProgressRankingSummaryService $progressRankingSummary = null, ?InterviewProcessModel $interviews = null, ?TestMediaEvidenceModel $mediaEvidence = null)
     {
         parent::__construct($view);
         $this->tests = $tests ?: new TestInstrumentModel();
         $this->sessions = $sessions ?: new TestSessionModel();
+        $this->processes = new TestProcessModel();
         $this->settings = $settings ?: new TestSettingsModel();
         $this->riasecRecommendations = $riasecRecommendations ?: new RiasecRecommendationService();
         $this->progressRankingSummary = $progressRankingSummary ?: new ProgressRankingSummaryService();
         $this->interviews = $interviews ?: new InterviewProcessModel();
         $this->mediaEvidence = $mediaEvidence ?: new TestMediaEvidenceModel();
+        $this->evaluationForms = new EvaluationSurveyFormModel();
+        $this->evaluationAttempts = new EvaluationSurveyAttemptModel();
+        $this->evaluationControl = new EvaluationSurveyControlModel();
+        $this->evaluationMediaEvidence = new EvaluationSurveyMediaEvidenceModel();
     }
 
     public function index(): void
@@ -28,7 +38,7 @@ final class TestController extends Controller
         require_permission('manage_tests');
 
         $this->render('tests/index', [
-            'title' => 'Evaluaciones | Metricatest',
+            'title' => 'Evaluaciones | e-talent',
             'currentPage' => 'tests',
             'tests' => $this->tests->all(),
             'categories' => TestInstrumentModel::CATEGORIES,
@@ -36,6 +46,87 @@ final class TestController extends Controller
             'itemTypes' => TestInstrumentModel::ITEM_TYPES,
             'sessions' => $this->sessions->allSessions(),
             'hasFinishedSessions' => $this->sessions->hasFinishedActiveSessions(),
+        ]);
+    }
+
+    public function companyAssignments(): void
+    {
+        require_permission('assign_tests');
+
+        $companies = (new CompanyModel())->active();
+        $companyId = max(0, (int) ($_GET['company_id'] ?? ($companies[0]['id'] ?? 0)));
+        $company = array_values(array_filter($companies, static fn(array $row): bool => (int) $row['id'] === $companyId))[0] ?? null;
+        if (!$company && $companies) {
+            $company = $companies[0];
+            $companyId = (int) $company['id'];
+        }
+
+        $assignments = $companyId > 0 ? (new CompanyTestAssignmentModel())->assignmentsForCompany($companyId) : [];
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            verify_csrf();
+            $companyId = max(0, (int) ($_POST['company_id'] ?? 0));
+            (new CompanyTestAssignmentModel())->saveCompanyAssignments($companyId, is_array($_POST['instruments'] ?? null) ? $_POST['instruments'] : []);
+            flash('success', 'Asignaciones y configuraciones de la empresa actualizadas correctamente.');
+            redirect(route_url('tests.company-assignments') . '?company_id=' . $companyId);
+        }
+
+        $this->render('tests/company_assignments', [
+            'title' => 'Asignar evaluaciones Empresa | e-talent',
+            'currentPage' => 'tests.company-assignments',
+            'companies' => $companies,
+            'company' => $company,
+            'assignments' => $assignments,
+        ]);
+    }
+
+    public function rankingCompanyAssignments(): void
+    {
+        require_permission('manage_ranking_presets');
+
+        $companies = (new CompanyModel())->active();
+        $officialConfig = $this->progressRankingSummary->officialConfig();
+        $presets = $this->settings->rankingPresetOptions($officialConfig);
+        $companyId = max(0, (int) ($_GET['company_id'] ?? ($companies[0]['id'] ?? 0)));
+
+        $companyIds = array_map(static fn(array $company): int => (int) ($company['id'] ?? 0), $companies);
+        if ($companyId > 0 && !in_array($companyId, $companyIds, true)) {
+            $companyId = (int) ($companies[0]['id'] ?? 0);
+        }
+
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            verify_csrf();
+            $companyId = max(0, (int) ($_POST['company_id'] ?? 0));
+            $presetId = max(0, (int) ($_POST['preset_id'] ?? 0));
+            if (!in_array($companyId, $companyIds, true)) {
+                flash('danger', 'La empresa seleccionada no existe o está inactiva.');
+            } else {
+                try {
+                    $this->settings->saveRankingCompanyAssignment(
+                        $companyId,
+                        $presetId > 0 ? $presetId : null,
+                        (int) (current_user()['id'] ?? 0)
+                    );
+                    flash('success', 'Configuración de ranking asignada a la empresa.');
+                } catch (Throwable $exception) {
+                    flash('danger', $exception->getMessage());
+                }
+            }
+            redirect(route_url('tests.ranking-company-assignments') . '?company_id=' . $companyId);
+        }
+
+        $assignmentRows = $this->settings->rankingCompanyAssignments();
+        $assignmentMap = [];
+        foreach ($assignmentRows as $assignment) {
+            $assignmentMap[(int) ($assignment['company_id'] ?? 0)] = $assignment;
+        }
+
+        $this->render('tests/ranking_company_assignments', [
+            'title' => 'Asignar ranking por empresa | e-talent',
+            'currentPage' => 'tests.ranking-company-assignments',
+            'companies' => $companies,
+            'presets' => $presets,
+            'selectedCompanyId' => $companyId,
+            'assignmentMap' => $assignmentMap,
         ]);
     }
 
@@ -58,7 +149,7 @@ final class TestController extends Controller
         ));
 
         $this->render('tests/progress', [
-            'title' => 'Estado Avance | Metricatest',
+            'title' => 'Estado Avance | e-talent',
             'currentPage' => 'tests.progress',
             'tests' => $activeTests,
             'sessions' => $dashboardSessions,
@@ -87,7 +178,7 @@ final class TestController extends Controller
         $finishedSessions = array_values(array_filter(
             $this->sessions->dashboardSessions($dashboardFilters, $dashboardFields),
             static fn(array $session): bool => isset($activeTestIds[(int) ($session['instrument_id'] ?? 0)])
-                && in_array((string) ($session['status'] ?? ''), ['completed', 'expired'], true)
+                && (string) ($session['status'] ?? '') === 'completed'
         ));
 
         if (!$finishedSessions) {
@@ -145,7 +236,7 @@ final class TestController extends Controller
 
     public function progressRanking(): void
     {
-        require_permission('manage_tests');
+        require_permission('manage_ranking_presets');
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             require_permission('manage_ranking_presets');
@@ -179,24 +270,20 @@ final class TestController extends Controller
         $finishedSessions = array_values(array_filter(
             $this->sessions->dashboardSessions($dashboardFilters, $dashboardFields),
             static fn(array $session): bool => isset($activeTestIds[(int) ($session['instrument_id'] ?? 0)])
-                && in_array((string) ($session['status'] ?? ''), ['completed', 'expired'], true)
+                && (string) ($session['status'] ?? '') === 'completed'
         ));
 
         $ranking = $this->progressRankingSummary->build(
             $finishedSessions,
             function (int $sessionId, array $session): array {
                 $summary = $this->sessions->summaryForSession($sessionId);
-                if (!$summary && (string) ($session['status'] ?? '') === 'expired') {
-                    $summary = $this->sessions->complete($sessionId, [], 'expired');
-                }
-
                 return $summary;
             },
             $rankingConfig
         );
 
         $this->render('tests/progress_ranking', [
-            'title' => 'Ranking Resumen | Metricatest',
+            'title' => 'Ranking Resumen | e-talent',
             'currentPage' => 'tests.progress',
             'ranking' => $ranking,
             'dashboardFields' => $dashboardFields,
@@ -296,7 +383,7 @@ final class TestController extends Controller
         }
 
         $this->render('tests/assign', [
-            'title' => 'Asignar evaluacion | Metricatest',
+            'title' => 'Asignar evaluacion | e-talent',
             'currentPage' => 'tests.assign',
             'instruments' => $this->sessions->activeInstruments(),
             'users' => $this->sessions->assignableUsersForDemo(),
@@ -307,31 +394,93 @@ final class TestController extends Controller
     public function mine(): void
     {
         require_auth();
-        $sessions = $this->sessions->sessionsForUser((int) current_user()['id']);
+        $currentUser = current_user() ?: [];
+        $userId = (int) ($currentUser['id'] ?? 0);
+        $companyId = (int) ($currentUser['company_id'] ?? 0);
+        $allSessions = $this->sessions->sessionsForUser($userId);
+        // Keep expired assignments visible for audit; they are not answerable,
+        // but hiding them would make partial saved work disappear from the user view.
+        $sessions = array_values(array_filter($allSessions, static fn(array $session): bool => in_array((string) ($session['status'] ?? ''), ['assigned', 'in_progress', 'expired'], true)));
+        $evaluationAssignments = array_values(array_filter(
+            $this->processes->evaluationAssignmentsForUser($userId, $companyId),
+            static fn(array $assignment): bool => in_array((string) ($assignment['status'] ?? ''), ['assigned', 'in_progress', 'expired'], true)
+        ));
+        $allEvaluationAssignments = $this->processes->evaluationAssignmentsForUser($userId, $companyId, true);
+        foreach ($evaluationAssignments as &$assignment) {
+            $assignment['process_availability'] = $this->sessions->availabilityForProcess((int) ($assignment['process_id'] ?? 0));
+        }
+        unset($assignment);
         $pendingAutoStartSession = $this->pendingAutoStartSession($sessions);
-        $assignedTestsFinalized = $this->assignedTestsFinalized($sessions);
-        $interviewAppointments = $this->interviews->appointmentsForCandidate((int) current_user()['id']);
+        $assignedActivitiesCompleted = $this->assignedActivitiesCompleted($allSessions, $allEvaluationAssignments);
+        $interviewAppointments = $this->interviews->appointmentsForCandidate($userId);
+        $componentReview = $companyId > 0 ? (new ComponentValidationModel())->latestForUser($userId, $companyId) : null;
+        $facialEnrollmentStatus = $companyId > 0 ? (new FacialRecognitionModel())->enrollmentStatusForUser($userId, $companyId) : null;
 
         $this->render('tests/my', [
-            'title' => 'Mis evaluaciones | Metricatest',
+            'title' => 'Mis evaluaciones | e-talent',
             'currentPage' => 'my-tests',
             'sessions' => $sessions,
+            'evaluationAssignments' => $evaluationAssignments,
             'interviewAppointments' => $interviewAppointments,
             'pendingAutoStartSession' => $pendingAutoStartSession,
-            'assignedTestsFinalized' => $assignedTestsFinalized,
+            'assignedActivitiesCompleted' => $assignedActivitiesCompleted,
+            'componentValidationPassed' => (string) ($componentReview['outcome'] ?? '') === 'passed',
+            'facialEnrollmentActive' => $facialEnrollmentStatus === 'active',
             'evaluationMessages' => $this->settings->evaluationMessages(),
             'serverNow' => time(),
+        ]);
+    }
+
+    public function mineCompleted(): void
+    {
+        require_auth();
+        $userId = (int) current_user()['id'];
+        $completed = [];
+        foreach ($this->sessions->sessionsForUser($userId) as $session) {
+            if ((string) ($session['status'] ?? '') !== 'completed') continue;
+            $completed[] = [
+                'activity_name' => (string) ($session['instrument_name'] ?? 'Test'),
+                'activity_type' => 'Test psicolaboral',
+                'process_name' => (string) ($session['process_name'] ?? ''),
+                'question_count' => (int) ($session['items_count'] ?? 0),
+                'answered_count' => (int) ($session['answers_count'] ?? 0),
+                'completed_at' => (string) ($session['completed_at'] ?? ''),
+            ];
+        }
+        // Completed evaluations remain in the personal history when their form
+        // is later deactivated; the assignment and attempt are the audit record.
+        foreach ($this->processes->evaluationAssignmentsForUser($userId, null, true) as $assignment) {
+            if ((string) ($assignment['status'] ?? '') !== 'completed') continue;
+            $completed[] = [
+                'activity_name' => (string) ($assignment['form_title'] ?? 'Evaluación'),
+                'activity_type' => 'Evaluación',
+                'process_name' => (string) ($assignment['process_name'] ?? ''),
+                'question_count' => (int) ($assignment['items_count'] ?? 0),
+                'answered_count' => (int) ($assignment['answers_count'] ?? 0),
+                'completed_at' => (string) ($assignment['completed_at'] ?? ''),
+            ];
+        }
+        usort($completed, static fn(array $left, array $right): int => strcmp($right['completed_at'], $left['completed_at']));
+
+        $this->render('tests/my_completed', [
+            'title' => 'Evaluaciones Realizadas | e-talent',
+            'currentPage' => 'my-tests.completed',
+            'completedActivities' => $completed,
         ]);
     }
 
     public function mineStatus(): void
     {
         require_auth();
-        $sessions = $this->sessions->sessionsForUser((int) current_user()['id']);
+        $user = current_user() ?: [];
+        $userId = (int) ($user['id'] ?? 0);
+        $companyId = (int) ($user['company_id'] ?? 0);
+        $sessions = $this->sessions->sessionsForUser($userId);
+        $evaluationAssignments = $this->processes->evaluationAssignmentsForUser($userId, $companyId, true);
 
         $this->jsonResponse([
             'ok' => true,
-            'assigned_tests_finalized' => $this->assignedTestsFinalized($sessions),
+            'assigned_activities_completed' => $this->assignedActivitiesCompleted($sessions, $evaluationAssignments),
             'server_now' => time(),
         ]);
     }
@@ -356,7 +505,7 @@ final class TestController extends Controller
         }
 
         $this->render('tests/settings', [
-            'title' => 'Configuracion Evaluaciones | Metricatest',
+            'title' => 'Configuracion Evaluaciones | e-talent',
             'currentPage' => 'tests.settings',
             'settings' => $this->settings->evaluationMessages(),
             'defaults' => TestSettingsModel::DEFAULTS,
@@ -437,13 +586,78 @@ final class TestController extends Controller
             ]);
         }
 
+        $isParticipant = !has_permission('manage_tests');
+        $requestPath = route_url('test-session.take', $id);
+        $faceAuthorizationKey = 'test:' . $id;
+        $authorizationIsValid = false;
+        if ($isParticipant && (string) ($session['status'] ?? '') === 'assigned') {
+            $faceAuthorization = $_SESSION['assessment_face_authorizations'][$faceAuthorizationKey] ?? null;
+            $authorizationIsValid = is_array($faceAuthorization)
+                && (int) ($faceAuthorization['user_id'] ?? 0) === $userId
+                && (int) ($faceAuthorization['company_id'] ?? 0) === (int) (current_user()['company_id'] ?? 0)
+                && (string) ($faceAuthorization['activity_type'] ?? '') === 'test_session'
+                && (int) ($faceAuthorization['activity_id'] ?? 0) === $id
+                && (int) ($faceAuthorization['issued_at'] ?? 0) <= time()
+                && (time() - (int) ($faceAuthorization['issued_at'] ?? 0)) <= 900;
+        }
+
         if ($session['status'] === 'completed') {
+            if ($_SERVER['REQUEST_METHOD'] === 'POST' && $this->isAjaxRequest()) {
+                verify_csrf();
+                $action = (string) ($_POST['test_action'] ?? 'complete');
+                if (in_array($action, ['complete', 'complete_incomplete', 'complete_expired', 'save_block_finish'], true)) {
+                    $rawAnswers = is_array($_POST['answers'] ?? null) ? $_POST['answers'] : [];
+                    $answers = $this->mergeAnswerSnapshot($rawAnswers, $_POST['answers_snapshot_json'] ?? null);
+                    $verification = $this->sessions->verifyAnswersForSession($id, $answers);
+                    $submissionEvent = in_array($action, ['complete_incomplete', 'complete_expired'], true) ? 'evaluation_submitted_incomplete' : 'evaluation_submitted';
+                    $activityRecorded = $this->sessions->hasActivityEvent($id, $submissionEvent);
+                    if ($verification['verified'] && $activityRecorded) {
+                        $this->jsonResponse(['ok' => true, 'finished' => true, 'answers_saved' => true, 'answers_verified' => true, 'answers_saved_count' => $verification['answered_count'], 'activity_recorded' => true, 'redirect_url' => route_url('my-tests')]);
+                        return;
+                    }
+                    $this->jsonResponse(['ok' => false, 'reason' => 'completed_submission_unverified', 'message' => 'El test figura finalizado, pero no se pudo confirmar el guardado o el registro de actividad. Solicita asistencia antes de volver a intentarlo.'], 503);
+                    return;
+                }
+            }
             redirect(route_url('my-tests'));
         }
 
+        if ((string) ($session['status'] ?? '') === 'expired' && $_SERVER['REQUEST_METHOD'] === 'POST' && $this->isAjaxRequest()) {
+            verify_csrf();
+            $rawAnswers = is_array($_POST['answers'] ?? null) ? $_POST['answers'] : [];
+            $answers = $this->mergeAnswerSnapshot($rawAnswers, $_POST['answers_snapshot_json'] ?? null);
+            $verification = $this->sessions->verifyAnswersForSession($id, $answers);
+            $activityRecorded = $this->sessions->hasActivityEvent($id, 'evaluation_expired');
+            if ($verification['verified'] && $activityRecorded) {
+                $this->jsonResponse(['ok' => true, 'finished' => true, 'answers_saved' => true, 'answers_verified' => true, 'answers_saved_count' => $verification['answered_count'], 'activity_recorded' => true, 'final_status' => 'expired', 'redirect_url' => route_url('my-tests')]);
+                return;
+            }
+            $this->jsonResponse(['ok' => false, 'reason' => 'expired_submission_unverified', 'message' => 'El test está vencido, pero no se pudo confirmar el guardado de respuestas o la actividad. Solicita asistencia antes de cerrar esta pantalla.'], 503);
+            return;
+        }
         if (in_array($session['status'], ['cancelled', 'expired'], true)) {
             flash('warning', 'Esta evaluacion ya no esta disponible para responder.');
             redirect(route_url('my-tests'));
+        }
+
+        if ((string) ($session['status'] ?? '') === 'assigned') {
+            $user = current_user();
+            $companyId = (int) ($user['company_id'] ?? 0);
+            $componentReview = $companyId > 0 ? (new ComponentValidationModel())->latestForUser($userId, $companyId) : null;
+            $facialStatus = $companyId > 0 ? (new FacialRecognitionModel())->enrollmentStatusForUser($userId, $companyId) : null;
+            if (!ProcessPrerequisiteService::isReady(
+                $session,
+                (string) ($componentReview['outcome'] ?? '') === 'passed',
+                $facialStatus === 'active'
+            )) {
+                $missing = ProcessPrerequisiteService::missingLabels(
+                    $session,
+                    (string) ($componentReview['outcome'] ?? '') === 'passed',
+                    $facialStatus === 'active'
+                );
+                flash('warning', 'Antes de iniciar esta actividad debes ' . implode(' y ', $missing) . '.');
+                redirect(route_url('my-tests'));
+            }
         }
 
         $pendingAutoStartSession = $this->pendingAutoStartSession($this->sessions->sessionsForUser($userId));
@@ -462,8 +676,17 @@ final class TestController extends Controller
         }
 
         $originalStatus = (string) $session['status'];
-        $this->sessions->start($id, (int) ($session['duration_minutes'] ?? 0));
-        $session = $this->sessions->findForUser($id, $userId);
+        $wasReopened = (int) ($session['reopened_duration_minutes'] ?? 0) > 0;
+        // Para participantes, ni el tiempo ni el estado de la sesión comienzan
+        // hasta confirmar las instrucciones en el último paso del flujo.
+        $deferStartUntilSupervision = $isParticipant && (string) ($session['status'] ?? '') === 'assigned';
+        $requiresAudioVisualSubmission = (string) ($session['control_mode'] ?? '') === 'supervised_audio_visual'
+            || (int) ($session['supervised_mode_enabled'] ?? 0) === 1;
+        if (!$deferStartUntilSupervision) {
+            $this->sessions->start($id, (int) ($session['duration_minutes'] ?? 0), $session);
+            $session = $this->sessions->findForUser($id, $userId);
+            if ($isParticipant) unset($_SESSION['assessment_face_authorizations'][$faceAuthorizationKey]);
+        }
         if (!$session) {
             platform_error(404, 'Evaluacion no encontrada.', [
                 'chips' => ['Evaluacion', 'Sesion'],
@@ -475,11 +698,8 @@ final class TestController extends Controller
             $this->sessions->logActivity($id, $userId, 'evaluation_opened', [
                 'url_path' => parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '',
             ]);
-            $this->sessions->logActivity(
-                $id,
-                $userId,
-                $originalStatus === 'assigned' ? 'evaluation_started' : 'evaluation_reopened'
-            );
+            if ($originalStatus !== 'assigned') $this->sessions->logActivity($id, $userId, 'evaluation_reopened');
+            elseif (!$deferStartUntilSupervision) $this->sessions->logActivity($id, $userId, 'evaluation_started');
         }
 
         $hasTimeLimit = (int) ($session['duration_minutes'] ?? 0) > 0;
@@ -488,7 +708,7 @@ final class TestController extends Controller
             $remainingSeconds = max(0, strtotime((string) $session['expires_at']) - time());
             if ($remainingSeconds <= 0 && $_SERVER['REQUEST_METHOD'] !== 'POST') {
                 $this->sessions->complete($id, [], 'expired');
-                flash('warning', 'El tiempo de esta evaluacion ha finalizado.');
+            flash('warning', (string) $this->settings->evaluationMessages()['expired_message']);
                 redirect(route_url('my-tests'));
             }
         }
@@ -501,16 +721,22 @@ final class TestController extends Controller
         $requestedBlock = $_GET['block'] ?? $_POST['block'] ?? null;
         $currentBlock = $useBlocks ? max(1, min($totalBlocks, (int) ($requestedBlock ?? 1))) : 1;
         if ($useBlocks && $requestedBlock === null) {
-            $firstMissingBlock = 1;
-            $hasMissingAnswer = false;
-            foreach ($items as $index => $item) {
-                if (trim((string) ($item['answer_value'] ?? '')) === '') {
-                    $firstMissingBlock = (int) floor($index / $blockSize) + 1;
-                    $hasMissingAnswer = true;
-                    break;
+            if ($wasReopened) {
+                // Una reapertura debe permitir revisar todos los bloques,
+                // incluso si la sesión ya tenía todas sus respuestas.
+                $currentBlock = 1;
+            } else {
+                $firstMissingBlock = 1;
+                $hasMissingAnswer = false;
+                foreach ($items as $index => $item) {
+                    if (trim((string) ($item['answer_value'] ?? '')) === '') {
+                        $firstMissingBlock = (int) floor($index / $blockSize) + 1;
+                        $hasMissingAnswer = true;
+                        break;
+                    }
                 }
+                $currentBlock = $hasMissingAnswer ? max(1, min($totalBlocks, $firstMissingBlock)) : $totalBlocks;
             }
-            $currentBlock = $hasMissingAnswer ? max(1, min($totalBlocks, $firstMissingBlock)) : $totalBlocks;
         }
         $blockOffset = ($currentBlock - 1) * $blockSize;
         $blockItems = array_slice($items, $blockOffset, $blockSize);
@@ -518,6 +744,9 @@ final class TestController extends Controller
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             verify_csrf();
+            if ((string) ($session['status'] ?? '') !== 'in_progress') {
+                platform_error(409, 'Completa la validación previa antes de responder.');
+            }
             $answers = $_POST['answers'] ?? [];
             $rawPostAnswers = is_array($answers) ? $answers : [];
             $answerTrace = $this->answerSnapshotTrace($rawPostAnswers, $_POST['answers_snapshot_json'] ?? null);
@@ -549,17 +778,30 @@ final class TestController extends Controller
 
             if ($hasTimeLimit && ($action === 'time_expired' || ($remainingSeconds !== null && $remainingSeconds <= 0))) {
                 $items = $this->sessions->itemsForSession($id);
-                $this->logAnswerActivity($id, $userId, $answers, $items, $currentBlock, $remainingSeconds);
                 $saveResult = $this->sessions->saveAnswersPayloadForSession($id, $answers);
-                $this->sessions->logActivity($id, $userId, 'evaluation_expired', [
+                $answerVerification = $this->sessions->verifyAnswersForSession($id, $answers);
+                if (!$answerVerification['verified']) {
+                    $this->jsonResponse(['ok' => false, 'reason' => 'answer_persistence_unverified', 'message' => 'No se pudo confirmar el guardado de todas tus respuestas antes del vencimiento.'], 503);
+                    return;
+                }
+                $this->logAnswerActivity($id, $userId, $answers, $items, $currentBlock, $remainingSeconds);
+                $activityRecorded = $this->sessions->logActivity($id, $userId, 'evaluation_expired', [
                     'block' => $currentBlock,
                     'remaining_seconds' => (int) ($remainingSeconds ?? 0),
                     'received_answer_item_ids' => $saveResult['received_item_ids'] ?? [],
                     'saved_answer_item_ids' => $saveResult['saved_item_ids'] ?? [],
                     'answer_trace' => $this->buildAnswerTrace($answerTrace, $answers, $saveResult, (string) $action, $currentBlock),
                 ], null, $useBlocks ? $currentBlock : null);
+                if ($requiresAudioVisualSubmission && !$activityRecorded) {
+                    $this->jsonResponse(['ok' => false, 'reason' => 'activity_persistence_unavailable', 'message' => 'Las respuestas se guardaron, pero no se confirmó el registro de vencimiento.'], 503);
+                    return;
+                }
                 $this->sessions->complete($id, [], 'expired');
-                flash('warning', 'El tiempo de esta evaluacion ha finalizado. Se guardaron las respuestas registradas hasta ese momento.');
+                if ($this->isAjaxRequest()) {
+                    $this->jsonResponse(['ok' => true, 'finished' => true, 'answers_saved' => true, 'answers_verified' => true, 'answers_saved_count' => $answerVerification['answered_count'], 'activity_recorded' => $activityRecorded, 'final_status' => 'expired', 'message' => (string) $this->settings->evaluationMessages()['expired_message'], 'redirect_url' => route_url('my-tests')]);
+                    return;
+                }
+                flash('warning', (string) $this->settings->evaluationMessages()['expired_message']);
                 redirect(route_url('my-tests'));
             }
 
@@ -600,7 +842,7 @@ final class TestController extends Controller
                             $missingOffset = ($missingBlock - 1) * $blockSize;
                             $missingItems = array_slice($items, $missingOffset, $blockSize);
                             $html = $this->view->render('tests/take', [
-                                'title' => 'Responder evaluacion | Metricatest',
+                                'title' => 'Responder evaluacion | e-talent',
                                 'currentPage' => 'my-tests',
                                 'session' => $session,
                                 'items' => $missingItems,
@@ -618,7 +860,7 @@ final class TestController extends Controller
                             $this->jsonResponse([
                                 'ok' => false,
                                 'reason' => 'missing_answers_before_finish',
-                                'message' => 'Aun te quedan preguntas sin contestar en la evaluacion. Deseas finalizarla de todas formas?',
+                                'message' => (string) $this->settings->evaluationMessages()['incomplete_confirm_message'],
                                 'missing_count' => count($missing),
                                 'missing_block' => $missingBlock,
                                 'next_block' => $missingBlock,
@@ -633,16 +875,24 @@ final class TestController extends Controller
                         redirect(route_url('test-session.take', $id) . '?block=' . $missingBlock);
                     }
 
-                    $this->sessions->logActivity($id, $userId, 'evaluation_submitted', [
+                    $activityRecorded = $this->sessions->logActivity($id, $userId, 'evaluation_submitted', [
                         'answered_count' => count(array_filter($answers, static fn($answer): bool => is_array($answer) ? count(array_filter($answer)) > 0 : trim((string) $answer) !== '')),
                         'remaining_seconds' => $remainingSeconds,
                     ]);
+                    if ($requiresAudioVisualSubmission && !$activityRecorded) {
+                        $this->jsonResponse(['ok' => false, 'reason' => 'activity_persistence_unavailable', 'message' => 'Las respuestas están guardadas, pero no se confirmó el registro de actividad.'], 503);
+                        return;
+                    }
                     $this->sessions->complete($id, []);
 
                     if ($this->isAjaxRequest()) {
                         $this->jsonResponse([
                             'ok' => true,
                             'finished' => true,
+                            'answers_saved' => true,
+                            'answers_verified' => true,
+                            'answers_saved_count' => count(array_filter($items, static fn(array $item): bool => trim((string) ($item['answer_value'] ?? '')) !== '')),
+                            'activity_recorded' => $activityRecorded,
                             'message' => 'Evaluacion enviada correctamente.',
                             'redirect_url' => route_url('my-tests'),
                         ]);
@@ -662,7 +912,7 @@ final class TestController extends Controller
                     $nextItems = array_slice($items, $nextOffset, $blockSize);
 
                     $html = $this->view->render('tests/take', [
-                        'title' => 'Responder evaluacion | Metricatest',
+                        'title' => 'Responder evaluacion | e-talent',
                         'currentPage' => 'my-tests',
                         'session' => $session,
                         'items' => $nextItems,
@@ -693,9 +943,14 @@ final class TestController extends Controller
 
             if ($action === 'complete_expired') {
                 $items = $this->sessions->itemsForSession($id);
-                $this->logAnswerActivity($id, $userId, $answers, $items, $currentBlock, $remainingSeconds);
                 $saveResult = $this->sessions->saveAnswersPayloadForSession($id, $answers);
-                $this->sessions->logActivity($id, $userId, 'evaluation_submitted_incomplete', [
+                $answerVerification = $this->sessions->verifyAnswersForSession($id, $answers);
+                if (!$answerVerification['verified']) {
+                    $this->jsonResponse(['ok' => false, 'reason' => 'answer_persistence_unverified', 'message' => 'No se pudo confirmar el guardado de todas tus respuestas.'], 503);
+                    return;
+                }
+                $this->logAnswerActivity($id, $userId, $answers, $items, $currentBlock, $remainingSeconds);
+                $activityRecorded = $this->sessions->logActivity($id, $userId, 'evaluation_submitted_incomplete', [
                     'block' => $currentBlock,
                     'remaining_seconds' => $remainingSeconds,
                     'source' => 'legacy_incomplete_finish',
@@ -704,12 +959,20 @@ final class TestController extends Controller
                     'saved_answer_item_ids' => $saveResult['saved_item_ids'] ?? [],
                     'answer_trace' => $this->buildAnswerTrace($answerTrace, $answers, $saveResult, (string) $action, $currentBlock),
                 ], null, $useBlocks ? $currentBlock : null);
+                if ($requiresAudioVisualSubmission && !$activityRecorded) {
+                    $this->jsonResponse(['ok' => false, 'reason' => 'activity_persistence_unavailable', 'message' => 'Las respuestas quedaron guardadas, pero no se confirmó la actividad.'], 503);
+                    return;
+                }
                 $this->sessions->complete($id, [], 'completed');
 
                 if ($this->isAjaxRequest()) {
                     $this->jsonResponse([
                         'ok' => true,
                         'finished' => true,
+                        'answers_saved' => true,
+                        'answers_verified' => true,
+                        'answers_saved_count' => (int) ($answerVerification['answered_count'] ?? 0),
+                        'activity_recorded' => $activityRecorded,
                         'final_status' => 'completed',
                         'message' => 'Evaluacion finalizada con las respuestas registradas.',
                         'redirect_url' => route_url('my-tests'),
@@ -723,9 +986,14 @@ final class TestController extends Controller
 
             if ($action === 'complete_incomplete') {
                 $items = $this->sessions->itemsForSession($id);
-                $this->logAnswerActivity($id, $userId, $answers, $items, $currentBlock, $remainingSeconds);
                 $saveResult = $this->sessions->saveAnswersPayloadForSession($id, $answers);
-                $this->sessions->logActivity($id, $userId, 'evaluation_submitted_incomplete', [
+                $answerVerification = $this->sessions->verifyAnswersForSession($id, $answers);
+                if (!$answerVerification['verified']) {
+                    $this->jsonResponse(['ok' => false, 'reason' => 'answer_persistence_unverified', 'message' => 'No se pudo confirmar el guardado de todas tus respuestas.'], 503);
+                    return;
+                }
+                $this->logAnswerActivity($id, $userId, $answers, $items, $currentBlock, $remainingSeconds);
+                $activityRecorded = $this->sessions->logActivity($id, $userId, 'evaluation_submitted_incomplete', [
                     'block' => $currentBlock,
                     'remaining_seconds' => $remainingSeconds,
                     'source' => 'user_confirmed_incomplete_finish',
@@ -734,12 +1002,20 @@ final class TestController extends Controller
                     'saved_answer_item_ids' => $saveResult['saved_item_ids'] ?? [],
                     'answer_trace' => $this->buildAnswerTrace($answerTrace, $answers, $saveResult, (string) $action, $currentBlock),
                 ], null, $useBlocks ? $currentBlock : null);
+                if ($requiresAudioVisualSubmission && !$activityRecorded) {
+                    $this->jsonResponse(['ok' => false, 'reason' => 'activity_persistence_unavailable', 'message' => 'Las respuestas quedaron guardadas, pero no se confirmó la actividad.'], 503);
+                    return;
+                }
                 $this->sessions->complete($id, [], 'completed');
 
                 if ($this->isAjaxRequest()) {
                     $this->jsonResponse([
                         'ok' => true,
                         'finished' => true,
+                        'answers_saved' => true,
+                        'answers_verified' => true,
+                        'answers_saved_count' => (int) ($answerVerification['answered_count'] ?? 0),
+                        'activity_recorded' => $activityRecorded,
                         'final_status' => 'completed',
                         'message' => 'Evaluacion finalizada con las respuestas registradas.',
                         'redirect_url' => route_url('my-tests'),
@@ -816,24 +1092,55 @@ final class TestController extends Controller
                     }
                 }
                 $missingBlock = $useBlocks ? $this->blockForFirstMissingItem($items, $missing, $blockSize) : 1;
-                flash('danger', 'Aun quedan preguntas sin responder. Te llevamos al primer bloque pendiente antes de finalizar.');
+                $message = 'Aun quedan preguntas sin responder. Te llevamos al primer bloque pendiente antes de finalizar.';
+                if ($this->isAjaxRequest()) {
+                    $this->jsonResponse(['ok' => false, 'reason' => 'required_answers_missing', 'message' => $message, 'missing_count' => count($missing), 'missing_block' => $missingBlock], 422);
+                    return;
+                }
+                flash('danger', $message);
                 redirect(route_url('test-session.take', $id) . ($useBlocks ? '?block=' . $missingBlock : ''));
             }
 
-            if (!$useBlocks) {
-                $this->logAnswerActivity($id, $userId, $answers, $items, $currentBlock, $remainingSeconds);
+            // Persist and read back every non-empty answer before recording submission activity.
+            $saveResult = $this->sessions->saveAnswersPayloadForSession($id, $answers);
+            $answerVerification = $this->sessions->verifyAnswersForSession($id, $answers);
+            if (empty($answerVerification['verified'])) {
+                $this->jsonResponse(['ok' => false, 'reason' => 'answer_persistence_unverified', 'message' => 'No se pudo confirmar el guardado de todas tus respuestas. No cierres la evaluación; inténtalo nuevamente.', 'missing_item_ids' => $answerVerification['missing_item_ids'] ?? []], 503);
+                return;
             }
-            $this->sessions->logActivity($id, $userId, 'evaluation_submitted', [
-                'answered_count' => count(array_filter($answers, static fn($answer): bool => is_array($answer) ? count(array_filter($answer)) > 0 : trim((string) $answer) !== '')),
+
+            $this->logAnswerActivity($id, $userId, $answers, $items, $currentBlock, $remainingSeconds);
+            $activityRecorded = $this->sessions->logActivity($id, $userId, 'evaluation_submitted', [
+                'received_answer_item_ids' => $saveResult['received_item_ids'] ?? [],
+                'saved_answer_item_ids' => $saveResult['saved_item_ids'] ?? [],
+                'answered_count' => (int) ($answerVerification['answered_count'] ?? 0),
                 'remaining_seconds' => $remainingSeconds,
             ]);
+            if ($requiresAudioVisualSubmission && !$activityRecorded) {
+                $this->jsonResponse(['ok' => false, 'reason' => 'activity_persistence_unavailable', 'message' => 'Las respuestas están guardadas, pero no se pudo confirmar el registro de actividad. La evidencia no se finalizará; solicita asistencia.'], 503);
+                return;
+            }
             $this->sessions->complete($id, $answers);
+            if ($this->isAjaxRequest()) {
+                $this->jsonResponse([
+                    'ok' => true,
+                    'finished' => true,
+                    'answers_saved' => true,
+                    'answers_verified' => true,
+                    'answers_saved_count' => (int) ($answerVerification['answered_count'] ?? 0),
+                    'activity_recorded' => (bool) $activityRecorded,
+                    'final_status' => 'completed',
+                    'message' => 'Respuestas confirmadas y registro de actividad guardado.',
+                    'redirect_url' => route_url('my-tests'),
+                ]);
+                return;
+            }
             flash('success', 'Evaluacion enviada correctamente.');
             redirect(route_url('my-tests'));
         }
 
         $this->render('tests/take', [
-            'title' => 'Responder evaluacion | Metricatest',
+            'title' => 'Responder evaluacion | e-talent',
             'currentPage' => 'my-tests',
             'session' => $session,
             'items' => $useBlocks ? $blockItems : $items,
@@ -846,6 +1153,11 @@ final class TestController extends Controller
             'remainingSeconds' => $remainingSeconds,
             'sessionModel' => $this->sessions,
             'evaluationMessages' => $this->settings->evaluationMessages(),
+            'assessmentIdentityVerified' => !$isParticipant || (string) ($session['status'] ?? '') !== 'assigned' || $authorizationIsValid,
+            'assessmentEntryFlow' => $isParticipant && (string) ($session['status'] ?? '') === 'assigned',
+            'assessmentUserId' => $userId,
+            'assessmentReturnTo' => $requestPath,
+            'assessmentFaceSettings' => (new FacialRecognitionService())->settings(),
         ]);
     }
 
@@ -861,6 +1173,66 @@ final class TestController extends Controller
         $id = request_secure_id('test_session');
         $userId = (int) current_user()['id'];
         $eventType = (string) ($_POST['event_type'] ?? '');
+        if ($eventType === 'supervised_started') {
+            $session = $this->sessions->findForUser($id, $userId);
+            if (!$session || !in_array((string) ($session['status'] ?? ''), ['assigned', 'in_progress'], true)) {
+                $this->jsonResponse(['ok' => false, 'message' => 'La sesión no se puede activar.'], 409);
+                return;
+            }
+            if ((string) ($session['status'] ?? '') === 'assigned' && !has_permission('manage_tests')) {
+                $proofKey = 'test:' . $id;
+                $proof = $_SESSION['assessment_face_authorizations'][$proofKey] ?? null;
+                if (!is_array($proof) || (int) ($proof['user_id'] ?? 0) !== $userId
+                    || (int) ($proof['company_id'] ?? 0) !== (int) (current_user()['company_id'] ?? 0)
+                    || (string) ($proof['activity_type'] ?? '') !== 'test_session'
+                    || (int) ($proof['activity_id'] ?? 0) !== $id
+                    || (int) ($proof['issued_at'] ?? 0) > time()
+                    || (time() - (int) ($proof['issued_at'] ?? 0)) > 900) {
+                    $this->jsonResponse(['ok' => false, 'message' => 'Debes verificar tu identidad facial antes de iniciar.'], 403); return;
+                }
+                $availability = $this->sessions->availabilityForSession($session);
+                if (empty($availability['allowed'])) {
+                    $this->jsonResponse(['ok' => false, 'message' => (string) ($availability['message'] ?? 'El proceso ya no está disponible.')], 409);
+                    return;
+                }
+                $companyId = (int) (current_user()['company_id'] ?? 0);
+                $componentReview = $companyId > 0 ? (new ComponentValidationModel())->latestForUser($userId, $companyId) : null;
+                $facialStatus = $companyId > 0 ? (new FacialRecognitionModel())->enrollmentStatusForUser($userId, $companyId) : null;
+                if (!ProcessPrerequisiteService::isReady($session, (string) ($componentReview['outcome'] ?? '') === 'passed', $facialStatus === 'active')) {
+                    $this->jsonResponse(['ok' => false, 'message' => 'No se cumplen los requisitos de componentes o enrolamiento del proceso.'], 409);
+                    return;
+                }
+            }
+            if ((string) ($session['control_mode'] ?? '') === 'supervised_audio_visual') {
+                $evidenceId = max(0, (int) ($_POST['evidence_id'] ?? 0));
+                $evidence = $this->mediaEvidence->evidenceForSession($id);
+                $consentRecorded = false;
+                foreach ($this->sessions->activityForSession($id) as $activity) {
+                    if ((string) ($activity['event_type'] ?? '') === 'audio_visual_consent_accepted') { $consentRecorded = true; break; }
+                }
+                if (!$consentRecorded || $evidenceId <= 0 || !$evidence || (int) ($evidence['id'] ?? 0) !== $evidenceId
+                    || (string) ($evidence['status'] ?? '') !== 'recording') {
+                    $this->jsonResponse(['ok' => false, 'message' => 'Acepta y autoriza los componentes audiovisuales antes de iniciar.'], 409);
+                    return;
+                }
+            }
+            $this->sessions->start($id, (int) ($session['duration_minutes'] ?? 0), $session);
+            $session = $this->sessions->findForUser($id, $userId);
+            if (!$session || (string) ($session['status'] ?? '') !== 'in_progress') {
+                $this->jsonResponse(['ok' => false, 'message' => 'No se pudo activar la sesión.'], 409);
+                return;
+            }
+            if (!empty($proofKey)) unset($_SESSION['assessment_face_authorizations'][$proofKey]);
+            if ((string) ($session['status'] ?? '') === 'in_progress') {
+                $this->sessions->logActivity($id, $userId, 'evaluation_started', ['source' => 'supervised_preflight']);
+                if ((string) ($session['control_mode'] ?? '') === 'supervised_audio_visual') {
+                    $this->sessions->logActivity($id, $userId, 'audio_visual_recording_started', ['source' => 'supervised_preflight']);
+                }
+            }
+            // El evento de red solo coordina el inicio; el log de dominio
+            // conserva el vocabulario existente de las sesiones de test.
+            $eventType = 'evaluation_started';
+        }
         if ($eventType === 'heartbeat') {
             $saved = $this->sessions->touchPresence($id, $userId);
             header('Content-Type: application/json');
@@ -897,9 +1269,15 @@ final class TestController extends Controller
         $userId = (int) current_user()['id'];
         $policy = (string) ($_POST['policy'] ?? 'pause');
         $consented = (string) ($_POST['consented'] ?? '0') === '1';
+        $operationalSettings = (new PlatformSettingsModel())->operationalSettings();
+        $this->mediaEvidence->purgeExpiredIfDue($operationalSettings['test_evidence_retention_days'] ?? 365);
         $result = $this->mediaEvidence->setPolicy($id, $userId, $policy, $consented);
         if (!empty($result['ok'])) {
-            $this->sessions->logActivity($id, $userId, 'audio_visual_recording_started', ['policy' => $policy]);
+            $this->sessions->logActivity($id, $userId, 'audio_visual_consent_accepted', [
+                'source' => 'media_init',
+                'video_and_microphone' => true,
+                'screen_capture' => true,
+            ]);
         }
         $this->jsonResponse($result, !empty($result['ok']) ? 200 : 422);
     }
@@ -960,17 +1338,47 @@ final class TestController extends Controller
         $severity = (string) ($_POST['severity'] ?? 'attention');
         $confidence = isset($_POST['confidence']) ? (float) $_POST['confidence'] : null;
         $metadata = is_array($_POST['metadata'] ?? null) ? $_POST['metadata'] : [];
+        $metadata['trace_user_id'] = $userId;
+        $metadata['trace_company_id'] = (int) (current_user()['company_id'] ?? 0);
+        $metadata['trace_recorded_at'] = date('Y-m-d H:i:s');
         $evidenceId = max(0, (int) ($_POST['evidence_id'] ?? 0)) ?: null;
         $saved = $this->mediaEvidence->recordRisk($id, $userId, $eventType, $severity, $confidence, $metadata, $evidenceId);
         if ($saved) {
-            $this->sessions->logActivity($id, $userId, 'audio_visual_risk', [
+            $this->sessions->logActivity($id, $userId, $eventType === 'multiple_voice_possible' ? 'multiple_voice_possible' : 'audio_visual_risk', [
                 'event_type' => $eventType,
-                'severity' => $severity,
+                'severity' => $eventType === 'multiple_voice_possible' ? 'attention' : $severity,
                 'confidence' => $confidence,
                 'evidence_id' => $evidenceId,
             ]);
         }
         $this->jsonResponse(['ok' => $saved], $saved ? 200 : 422);
+    }
+
+    public function mediaScreenshot(): void
+    {
+        require_auth(); verify_csrf();
+        $id = request_secure_id('test_session'); $userId = (int) current_user()['id'];
+        $result = $this->mediaEvidence->uploadScreenCapture($id, $userId, max(0, (int) ($_POST['evidence_id'] ?? 0)), (string) ($_POST['capture_source'] ?? ''), max(0, (int) ($_POST['capture_number'] ?? -1)), $_FILES['capture'] ?? [], max(0, (int) ($_POST['item_id'] ?? 0)) ?: null, max(0, (int) ($_POST['block_number'] ?? 0)) ?: null, (string) ($_POST['event_type'] ?? 'periodic'));
+        if (!empty($result['ok'])) $this->sessions->logActivity($id, $userId, 'audio_visual_screen_capture_completed', ['capture_number' => $result['capture_number'], 'source' => $result['source']]);
+        $this->jsonResponse($result, !empty($result['ok']) ? 200 : 422);
+    }
+
+    public function mediaScreenshotFile(): void
+    {
+        require_result_access();
+        $id = request_secure_id('test_session'); $captureId = max(0, (int) ($_GET['capture_id'] ?? 0));
+        $file = $this->mediaEvidence->screenCaptureFile($id, $captureId); if (!$file) { platform_error(404, 'Captura no disponible.'); }
+        $this->mediaEvidence->auditScreenCaptureAccess($id, $captureId, (int) current_user()['id']);
+        header('Content-Type: ' . $file['mime_type']); header('Content-Length: ' . (string) $file['size']); header('Content-Disposition: inline; filename="captura-' . $captureId . '.jpg"'); header('Cache-Control: private, no-store'); readfile($file['path']); exit;
+    }
+
+    public function mediaFailure(): void
+    {
+        require_auth();
+        verify_csrf();
+        $id = request_secure_id('test_session');
+        $saved = $this->mediaEvidence->markChunkUploadFailure($id, (int) current_user()['id'], max(0, (int) ($_POST['evidence_id'] ?? 0)), max(0, (int) ($_POST['chunk_number'] ?? -1)), (string) ($_POST['reason'] ?? ''));
+        $this->jsonResponse(['ok' => $saved, 'status' => $saved ? 'failed' : 'invalid_media_session'], $saved ? 200 : 422);
     }
 
     public function mediaEvidence(): void
@@ -981,15 +1389,80 @@ final class TestController extends Controller
             platform_error(404, 'Evidencia audiovisual no disponible.');
         }
         $this->mediaEvidence->auditAdminAccess($id, (int) (current_user()['id'] ?? 0), 'video_viewed');
-        $file = $this->mediaEvidence->evidenceFileForAdmin($id);
+        $evidenceId = max(0, (int) ($_GET['evidence_id'] ?? 0));
+        $file = $evidenceId > 0 ? $this->mediaEvidence->evidenceFileForEvidence($id, $evidenceId) : $this->mediaEvidence->evidenceFileForAdmin($id);
         if (!$file) {
             platform_error(404, 'Evidencia audiovisual no disponible.');
         }
-        header('Content-Type: ' . $file['mime_type']);
-        header('Content-Length: ' . (string) $file['size']);
-        header('Content-Disposition: inline; filename="evidencia-' . $id . '.media"');
+        $this->streamMediaFile($file, 'evidencia-' . $id . '.webm');
+    }
+
+    public function mediaPartial(): void
+    {
+        require_result_access();
+        verify_csrf();
+        $id = request_secure_id('test_session');
+        $this->mediaEvidence->assemblePartial($id, (int) current_user()['id']);
+        redirect(route_url('test-session.result', $id));
+    }
+
+    private function streamMediaFile(array $file, string $filename): void
+    {
+        $path = (string) ($file['path'] ?? '');
+        $size = (int) ($file['size'] ?? 0);
+        if ($path === '' || $size <= 0 || !is_file($path)) {
+            platform_error(404, 'Archivo audiovisual no disponible.');
+        }
+
+        $start = 0;
+        $end = $size - 1;
+        $range = (string) ($_SERVER['HTTP_RANGE'] ?? '');
+        if (preg_match('/bytes=(\d*)-(\d*)/i', $range, $matches)) {
+            if ($matches[1] !== '') {
+                $start = (int) $matches[1];
+            }
+            if ($matches[2] !== '') {
+                $end = (int) $matches[2];
+            } elseif ($matches[1] !== '') {
+                $end = min($size - 1, $start + 1024 * 1024 - 1);
+            }
+            if ($start > $end || $start >= $size) {
+                header('Content-Range: bytes */' . $size);
+                http_response_code(416);
+                exit;
+            }
+            $end = min($end, $size - 1);
+            http_response_code(206);
+        }
+
+        $length = $end - $start + 1;
+        header('Content-Type: ' . (string) ($file['mime_type'] ?? 'video/webm'));
+        header('Accept-Ranges: bytes');
+        header('Content-Length: ' . (string) $length);
+        header('Content-Disposition: inline; filename="' . basename($filename) . '"');
         header('Cache-Control: private, no-store');
-        readfile($file['path']);
+        if ($start > 0 || $end < $size - 1) {
+            header('Content-Range: bytes ' . $start . '-' . $end . '/' . $size);
+        }
+
+        $handle = fopen($path, 'rb');
+        if ($handle === false) {
+            platform_error(404, 'Archivo audiovisual no disponible.');
+        }
+        fseek($handle, $start);
+        $remaining = $length;
+        while ($remaining > 0 && !feof($handle)) {
+            $chunk = fread($handle, min(1024 * 1024, $remaining));
+            if ($chunk === false || $chunk === '') {
+                break;
+            }
+            echo $chunk;
+            $remaining -= strlen($chunk);
+            if (function_exists('flush')) {
+                flush();
+            }
+        }
+        fclose($handle);
         exit;
     }
 
@@ -1087,8 +1560,8 @@ final class TestController extends Controller
             ]);
         }
 
-        if ($isOwnSession && (int) ($session['user_can_view_results'] ?? 1) !== 1) {
-            flash('warning', 'El resultado de esta evaluacion no esta disponible para el usuario.');
+        if ($isOwnSession && !has_result_access()) {
+            flash('warning', 'Los resultados de las evaluaciones están disponibles solo para administradores autorizados.');
             redirect(route_url('dashboard'));
         }
 
@@ -1106,7 +1579,7 @@ final class TestController extends Controller
         }
 
         $this->render('tests/result', [
-            'title' => 'Resultado evaluacion | Metricatest',
+            'title' => 'Resultado evaluacion | e-talent',
             'currentPage' => has_result_access() ? 'tests' : 'my-tests',
             'session' => $session,
             'summary' => $summary,
@@ -1115,18 +1588,80 @@ final class TestController extends Controller
             'answeredItems' => $this->sessions->resultAnswerItemsForSession($id),
             'activityEvents' => has_result_access() ? $this->sessions->activityForSession($id) : [],
             'mediaEvidence' => has_result_access() && !$isOwnSession ? $this->mediaEvidence->evidenceForSession($id) : null,
+            'mediaEvidences' => has_result_access() && !$isOwnSession ? $this->mediaEvidence->evidencesForSession($id) : [],
             'audioVisualRisks' => has_result_access() && !$isOwnSession ? $this->mediaEvidence->risksForSession($id) : [],
+            'screenCaptures' => has_result_access() && !$isOwnSession ? $this->mediaEvidence->screenCapturesForSession($id) : [],
         ]);
     }
 
     public function userResults(): void
     {
+        $isDrawer = !empty($_GET['drawer']);
         require_result_access();
 
         $userId = request_secure_id('user');
-        $sessions = $this->sessions->finishedSessionsForUserResults($userId);
-        if (!$sessions) {
-            platform_error(404, 'No hay resultados terminados para este usuario.', [
+        $processId = 0;
+        $companyId = is_company_admin_user() ? (int) (current_user()['company_id'] ?? 0) : 0;
+        if (is_company_admin_user() && $companyId <= 0) {
+            platform_error(403, 'Tu perfil de Administrador Cliente no tiene una empresa asociada.');
+        }
+        if (!empty($_GET['process_sid'])) {
+            try {
+                $processId = secure_url_id((string) $_GET['process_sid'], 'test_process');
+            } catch (RuntimeException $exception) {
+                platform_error(410, 'El enlace seguro expiro o no es valido.');
+            }
+            if ($processId <= 0 || !$this->processes->can(current_user() ?: [], $processId, 'view_process_results')) {
+                platform_error(403, 'No tienes permisos para ver los resultados de este proceso.', [
+                    'chips' => ['Resultados', 'Proceso'],
+                ]);
+            }
+        } elseif (is_company_admin_user()) {
+            platform_error(403, 'Selecciona un proceso de tu empresa para consultar resultados.', [
+                'chips' => ['Resultados', 'Proceso'],
+            ]);
+        }
+
+        $sessions = $this->sessions->finishedSessionsForUserResults($userId, $processId);
+        $progressActivities = [];
+        foreach ($this->sessions->sessionsForUser($userId) as $session) {
+            if ($processId > 0 && (int) ($session['process_id'] ?? 0) !== $processId) {
+                continue;
+            }
+            $totalItems = (int) ($session['items_count'] ?? 0);
+            $answeredItems = (int) ($session['answers_count'] ?? 0);
+            $progressActivities[] = [
+                'name' => (string) ($session['instrument_name'] ?? 'Test'),
+                'type' => 'Test psicolaboral',
+                'kind' => 'test',
+                'session_id' => (int) ($session['id'] ?? 0),
+                'status' => (string) ($session['status'] ?? 'assigned'),
+                'answered' => $answeredItems,
+                'total' => $totalItems,
+                'last_activity' => (string) ($session['completed_at'] ?? $session['updated_at'] ?? $session['created_at'] ?? ''),
+            ];
+        }
+        foreach ($this->processes->evaluationAssignmentsForUser($userId, $companyId > 0 ? $companyId : null, true) as $assignment) {
+            if ($processId > 0 && (int) ($assignment['process_id'] ?? 0) !== $processId) {
+                continue;
+            }
+            $totalItems = (int) ($assignment['items_count'] ?? 0);
+            $answeredItems = (int) ($assignment['answers_count'] ?? 0);
+            $progressActivities[] = [
+                'name' => (string) ($assignment['form_title'] ?? 'Evaluación'),
+                'type' => 'Evaluación',
+                'kind' => 'evaluation',
+                'form_id' => (int) ($assignment['form_id'] ?? 0),
+                'user_id' => $userId,
+                'status' => (string) ($assignment['status'] ?? 'assigned'),
+                'answered' => $answeredItems,
+                'total' => $totalItems,
+                'last_activity' => (string) ($assignment['completed_at'] ?? ''),
+            ];
+        }
+        $evaluationResults = $this->evaluationResultsForUserProcess($userId, $processId, $companyId > 0 ? $companyId : null);
+        if (!$sessions && !$evaluationResults && !$progressActivities) {
+            platform_error(404, 'No hay respuestas guardadas para este usuario.', [
                 'chips' => ['Resultados', 'Usuario'],
             ]);
         }
@@ -1146,23 +1681,74 @@ final class TestController extends Controller
                 'answeredItems' => $this->sessions->resultAnswerItemsForSession($sessionId),
                 'activityEvents' => $this->sessions->activityForSession($sessionId),
                 'mediaEvidence' => $this->mediaEvidence->evidenceForSession($sessionId),
+                'mediaEvidences' => $this->mediaEvidence->evidencesForSession($sessionId),
                 'audioVisualRisks' => $this->mediaEvidence->risksForSession($sessionId),
+                'screenCaptures' => $this->mediaEvidence->screenCapturesForSession($sessionId),
             ];
         }
 
-        $user = $sessions[0];
+        $user = $sessions[0] ?? ($evaluationResults[0]['attempt'] ?? []);
         $this->render('tests/user_results', [
-            'title' => 'Resultados usuario | Metricatest',
+            'title' => 'Resultados usuario | e-talent',
             'currentPage' => 'tests',
             'userResult' => [
                 'id' => $userId,
-                'name' => $user['user_name'] ?? '',
+                'name' => $user['user_name'] ?? $user['name'] ?? '',
                 'email' => $user['user_email'] ?? '',
                 'company_name' => $user['company_name'] ?? '',
                 'age' => $user['age'] ?? '',
             ],
             'results' => $results,
-        ]);
+            'evaluationResults' => $evaluationResults,
+            'progressActivities' => $progressActivities,
+            'canReopenActivities' => $processId > 0 && $this->processes->can(current_user() ?: [], $processId, TestProcessModel::SUPERVISOR_SESSION_PERMISSION),
+            'process' => $processId > 0 ? $this->processes->find($processId) : null,
+        ], $isDrawer ? null : 'app');
+    }
+
+    private function evaluationResultsForUserProcess(int $userId, int $processId = 0, ?int $companyId = null): array
+    {
+        $assignments = $this->processes->evaluationAssignmentsForUser($userId, $companyId);
+        $results = [];
+        foreach ($assignments as $assignment) {
+            if ($processId > 0 && (int) ($assignment['process_id'] ?? 0) !== $processId) {
+                continue;
+            }
+            if (!in_array((string) ($assignment['status'] ?? ''), ['completed', 'in_progress', 'expired'], true)
+                || (int) ($assignment['answers_count'] ?? 0) <= 0) {
+                continue;
+            }
+
+            $attemptId = (int) ($assignment['attempt_id'] ?? 0);
+            if ($attemptId <= 0) {
+                continue;
+            }
+            $attempt = $companyId && $companyId > 0
+                ? $this->evaluationAttempts->findAttemptForCompany($attemptId, $companyId)
+                : $this->evaluationAttempts->findAttempt($attemptId);
+            if (!$attempt) {
+                continue;
+            }
+            $form = $companyId && $companyId > 0
+                ? $this->evaluationForms->findFormForCompany((int) ($attempt['form_id'] ?? 0), $companyId)
+                : $this->evaluationForms->findForm((int) ($attempt['form_id'] ?? 0));
+            if (!$form) continue;
+            $results[] = [
+                'attempt' => array_merge($assignment, $attempt),
+                'form' => $form ?: [],
+                'questions' => $form ? $this->evaluationAttempts->questionsForAnsweredAttempt($form, $attemptId) : [],
+                'answers' => $this->evaluationAttempts->answersForAttempt($attemptId),
+                'activityEvents' => $this->evaluationControl->eventsForAttempt($attemptId),
+                'mediaEvidence' => $this->evaluationMediaEvidence->evidencesForAttempt($attemptId),
+                'audioVisualRisks' => $this->evaluationMediaEvidence->risksForAttempt($attemptId),
+                'screenCaptures' => $this->evaluationMediaEvidence->screenCapturesForAttempt($attemptId),
+            ];
+        }
+
+        usort($results, static function (array $a, array $b): int {
+            return strcmp((string) ($b['attempt']['completed_at'] ?? ''), (string) ($a['attempt']['completed_at'] ?? ''));
+        });
+        return $results;
     }
 
     public function resultExport(): void
@@ -1211,7 +1797,7 @@ final class TestController extends Controller
         ];
 
         $this->render('tests/form', [
-            'title' => ($id ? 'Editar evaluacion' : 'Nueva evaluacion') . ' | Metricatest',
+            'title' => ($id ? 'Editar evaluacion' : 'Nueva evaluacion') . ' | e-talent',
             'currentPage' => 'tests',
             'id' => $id,
             'categories' => TestInstrumentModel::CATEGORIES,
@@ -1266,7 +1852,7 @@ final class TestController extends Controller
         $rulesByItem = $this->tests->scoreRulesForItems($id, array_column($items, 'id'));
 
         $this->render('tests/content', [
-            'title' => 'Contenido evaluacion | Metricatest',
+            'title' => 'Contenido evaluacion | e-talent',
             'currentPage' => 'tests',
             'instrument' => $instrument,
             'scales' => $this->tests->scalesForInstrument($id),
@@ -2055,9 +2641,14 @@ final class TestController extends Controller
         $message = (string) ($availability['message'] ?? 'Ya termino el tiempo para el proceso completo');
         $items = $this->sessions->itemsForSession($sessionId);
 
-        $this->logAnswerActivity($sessionId, $userId, $answers, $items, $currentBlock, $remainingSeconds);
         $saveResult = $this->sessions->saveAnswersPayloadForSession($sessionId, $answers);
-        $this->sessions->logActivity($sessionId, $userId, 'evaluation_expired', [
+        $answerVerification = $this->sessions->verifyAnswersForSession($sessionId, $answers);
+        if (!$answerVerification['verified']) {
+            $this->jsonResponse(['ok' => false, 'reason' => 'answer_persistence_unverified', 'message' => 'No se pudo confirmar el guardado de todas tus respuestas antes de cerrar el proceso.'], 503);
+            return;
+        }
+        $this->logAnswerActivity($sessionId, $userId, $answers, $items, $currentBlock, $remainingSeconds);
+        $activityRecorded = $this->sessions->logActivity($sessionId, $userId, 'evaluation_expired', [
             'block' => $currentBlock,
             'remaining_seconds' => (int) ($remainingSeconds ?? 0),
             'process_remaining_seconds' => (int) ($availability['remaining_seconds'] ?? 0),
@@ -2067,9 +2658,28 @@ final class TestController extends Controller
             'saved_answer_item_ids' => $saveResult['saved_item_ids'] ?? [],
             'answer_trace' => $this->buildAnswerTrace($answerTrace, $answers, $saveResult, $action, $currentBlock),
         ], null, $currentBlock);
+        if (($session['control_mode'] ?? 'off') === 'supervised_audio_visual' && !$activityRecorded) {
+            $this->jsonResponse(['ok' => false, 'reason' => 'activity_persistence_unavailable', 'message' => 'Las respuestas quedaron guardadas, pero no se confirmó el registro de vencimiento.'], 503);
+            return;
+        }
         $this->sessions->complete($sessionId, [], 'expired');
 
         if ($this->isAjaxRequest()) {
+            if (($session['control_mode'] ?? 'off') === 'supervised_audio_visual') {
+                $this->jsonResponse([
+                    'ok' => true,
+                    'finished' => true,
+                    'answers_saved' => true,
+                    'answers_verified' => true,
+                    'answers_saved_count' => $answerVerification['answered_count'],
+                    'activity_recorded' => true,
+                    'final_status' => 'expired',
+                    'message' => $message,
+                    'reason' => $reason,
+                    'redirect_url' => route_url('my-tests'),
+                ]);
+                return;
+            }
             $this->jsonResponse([
                 'ok' => false,
                 'saved' => true,
@@ -2254,26 +2864,19 @@ final class TestController extends Controller
         return $pending[0];
     }
 
-    private function assignedTestsFinalized(array $sessions): bool
+    private function assignedActivitiesCompleted(array $sessions, array $evaluationAssignments): bool
     {
-        $hasFinishedAssignedTest = false;
+        $hasAssignedActivity = false;
 
-        foreach ($sessions as $session) {
-            $status = (string) ($session['status'] ?? '');
-            if (in_array($status, ['completed', 'expired'], true)) {
-                $hasFinishedAssignedTest = true;
+        foreach (array_merge($sessions, $evaluationAssignments) as $activity) {
+            $status = (string) ($activity['status'] ?? '');
+            if ($status === 'cancelled' || (string) ($activity['assignment_status'] ?? '') === 'cancelled') {
                 continue;
             }
-
-            if ($status === 'cancelled') {
-                continue;
-            }
-
-            if ($status !== '') {
-                return false;
-            }
+            $hasAssignedActivity = true;
+            if ($status !== 'completed') return false;
         }
 
-        return $hasFinishedAssignedTest;
+        return $hasAssignedActivity;
     }
 }

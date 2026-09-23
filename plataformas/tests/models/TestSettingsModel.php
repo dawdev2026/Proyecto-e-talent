@@ -18,6 +18,11 @@ final class TestSettingsModel
         'exit_confirm_message' => "Si sales ahora, guardaremos tus respuestas y conservaras el tiempo restante para continuar despues.\n\nDeseas guardar y salir?",
         'exit_continue_button' => 'Continuar evaluacion',
         'exit_save_exit_button' => 'Guardar y salir',
+        'incomplete_confirm_title' => 'Evaluacion incompleta',
+        'incomplete_confirm_message' => 'Aun quedan preguntas sin responder. Deseas contestarlas antes de finalizar?',
+        'incomplete_confirm_button' => 'Si, contestar pendientes',
+        'incomplete_cancel_button' => 'No, guardar y finalizar',
+        'expired_message' => 'El tiempo finalizo. Se guardaron las respuestas registradas hasta este momento.',
     ];
 
     public const RANKING_CONFIG_KEY = 'ranking_config';
@@ -37,6 +42,7 @@ final class TestSettingsModel
     ];
 
     private ?bool $hasRankingPresetsTable = null;
+    private ?bool $hasCompanyRankingAssignmentsTable = null;
 
     public function __construct(?Database $db = null)
     {
@@ -90,13 +96,15 @@ final class TestSettingsModel
 
         $allowedSettings = array_intersect_key($settings, self::DEFAULTS);
         $this->db->transaction(function (Database $db) use ($allowedSettings): void {
-            foreach ($allowedSettings as $key => $value) {
-                $db->execute('
-                    INSERT INTO test_settings (setting_key, setting_value)
-                    VALUES (?, ?)
-                    ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)
-                ', [$key, $value]);
+            if (!$allowedSettings) {
+                return;
             }
+            $params = [];
+            foreach ($allowedSettings as $key => $value) array_push($params, (string) $key, (string) $value);
+            $db->execute(
+                'INSERT INTO test_settings (setting_key, setting_value) VALUES ' . implode(', ', array_fill(0, count($allowedSettings), '(?, ?)')) . ' ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)',
+                $params
+            );
         });
 
         self::$settingsCache = null;
@@ -269,6 +277,103 @@ final class TestSettingsModel
         return $this->hasRankingPresetsTable();
     }
 
+    /**
+     * Returns the ranking configuration assigned to a company, falling back
+     * to the supplied configuration when the company has no assignment.
+     */
+    public function rankingConfigForCompany(int $companyId, array $fallbackConfig): array
+    {
+        $fallbackConfig = is_array($fallbackConfig) ? $fallbackConfig : [];
+        if ($companyId <= 0 || !$this->hasCompanyRankingAssignmentsTable() || !$this->hasRankingPresetsTable()) {
+            return $fallbackConfig;
+        }
+
+        $row = $this->db->fetch('
+            SELECT p.config_json
+            FROM test_ranking_company_assignments a
+            INNER JOIN test_ranking_presets p ON p.id = a.preset_id
+            WHERE a.company_id = ? AND a.is_active = 1
+            LIMIT 1
+        ', [$companyId]);
+        if (!$row) {
+            return $fallbackConfig;
+        }
+
+        $config = json_decode((string) ($row['config_json'] ?? ''), true);
+        return is_array($config) ? $config : $fallbackConfig;
+    }
+
+    public function rankingCompanyAssignment(int $companyId): ?array
+    {
+        if ($companyId <= 0 || !$this->hasCompanyRankingAssignmentsTable()) {
+            return null;
+        }
+
+        $row = $this->db->fetch('
+            SELECT a.company_id, a.preset_id, a.assigned_at, p.preset_key, p.name AS preset_name,
+                   p.is_official
+            FROM test_ranking_company_assignments a
+            LEFT JOIN test_ranking_presets p ON p.id = a.preset_id
+            WHERE a.company_id = ? AND a.is_active = 1
+            LIMIT 1
+        ', [$companyId]);
+
+        if (!$row) {
+            return null;
+        }
+
+        return [
+            'company_id' => (int) ($row['company_id'] ?? 0),
+            'preset_id' => (int) ($row['preset_id'] ?? 0),
+            'preset_key' => (string) ($row['preset_key'] ?? ''),
+            'preset_name' => (string) ($row['preset_name'] ?? ''),
+            'is_official' => (int) ($row['is_official'] ?? 0) === 1,
+            'assigned_at' => (string) ($row['assigned_at'] ?? ''),
+        ];
+    }
+
+    public function rankingCompanyAssignments(): array
+    {
+        if (!$this->hasCompanyRankingAssignmentsTable()) {
+            return [];
+        }
+
+        return $this->db->fetchAll('
+            SELECT a.company_id, a.preset_id, a.assigned_at, p.preset_key, p.name AS preset_name,
+                   p.is_official
+            FROM test_ranking_company_assignments a
+            LEFT JOIN test_ranking_presets p ON p.id = a.preset_id
+            WHERE a.is_active = 1
+            ORDER BY a.company_id ASC
+        ');
+    }
+
+    public function saveRankingCompanyAssignment(int $companyId, ?int $presetId, int $userId): void
+    {
+        if ($companyId <= 0 || !$this->hasCompanyRankingAssignmentsTable()) {
+            throw new InvalidArgumentException('No se pudo identificar la empresa para asignar la matriz.');
+        }
+
+        if ($presetId !== null && $presetId > 0) {
+            $preset = $this->db->fetch('SELECT id FROM test_ranking_presets WHERE id = ? LIMIT 1', [$presetId]);
+            if (!$preset) {
+                throw new InvalidArgumentException('La configuracion de ranking seleccionada no existe.');
+            }
+        }
+
+        if ($presetId === null || $presetId <= 0) {
+            $this->db->execute('DELETE FROM test_ranking_company_assignments WHERE company_id = ?', [$companyId]);
+            return;
+        }
+
+        $this->db->execute('
+            INSERT INTO test_ranking_company_assignments (company_id, preset_id, assigned_by, is_active)
+            VALUES (?, ?, ?, 1)
+            ON DUPLICATE KEY UPDATE preset_id = VALUES(preset_id), assigned_by = VALUES(assigned_by),
+                                    is_active = 1, assigned_at = CURRENT_TIMESTAMP
+        ', [$companyId, $presetId, $userId > 0 ? $userId : null]);
+    }
+
     private function hasSettingsTable(bool $createIfMissing = false): bool
     {
         if ($this->hasSettingsTable !== null) {
@@ -321,6 +426,28 @@ final class TestSettingsModel
         }
 
         return $this->hasRankingPresetsTable;
+    }
+
+    private function hasCompanyRankingAssignmentsTable(): bool
+    {
+        if ($this->hasCompanyRankingAssignmentsTable !== null) {
+            return $this->hasCompanyRankingAssignmentsTable;
+        }
+
+        try {
+            $row = $this->db->fetch("
+                SELECT COUNT(*) AS total
+                FROM information_schema.TABLES
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = 'test_ranking_company_assignments'
+            ");
+            $this->hasCompanyRankingAssignmentsTable = (int) ($row['total'] ?? 0) > 0;
+        } catch (Throwable $exception) {
+            error_log('Company ranking assignment schema check error: ' . $exception->getMessage());
+            $this->hasCompanyRankingAssignmentsTable = false;
+        }
+
+        return $this->hasCompanyRankingAssignmentsTable;
     }
 
     private function ensureOfficialRankingPreset(array $officialConfig): array

@@ -16,7 +16,7 @@ final class ProfileController extends Controller
         require_permission('manage_profiles');
 
         $this->render('profiles/index', [
-            'title' => 'Perfiles | Metricatest',
+            'title' => 'Perfiles | e-talent',
             'currentPage' => 'profiles',
             'profiles' => $this->profiles->all(),
             'permissionLabels' => ProfileModel::PERMISSIONS,
@@ -42,7 +42,7 @@ final class ProfileController extends Controller
         }
 
         $this->render('profiles/form', [
-            'title' => ($id ? 'Editar perfil' : 'Nuevo perfil') . ' | Metricatest',
+            'title' => ($id ? 'Editar perfil' : 'Nuevo perfil') . ' | e-talent',
             'currentPage' => 'profiles',
             'id' => $id,
             'permissionLabels' => ProfileModel::PERMISSIONS,

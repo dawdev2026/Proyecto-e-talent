@@ -69,6 +69,11 @@ function database_apply_environment_overrides(array $config, string $connection)
         'password' => database_env('DB_PASSWORD'),
         'charset' => database_env('DB_CHARSET'),
         'socket' => database_env('DB_SOCKET'),
+        'persistent' => database_env('DB_PERSISTENT'),
+        'query_profiling' => database_env('DB_QUERY_PROFILING'),
+        'slow_query_ms' => database_env('DB_SLOW_QUERY_MS'),
+        'query_sample_rate' => database_env('DB_QUERY_SAMPLE_RATE'),
+        'query_profile_log' => database_env('DB_QUERY_PROFILE_LOG'),
         'database' => $database ?: database_env('DB_DATABASE'),
     ];
 

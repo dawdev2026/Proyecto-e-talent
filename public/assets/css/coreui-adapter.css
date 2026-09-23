@@ -1,0 +1,341 @@
+/* e-talent visual adapter: CoreUI shell + existing platform theme variables. */
+:root,
+[data-coreui-theme="light"] {
+    --cui-primary: var(--app-primary, #5856d6);
+    --cui-link-color: var(--app-primary, #5856d6);
+    --cui-body-bg: var(--app-bg, #f3f4f7);
+    --cui-tertiary-bg: var(--app-bg, #f3f4f7);
+    --cui-body-font-family: var(--app-font-family, var(--cui-font-sans-serif));
+    --cui-body-font-size: var(--app-font-size, 15px);
+}
+
+[data-coreui-theme="dark"] {
+    --cui-primary: var(--app-primary, #8d8bea);
+    --cui-link-color: var(--app-primary, #8d8bea);
+}
+
+html,
+body {
+    min-height: 100%;
+}
+
+.app-body {
+    background: var(--app-bg, var(--cui-tertiary-bg));
+}
+
+.sidebar-brand {
+    color: #fff;
+    font-weight: 700;
+    letter-spacing: .01em;
+}
+
+.sidebar-brand .brand-image {
+    display: block;
+    max-width: 160px;
+    max-height: 38px;
+    object-fit: contain;
+}
+
+.sidebar-brand-compact {
+    display: none;
+}
+
+.sidebar-brand-compact.brand-image {
+    width: 32px;
+    height: 32px;
+    object-fit: contain;
+}
+
+@media (min-width: 992px) {
+    .app-body {
+        --cui-sidebar-occupy-start: var(--sidebar-width, 18rem);
+    }
+
+    .app-body > .sidebar {
+        --cui-sidebar-width: var(--sidebar-width, 18rem);
+    }
+}
+
+.app-body > .sidebar {
+    --cui-sidebar-bg: var(--sidebar-bg, #fff);
+    --cui-sidebar-color: var(--sidebar-text, #344054);
+    --cui-sidebar-brand-bg: var(--topbar-bg, var(--app-primary));
+    --cui-sidebar-brand-color: #fff;
+    background: var(--sidebar-bg, #fff);
+    border-inline-end: 0 !important;
+    color: var(--sidebar-text, #344054);
+}
+
+.app-body > .sidebar .sidebar-header {
+    min-height: var(--topbar-height, 68px);
+    background: var(--topbar-bg, var(--app-primary));
+    border-color: color-mix(in srgb, #fff 18%, transparent) !important;
+}
+
+.app-body > .sidebar .sidebar-nav {
+    background: var(--sidebar-bg, #fff);
+    padding-inline: .4rem;
+}
+
+.app-body > .sidebar .nav-link {
+    text-decoration: none;
+    white-space: normal;
+    line-height: 1.25;
+    font-size: var(--font-size-nav, 15px);
+    color: var(--sidebar-text, #344054);
+}
+
+.app-body > .sidebar .sidebar-nav > .nav-item > .nav-link,
+.app-body > .sidebar .sidebar-menu-group > .nav-group-toggle {
+    min-height: 3rem;
+    padding: .65rem .75rem;
+    gap: .7rem;
+}
+
+.app-body > .sidebar .nav-icon {
+    color: var(--sidebar-icon, #98A2B3);
+}
+
+.app-body > .sidebar .nav-link:hover,
+.app-body > .sidebar .nav-link.active {
+    background: var(--sidebar-active-bg, #EEF2FF);
+    color: var(--sidebar-active-text, var(--app-primary));
+}
+
+.app-body > .sidebar .nav-link:hover .nav-icon,
+.app-body > .sidebar .nav-link.active .nav-icon {
+    color: var(--sidebar-active-text, var(--app-primary));
+}
+
+.sidebar .nav-group-toggle {
+    align-items: flex-start;
+}
+
+.sidebar .nav-group-toggle::after {
+    flex: 0 0 auto;
+    margin-top: .2rem;
+}
+
+.app-body > .sidebar .sidebar-menu-group > .nav-group-toggle {
+    display: flex !important;
+    align-items: center;
+    min-height: 2.9rem;
+    background: transparent !important;
+    color: var(--sidebar-text, #344054) !important;
+    font-weight: 600;
+}
+
+.app-body > .sidebar .sidebar-menu-group > .nav-group-toggle.active,
+.app-body > .sidebar .sidebar-menu-group > .nav-group-toggle:hover {
+    background: var(--sidebar-active-bg, #EEF2FF) !important;
+    color: var(--sidebar-active-text, var(--app-primary)) !important;
+}
+
+.app-body > .sidebar .sidebar-menu-group > .nav-group-toggle .sidebar-group-label {
+    display: inline-block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    overflow: visible;
+    flex: 1 1 auto;
+    line-height: 1.25;
+}
+
+.app-body > .sidebar .sidebar-menu-group > .nav-group-items {
+    padding: .15rem 0 .45rem;
+}
+
+.app-body > .sidebar .sidebar-menu-group > .nav-group-items .sidebar-submenu-link {
+    min-height: 2.45rem;
+    margin: .1rem .35rem .1rem 1.55rem;
+    padding: .55rem .65rem;
+    border-radius: .55rem;
+    gap: .65rem;
+    background: transparent !important;
+    color: var(--sidebar-text, #344054) !important;
+}
+
+.app-body > .sidebar .sidebar-menu-group > .nav-group-items .sidebar-submenu-link > span {
+    min-width: 0;
+    line-height: 1.25;
+}
+
+.app-body > .sidebar .sidebar-menu-group > .nav-group-items .sidebar-submenu-link:hover,
+.app-body > .sidebar .sidebar-menu-group > .nav-group-items .sidebar-submenu-link.active {
+    background: var(--sidebar-active-bg, #EEF2FF) !important;
+    color: var(--sidebar-active-text, var(--app-primary)) !important;
+}
+
+.app-body > .sidebar .sidebar-menu-group > .nav-group-items .sidebar-submenu-link .nav-icon {
+    flex: 0 0 1.15rem;
+    margin-inline: 0;
+    font-size: .95rem;
+}
+
+.sidebar .nav-icon.bi {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1rem;
+}
+
+.header .header-toggler {
+    color: var(--app-text, var(--cui-body-color));
+}
+
+.app-body > .wrapper > .header > .container-fluid:first-child {
+    min-height: var(--topbar-height, 68px);
+    background: var(--topbar-bg, var(--app-primary));
+    border-color: color-mix(in srgb, #fff 18%, transparent) !important;
+    color: var(--topbar-text, #fff);
+}
+
+.app-body > .wrapper > .header > .container-fluid:first-child .header-toggler,
+.app-body > .wrapper > .header > .container-fluid:first-child .user-menu,
+.app-body > .wrapper > .header > .container-fluid:first-child .user-menu .btn {
+    color: var(--topbar-text, #fff) !important;
+}
+
+.app-body > .wrapper > .header > .container-fluid:first-child .user-avatar {
+    background: var(--topbar-menu-button, #36C7B4) !important;
+    border: 2px solid color-mix(in srgb, #fff 75%, transparent);
+    color: #fff !important;
+}
+
+.app-body > .wrapper > .header > .container-fluid:first-child .user-menu-name,
+.app-body > .wrapper > .header > .container-fluid:first-child .user-menu .bi {
+    color: var(--topbar-text, #fff) !important;
+}
+
+.app-body > .wrapper > .header > .container-fluid:first-child .theme-toggle:hover,
+.app-body > .wrapper > .header > .container-fluid:first-child .user-menu .btn:hover {
+    background: color-mix(in srgb, var(--topbar-menu-bg, #fff) 18%, transparent);
+}
+
+.app-body > .wrapper > .header > .container-fluid:nth-child(2) {
+    background: var(--app-bg, #f5f7fb);
+}
+
+/* Mantiene el breadcrumb visualmente separado del borde del sidebar. */
+@media (min-width: 992px) {
+    .app-body > .wrapper > .header > .container-fluid:nth-child(2) {
+        padding-inline-start: clamp(2rem, 2.5vw, 3.5rem) !important;
+        padding-inline-end: clamp(2rem, 2.5vw, 3.5rem) !important;
+    }
+}
+
+@media (min-width: 992px) {
+    html.sidebar-collapsed .app-body {
+        --cui-sidebar-occupy-start: 4.5rem;
+    }
+
+    html.sidebar-collapsed .app-body > .sidebar {
+        --cui-sidebar-width: 4.5rem;
+    }
+
+    html.sidebar-collapsed .app-body > .wrapper {
+        padding-inline-start: 4.5rem;
+    }
+
+    html.sidebar-collapsed .sidebar-brand-full {
+        display: none !important;
+    }
+
+    html.sidebar-collapsed .sidebar-brand-compact {
+        display: inline-flex !important;
+        align-items: center;
+        justify-content: center;
+        max-width: 32px;
+        max-height: 32px;
+        margin-inline: auto;
+    }
+
+    html.sidebar-collapsed .app-body > .sidebar .nav-link {
+        width: 100%;
+        justify-content: center;
+        padding-inline: 0 !important;
+        gap: 0;
+        text-align: center;
+    }
+
+    html.sidebar-collapsed .app-body > .sidebar .nav-link .nav-icon {
+        flex: 0 0 1.25rem;
+        width: 1.25rem;
+        margin-inline: auto !important;
+        text-align: center;
+    }
+
+    html.sidebar-collapsed .app-body > .sidebar .nav-link > span:not(.nav-icon) {
+        display: none;
+    }
+
+    /* En modo compacto ningún texto ni submenú debe desbordar el ancho del sidebar. */
+    html.sidebar-collapsed .app-body > .sidebar .sidebar-group-label,
+    html.sidebar-collapsed .app-body > .sidebar .sidebar-submenu-link > span {
+        display: none !important;
+        visibility: hidden !important;
+        width: 0 !important;
+        max-width: 0 !important;
+        overflow: hidden !important;
+    }
+
+    html.sidebar-collapsed .app-body > .sidebar .sidebar-menu-group > .nav-group-items {
+        display: none !important;
+    }
+
+    html.sidebar-collapsed .app-body > .sidebar .nav-group-toggle::after {
+        display: none;
+    }
+
+    html.sidebar-collapsed .app-body > .sidebar .sidebar-menu-group > .nav-group-items .sidebar-submenu-link {
+        margin-inline: .55rem;
+        padding-inline: .75rem;
+    }
+}
+
+.header .theme-toggle {
+    min-width: 2.5rem;
+}
+
+.app-shell {
+    padding-top: 0;
+}
+
+.app-shell > .container-fluid {
+    width: 100%;
+}
+
+.app-shell .card {
+    border-color: var(--app-border, var(--cui-border-color));
+}
+
+/* Legacy view names are retained for business-specific behavior, but render
+ * using the same card surface as CoreUI cards. */
+.app-shell .content-panel,
+.app-shell .metric-card {
+    background: var(--card-content-bg, var(--cui-card-bg, var(--cui-body-bg)));
+    border: var(--cui-border-width) solid var(--app-border, var(--cui-border-color));
+    border-radius: var(--cui-border-radius);
+}
+
+.app-shell .page-header {
+    border-radius: var(--cui-border-radius);
+}
+
+.app-shell .card-header {
+    background: var(--card-header-bg, var(--cui-tertiary-bg));
+    color: var(--card-text, var(--cui-body-color));
+}
+
+.app-shell .table {
+    --cui-table-border-color: var(--table-border, var(--cui-border-color));
+}
+
+@media (max-width: 991.98px) {
+    .wrapper {
+        padding-inline: 0;
+    }
+
+    .body.flex-grow-1 {
+        padding-inline: 1rem !important;
+    }
+}

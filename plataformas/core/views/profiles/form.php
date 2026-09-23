@@ -13,7 +13,7 @@ $selectedScopes = $selectedScopes ?? [];
 <form method="post" class="user-form-layout needs-validation" novalidate>
     <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
 
-    <section class="content-panel user-form-main">
+    <section class="card content-panel user-form-main">
         <div class="user-form-section">
             <div class="user-form-section-head">
                 <span><i class="bi bi-shield-lock"></i></span>
@@ -136,7 +136,7 @@ $selectedScopes = $selectedScopes ?? [];
         </div>
     </section>
 
-    <aside class="content-panel user-form-aside">
+    <aside class="card content-panel user-form-aside">
         <div class="user-form-aside-header">
             <span><i class="bi bi-person-lock"></i></span>
             <div>

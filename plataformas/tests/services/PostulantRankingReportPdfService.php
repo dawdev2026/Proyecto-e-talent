@@ -556,7 +556,7 @@ final class PostulantRankingReportPdfService
             $name = trim((string) ($design['html_title'] ?? ''));
         }
 
-        return $name !== '' ? $name : 'Metricatest';
+        return $name !== '' ? $name : 'e-talent';
     }
 
     private function brandLogoPath(array $design, array $login): string
@@ -1210,12 +1210,12 @@ final class PostulantSimplePdf
 
     private function ascii(string $text): string
     {
-        $map = [
-            'á' => 'a', 'é' => 'e', 'í' => 'i', 'ó' => 'o', 'ú' => 'u', 'ñ' => 'n',
-            'Á' => 'A', 'É' => 'E', 'Í' => 'I', 'Ó' => 'O', 'Ú' => 'U', 'Ñ' => 'N',
-            'ü' => 'u', 'Ü' => 'U',
-        ];
-        $text = strtr($text, $map);
+        $converted = function_exists('iconv')
+            ? iconv('UTF-8', 'Windows-1252//TRANSLIT//IGNORE', $text)
+            : false;
+        if (is_string($converted)) {
+            return $converted;
+        }
         return preg_replace('/[^\\x20-\\x7E]/', '', $text) ?? '';
     }
 }

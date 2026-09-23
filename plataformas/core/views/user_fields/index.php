@@ -2,17 +2,21 @@
     <div>
         <p class="text-uppercase text-primary fw-bold small mb-1">Administracion</p>
         <h1 class="fw-bold mb-1">Campos de usuario</h1>
-        <p class="text-muted mb-0">Define datos adicionales por ambito: core, evaluaciones o futuras sub-plataformas.</p>
+        <p class="text-muted mb-0">Define los datos adicionales de los usuarios de tu empresa.</p>
+        <?php if (!empty($companyName)): ?>
+            <p class="small text-primary fw-semibold mb-0 mt-2"><i class="bi bi-buildings me-1"></i>Empresa: <?= e($companyName) ?></p>
+        <?php endif; ?>
     </div>
     <a class="btn btn-primary" href="<?= e(route_url('user-field.new')) ?>"><i class="bi bi-ui-checks-grid me-1"></i> Nuevo campo</a>
 </section>
 
-<section class="content-panel">
+<section class="card content-panel">
     <div class="table-responsive">
-        <table class="table align-middle app-table app-data-table" data-export-title="Campos de usuario">
+        <table class="table table-hover align-middle app-table app-data-table" data-export-title="Campos de usuario">
             <thead>
                 <tr>
                     <th>Dato</th>
+                    <th>Empresa</th>
                     <th>Ambito</th>
                     <th>Tipo</th>
                     <th>Revision</th>
@@ -30,6 +34,7 @@
                             <div class="fw-semibold"><?= e($field['label']) ?></div>
                             <div class="text-muted small"><?= e($field['help_text'] ?? '') ?></div>
                         </td>
+                        <td><?= e((string) ($field['company_name'] ?? '') !== '' ? (string) $field['company_name'] : 'Sin empresa asignada') ?></td>
                         <td><?= e($scopes[($field['scope_type'] ?? 'core') . ':' . ($field['scope_key'] ?? 'core')] ?? labelize(($field['scope_type'] ?? 'core') . ' ' . ($field['scope_key'] ?? 'core'))) ?></td>
                         <td><?= e($types[$field['field_type']] ?? $field['field_type']) ?></td>
                         <td>

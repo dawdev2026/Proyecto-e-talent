@@ -58,17 +58,20 @@ foreach ($sessions as $session) {
         $sessionUsers[$userId]['sessions'][$instrumentId] = $session;
     }
 
-    if (in_array($session['status'], ['completed', 'expired'], true)) {
-        $sessionUsers[$userId]['finished_count']++;
+}
+foreach ($sessionUsers as &$sessionUser) {
+    foreach ($sessionUser['sessions'] as $session) {
+        if ((string) ($session['status'] ?? '') === 'completed') $sessionUser['finished_count']++;
     }
 }
+unset($sessionUser);
 uasort($sessionUsers, static fn(array $a, array $b): int => strcmp($a['name'], $b['name']));
 ?>
 
 <section class="page-header">
     <div>
         <p class="text-uppercase text-primary fw-bold small mb-1">Evaluaciones</p>
-        <h1 class="fw-bold mb-1">Estado Avance</h1>
+        <h1 class="fw-bold mb-1">Estado Avance <?= status_help_button('Estados de las actividades', "• Asignada / Pendiente: fue asignada y aún no se ha abierto.\n• En curso: hay un intento abierto; puede tener cero respuestas y no representa por sí solo avance respondido.\n• Con respuestas: existe al menos una respuesta no vacía guardada; es una métrica, no un estado del intento.\n• Completada: se envió explícitamente, incluso si no contiene respuestas.\n• Expirada: venció el plazo sin entrega y no cuenta como completada.\n• Cancelada: la asignación se retiró y se excluye de los totales activos.") ?></h1>
         <p class="text-muted mb-0">Seguimiento por persona de las evaluaciones activas asignadas.</p>
     </div>
     <div class="d-flex flex-wrap gap-2">
@@ -77,7 +80,7 @@ uasort($sessionUsers, static fn(array $a, array $b): int => strcmp($a['name'], $
     </div>
 </section>
 
-<section class="content-panel evaluation-dashboard mb-4">
+<section class="card content-panel evaluation-dashboard mb-4">
     <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
         <div>
             <h2 class="h5 fw-bold mb-1">Filtros</h2>
@@ -121,7 +124,7 @@ uasort($sessionUsers, static fn(array $a, array $b): int => strcmp($a['name'], $
     </form>
 </section>
 
-<section class="content-panel mt-4">
+<section class="card content-panel mt-4">
     <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
         <div>
             <h2 class="h5 fw-bold mb-1">Asignaciones y resultados recientes</h2>
@@ -149,7 +152,7 @@ uasort($sessionUsers, static fn(array $a, array $b): int => strcmp($a['name'], $
     </div>
     <div class="table-responsive">
         <table
-            class="table align-middle app-table app-data-table assignment-matrix-table"
+            class="table table-hover align-middle app-table app-data-table assignment-matrix-table"
             data-export-title="Estado Avance"
         >
             <thead>
@@ -158,7 +161,7 @@ uasort($sessionUsers, static fn(array $a, array $b): int => strcmp($a['name'], $
                     <?php foreach ($sessionInstruments as $instrument): ?>
                         <th><?= e($instrument['name']) ?></th>
                     <?php endforeach; ?>
-                    <th>Terminadas</th>
+                    <th>Completadas</th>
                     <th class="text-end no-sort no-export">Acciones</th>
                 </tr>
             </thead>

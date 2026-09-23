@@ -1,14 +1,32 @@
 .DS_Store
+documento_propuesta_optimizacion_evidencia.docx
 
-# Entorno Docker exclusivamente local; no se publica en GitHub
-docker/
-docker-compose.yml
+# La infraestructura Docker forma parte de este proyecto independiente.
 
 # Agentes e infraestructura interna exclusivamente local
 AGENTS.md
 .agents/
 .codex/
 config/agent-loop/
+
+# Carpetas de trabajo y soporte exclusivamente locales
+analisis/
+.tmp/
+output/
+outputs/
+database/*
+!database/
+!database/*.sql
+!database/MIGRATIONS.md
+!database/migrations/
+database/migrations/*
+!database/migrations/20260921_test_process_facial_enrollment_requirement.sql
+!database/migrations/*.sql
+docs/
+scripts/
+!scripts/
+scripts/*
+!scripts/db-migrate.php
 
 # Credenciales y claves locales
 config/database.php
@@ -20,6 +38,12 @@ config/*.secure
 vendor/
 sistema/vendor/
 database/sistema/vendor/
+
+# Dependencias frontend públicas requeridas por el runtime
+!public/assets/vendor/
+!public/assets/vendor/**
+!public/assets/js/vendor/
+!public/assets/js/vendor/**
 
 # Datos generados localmente, respaldos y temporales
 backups/
@@ -34,6 +58,7 @@ analisis/*.xlsx
 public/error_log
 public/tmp/*
 !public/tmp/.gitkeep
+public/uploads/
 database/public/tmp/*
 !database/public/tmp/.gitkeep
 database/tmp/*
@@ -41,6 +66,9 @@ database/tmp/*
 config/ambientes.local.env
 deployment-*.txt
 reports/db-structure/
+
+# XML de prueba pesado; se conserva únicamente en el entorno local
+xml_test/preguntas-PRUEBAAULAS-26-top-20260921-1039.xml
 
 # Cargas de usuarios; se conservan solo los assets de branding del proyecto
 public/uploads/*

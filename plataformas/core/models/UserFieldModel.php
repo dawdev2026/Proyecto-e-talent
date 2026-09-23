@@ -56,77 +56,84 @@ final class UserFieldModel
     public function all(): array
     {
         return $this->db->fetchAll('
-            SELECT *
-            FROM user_field_definitions
-            WHERE ' . $this->notReservedSql() . '
+            SELECT f.*, c.name AS company_name
+            FROM user_field_definitions f
+            LEFT JOIN companies c ON c.id = f.company_id
+            WHERE ' . $this->notReservedSql('f') . ' AND ' . $this->companyScopeSql('f') . '
             ORDER BY scope_type ASC, scope_key ASC, sort_order ASC, label ASC
-        ');
+        ', $this->companyScopeParams());
     }
 
     public function active(string $scopeType = 'core', string $scopeKey = 'core'): array
     {
         return $this->db->fetchAll('
             SELECT *
-            FROM user_field_definitions
+            FROM user_field_definitions f
             WHERE is_active = 1
               AND scope_type = ?
               AND scope_key = ?
-              AND ' . $this->notReservedSql() . '
+              AND ' . $this->notReservedSql('f') . '
+              AND ' . $this->companyScopeSql('f') . '
             ORDER BY sort_order ASC, label ASC
-        ', [$scopeType, $scopeKey]);
+        ', array_merge([$scopeType, $scopeKey], $this->companyScopeParams()));
     }
 
     public function activeForUsers(): array
     {
         return $this->db->fetchAll('
             SELECT *
-            FROM user_field_definitions
+            FROM user_field_definitions f
             WHERE is_active = 1
-              AND ' . $this->notReservedSql() . '
+              AND ' . $this->notReservedSql('f') . '
+              AND ' . $this->companyScopeSql('f') . '
             ORDER BY sort_order ASC, label ASC, scope_type ASC, scope_key ASC
-        ');
+        ', $this->companyScopeParams());
     }
 
     public function listable(string $scopeType = 'core', string $scopeKey = 'core'): array
     {
         return $this->db->fetchAll('
             SELECT *
-            FROM user_field_definitions
+            FROM user_field_definitions f
             WHERE is_active = 1
               AND show_in_list = 1
               AND scope_type = ?
               AND scope_key = ?
-              AND ' . $this->notReservedSql() . '
+              AND ' . $this->notReservedSql('f') . '
+              AND ' . $this->companyScopeSql('f') . '
             ORDER BY sort_order ASC, label ASC
-        ', [$scopeType, $scopeKey]);
+        ', array_merge([$scopeType, $scopeKey], $this->companyScopeParams()));
     }
 
     public function listableForUsers(): array
     {
         return $this->db->fetchAll('
             SELECT *
-            FROM user_field_definitions
+            FROM user_field_definitions f
             WHERE is_active = 1
               AND show_in_list = 1
-              AND ' . $this->notReservedSql() . '
+              AND ' . $this->notReservedSql('f') . '
+              AND ' . $this->companyScopeSql('f') . '
             ORDER BY sort_order ASC, label ASC, scope_type ASC, scope_key ASC
-        ');
+        ', $this->companyScopeParams());
     }
 
-    private function notReservedSql(): string
+    private function notReservedSql(string $alias = ''): string
     {
-        return "field_key NOT IN ('" . implode("','", self::RESERVED_CORE_KEYS) . "')";
+        $field = $alias !== '' ? $alias . '.field_key' : 'field_key';
+        return $field . " NOT IN ('" . implode("','", self::RESERVED_CORE_KEYS) . "')";
     }
 
     public function find(int $id): ?array
     {
-        return $this->db->fetch('SELECT * FROM user_field_definitions WHERE id = ? LIMIT 1', [$id]);
+        return $this->db->fetch('SELECT * FROM user_field_definitions f WHERE f.id = ? AND ' . $this->companyScopeSql('f') . ' LIMIT 1', array_merge([$id], $this->companyScopeParams()));
     }
 
     public function fieldKeyExists(string $fieldKey, ?int $excludeId = null): bool
     {
         $params = [$fieldKey];
-        $sql = 'SELECT id FROM user_field_definitions WHERE field_key = ?';
+        $sql = 'SELECT id FROM user_field_definitions f WHERE f.field_key = ? AND ' . $this->companyScopeSql('f');
+        $params = array_merge($params, $this->companyScopeParams());
         if ($excludeId !== null) {
             $sql .= ' AND id <> ?';
             $params[] = $excludeId;
@@ -138,9 +145,10 @@ final class UserFieldModel
     public function create(array $data): int
     {
         return $this->db->insert('
-            INSERT INTO user_field_definitions (scope_type, scope_key, field_key, label, field_type, validation_rule, validation_pattern, validation_message, options, help_text, is_required, show_in_list, sort_order, is_active)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO user_field_definitions (company_id, scope_type, scope_key, field_key, label, field_type, validation_rule, validation_pattern, validation_message, options, help_text, is_required, show_in_list, sort_order, is_active)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ', [
+            $data['company_id'] ?: null,
             $data['scope_type'],
             $data['scope_key'],
             $data['field_key'],
@@ -162,9 +170,10 @@ final class UserFieldModel
     {
         $this->db->execute('
             UPDATE user_field_definitions
-            SET scope_type = ?, scope_key = ?, field_key = ?, label = ?, field_type = ?, validation_rule = ?, validation_pattern = ?, validation_message = ?, options = ?, help_text = ?, is_required = ?, show_in_list = ?, sort_order = ?, is_active = ?
-            WHERE id = ?
+            SET company_id = ?, scope_type = ?, scope_key = ?, field_key = ?, label = ?, field_type = ?, validation_rule = ?, validation_pattern = ?, validation_message = ?, options = ?, help_text = ?, is_required = ?, show_in_list = ?, sort_order = ?, is_active = ?
+            WHERE id = ? AND ' . $this->companyScopeSql() . '
         ', [
+            $data['company_id'] ?: null,
             $data['scope_type'],
             $data['scope_key'],
             $data['field_key'],
@@ -180,12 +189,45 @@ final class UserFieldModel
             (int) $data['sort_order'],
             (int) $data['is_active'],
             $id,
+            ...$this->companyScopeParams(),
         ]);
     }
 
     public function delete(int $id): void
     {
-        $this->db->execute('DELETE FROM user_field_definitions WHERE id = ?', [$id]);
+        $this->db->execute('DELETE FROM user_field_definitions WHERE id = ? AND ' . $this->companyScopeSql(), array_merge([$id], $this->companyScopeParams()));
+    }
+
+    private function companyScopeSql(string $alias = ''): string
+    {
+        $column = static fn(string $name): string => $alias !== '' ? $alias . '.' . $name : $name;
+        $user = current_user();
+        if (!$user) {
+            return '1 = 1';
+        }
+
+        if ((string) ($user['role'] ?? '') === 'company_admin') {
+            if ((int) ($user['company_id'] ?? 0) <= 0) return '1 = 0';
+            return $column('company_id') . ' = ?';
+        }
+
+        if (has_permission('manage_user_fields')) return '1 = 1';
+
+        if ((int) ($user['company_id'] ?? 0) > 0) {
+            return $column('company_id') . ' = ?';
+        }
+
+        return '1 = 0';
+    }
+
+    private function companyScopeParams(): array
+    {
+        $user = current_user();
+        if ($user && ((string) ($user['role'] ?? '') === 'company_admin' || !has_permission('manage_user_fields')) && (int) ($user['company_id'] ?? 0) > 0) {
+            return [(int) $user['company_id']];
+        }
+
+        return [];
     }
 
     public function valuesForUser(int $userId): array
