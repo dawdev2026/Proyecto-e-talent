@@ -16,8 +16,10 @@ $mediaEvidence = array_values($mediaEvidence ?? []);
 $audioVisualRisks = array_values($audioVisualRisks ?? []);
 $audioVisualRisks = array_values(array_filter($audioVisualRisks, static fn(array $risk): bool => (string) ($risk['event_type'] ?? '') !== 'multiple_voice_possible'));
 $screenCaptures = array_values($screenCaptures ?? []);
+$isAdministrativeViewer = (bool) ($isAdministrativeViewer ?? false);
 $resultsVisible = (bool) ($resultsVisible ?? true);
 $controlEventLabels = [
+    'audio_visual_consent_accepted' => 'Consentimiento audiovisual aceptado',
     'audio_visual_screen_capture_completed' => 'Captura de pantalla guardada', 'audio_visual_risk' => 'Riesgo audiovisual registrado',
     'audio_visual_upload_completed' => 'Evidencia audiovisual guardada', 'audio_visual_upload_failed' => 'Fallo al guardar evidencia audiovisual',
     'attempt_opened' => 'Intento abierto', 'supervised_started' => 'Rendición supervisada iniciada',
@@ -178,6 +180,8 @@ $renderResponses = static function (array $questionSet, array $answerSet) use ($
     </div>
 <?php endif; ?>
 
+<?= status_help_button('Estado y calificación del resultado', "• Completada: la entrega se envió explícitamente, incluso sin respuestas.\n• Expirada: venció sin envío y no equivale a una entrega completada.\n• Aprobada/Reprobada: depende de comparar la nota con el umbral configurado.\n• Sin umbral: no hay criterio de aprobación definido.") ?>
+
 <?php if (!$resultsVisible): ?>
     <section class="card content-panel evaluation-result-panel">
         <div class="alert alert-info mb-0" role="status">
@@ -278,7 +282,7 @@ $renderResponses = static function (array $questionSet, array $answerSet) use ($
             </div>
         </section>
     <?php endif; ?>
-    <?php if ($isAssessment && $mediaEvidence): ?>
+    <?php if ($isAdministrativeViewer && $isAssessment && $mediaEvidence): ?>
         <section class="mt-4 pt-4 border-top" aria-labelledby="evaluation-media-title">
             <h2 id="evaluation-media-title" class="h5 fw-bold mb-1">Evidencia audiovisual</h2>
             <?php foreach ($mediaEvidence as $segment): ?>

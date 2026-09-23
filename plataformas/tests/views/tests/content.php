@@ -40,6 +40,7 @@ if (!function_exists('test_short_text')) {
 </section>
 
 <section class="card content-panel mt-4">
+    <p class="small text-muted">Estado de cada pregunta <?= status_help_button('Estados de las preguntas', "• Activa: se presenta al responder el test.\n• Inactiva: se conserva en la configuración, pero no se presenta como pregunta activa.") ?></p>
     <div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-3">
         <div>
             <h2 class="h5 fw-bold mb-1">Escalas</h2>

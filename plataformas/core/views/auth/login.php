@@ -25,7 +25,7 @@ $authStyle = sprintf(
     <div class="card-body p-0">
     <div class="text-center mb-4">
         <?php if ($loginSettings['login_logo_path']): ?>
-            <img class="auth-logo-image mx-auto mb-3" src="<?= e(url($loginSettings['login_logo_path'])) ?>" alt="">
+            <img class="auth-logo-image mx-auto mb-3" src="<?= e(url($loginSettings['login_logo_path'])) ?>" alt="<?= e(trim((string) ($loginSettings['login_title'] ?? 'Metricatest')) ?: 'Metricatest') ?>">
         <?php else: ?>
             <div class="auth-logo mx-auto mb-3"><i class="bi bi-shield-check"></i></div>
             <h1 class="auth-title fw-bold mb-1"><?= e(trim((string) $loginSettings['login_title']) ?: 'e-talent') ?></h1>

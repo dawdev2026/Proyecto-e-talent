@@ -12,6 +12,7 @@ final class EvaluationSurveyController extends Controller
     private EvaluationSurveyDashboardModel $dashboard;
     private TestSessionModel $testSessions;
     private EvaluationSurveyIntegrityReportPdfService $integrityPdf;
+    private MoodleEvaluationImportService $moodleImport;
 
     public function __construct(?Template $view = null, ?EvaluationSurveyFormModel $forms = null, ?EvaluationSurveyAttemptModel $attempts = null)
     {
@@ -25,12 +26,13 @@ final class EvaluationSurveyController extends Controller
         $this->dashboard = new EvaluationSurveyDashboardModel();
         $this->testSessions = new TestSessionModel();
         $this->integrityPdf = new EvaluationSurveyIntegrityReportPdfService();
+        $this->moodleImport = new MoodleEvaluationImportService();
     }
 
     public function dashboard(): void
     {
         $this->requireDashboardAccess();
-        $companyId = is_general_admin() ? null : (int) (current_user()['company_id'] ?? 0);
+        $companyId = $this->isGlobalEvaluationAdmin() ? null : (int) (current_user()['company_id'] ?? 0);
         $data = $this->dashboard->dashboard($companyId > 0 ? $companyId : null);
         $this->render('evaluaciones_encuestas/dashboard', [
             'title' => 'Dashboard de evaluaciones | e-talent',
@@ -44,7 +46,7 @@ final class EvaluationSurveyController extends Controller
     public function dashboardSummaryExport(): void
     {
         $this->requireDashboardAccess();
-        $companyId = is_general_admin() ? null : (int) (current_user()['company_id'] ?? 0);
+        $companyId = $this->isGlobalEvaluationAdmin() ? null : (int) (current_user()['company_id'] ?? 0);
         $rows = $this->attempts->dashboardSummaryExportData($companyId > 0 ? $companyId : null);
         $exportRows = [['Evaluación', 'Proceso', 'RUT', 'Nombre completo', 'Correo', 'Estado del intento', 'Preguntas', 'Buenas', 'Malas', 'Omitidas', 'Nota', 'Estado de aprobación']];
         foreach ($rows as $row) {
@@ -82,15 +84,21 @@ final class EvaluationSurveyController extends Controller
     public function dashboardIntegrityReport(): void
     {
         $this->requireDashboardAccess();
-        $companyId = is_general_admin() ? null : (int) (current_user()['company_id'] ?? 0);
+        $companyId = $this->isGlobalEvaluationAdmin() ? null : (int) (current_user()['company_id'] ?? 0);
+        $domain = (string) ($_GET['domain'] ?? 'evaluations') === 'tests' ? 'tests' : 'evaluations';
         $processIds = $this->requestPositiveIntList('process_id');
         $formIds = $this->requestPositiveIntList('form_id');
         $testIds = $this->requestPositiveIntList('test_id');
-        $data = $this->dashboard->integrityReport($companyId > 0 ? $companyId : null, $processIds ?: null, $formIds ?: null, $testIds ?: null);
-        $filterOptions = $this->dashboard->integrityFilterOptions($companyId > 0 ? $companyId : null);
+        $dateRange = $this->integrityDateRange();
+        $data = $this->dashboard->integrityReport($companyId > 0 ? $companyId : null, $processIds ?: null, $formIds ?: null, $testIds ?: null, $domain, $dateRange['from'], $dateRange['until']);
+        $filterOptions = $this->dashboard->integrityFilterOptions($companyId > 0 ? $companyId : null, $domain);
         $this->render('evaluaciones_encuestas/dashboard_integrity', [
-            'title' => 'Reporte de incidencias | e-talent',
-            'currentPage' => 'evaluation-surveys.dashboard',
+            'title' => ($domain === 'tests' ? 'Incidencias de tests' : 'Incidencias de evaluaciones') . ' | e-talent',
+            'currentPage' => $domain === 'tests'
+                ? 'client-admin.test-incidents'
+                : ($this->isGlobalEvaluationAdmin() ? 'evaluation-surveys.dashboard' : 'client-admin.evaluation-incidents'),
+            'reportDomain' => $domain,
+            'dateFrom' => $dateRange['from'], 'dateTo' => $dateRange['through'],
             'summary' => $data['summary'],
             'rows' => $data['rows'],
             'processIds' => $processIds,
@@ -105,15 +113,18 @@ final class EvaluationSurveyController extends Controller
     public function dashboardIntegrityReportPdf(): void
     {
         $this->requireDashboardAccess();
-        $companyId = is_general_admin() ? null : (int) (current_user()['company_id'] ?? 0);
+        $companyId = $this->isGlobalEvaluationAdmin() ? null : (int) (current_user()['company_id'] ?? 0);
         $processIds = $this->requestPositiveIntList('process_id');
         $formIds = $this->requestPositiveIntList('form_id');
         $testIds = $this->requestPositiveIntList('test_id');
-        $data = $this->dashboard->integrityReport($companyId > 0 ? $companyId : null, $processIds ?: null, $formIds ?: null, $testIds ?: null);
+        $domain = (string) ($_GET['domain'] ?? 'evaluations') === 'tests' ? 'tests' : 'evaluations';
+        $dateRange = $this->integrityDateRange();
+        $data = $this->dashboard->integrityReport($companyId > 0 ? $companyId : null, $processIds ?: null, $formIds ?: null, $testIds ?: null, $domain, $dateRange['from'], $dateRange['until']);
         $pdf = $this->integrityPdf->render($data);
         header('Content-Type: application/pdf');
         header('Content-Length: ' . strlen($pdf));
-        header('Content-Disposition: attachment; filename="' . $this->integrityPdf->filename() . '"');
+        $filename = $domain === 'tests' ? 'reporte-incidencias-tests-psicolaborales.pdf' : $this->integrityPdf->filename();
+        header('Content-Disposition: attachment; filename="' . $filename . '"');
         header('Cache-Control: private, no-store');
         echo $pdf;
         exit;
@@ -122,13 +133,17 @@ final class EvaluationSurveyController extends Controller
     public function dashboardIntegrityReportExcel(): void
     {
         $this->requireDashboardAccess();
-        $companyId = is_general_admin() ? null : (int) (current_user()['company_id'] ?? 0);
+        $companyId = $this->isGlobalEvaluationAdmin() ? null : (int) (current_user()['company_id'] ?? 0);
         $processIds = $this->requestPositiveIntList('process_id');
         $formIds = $this->requestPositiveIntList('form_id');
         $testIds = $this->requestPositiveIntList('test_id');
-        $data = $this->dashboard->integrityReport($companyId > 0 ? $companyId : null, $processIds ?: null, $formIds ?: null, $testIds ?: null);
+        $domain = (string) ($_GET['domain'] ?? 'evaluations') === 'tests' ? 'tests' : 'evaluations';
+        $dateRange = $this->integrityDateRange();
+        $data = $this->dashboard->integrityReport($companyId > 0 ? $companyId : null, $processIds ?: null, $formIds ?: null, $testIds ?: null, $domain, $dateRange['from'], $dateRange['until']);
         $workbook = $this->buildIntegrityExportWorkbook($data);
-        download_xlsx_workbook('reporte-ejecutivo-incidencias-evaluaciones.xlsx', $workbook, 'Reporte ejecutivo de incidencias | e-talent');
+        $filename = $domain === 'tests' ? 'reporte-ejecutivo-incidencias-tests.xlsx' : 'reporte-ejecutivo-incidencias-evaluaciones.xlsx';
+        $title = $domain === 'tests' ? 'Incidencias tests psicolaborales | e-talent' : 'Incidencias evaluaciones | e-talent';
+        download_xlsx_workbook($filename, $workbook, $title);
     }
 
     private function buildIntegrityExportWorkbook(array $data): array
@@ -216,7 +231,7 @@ final class EvaluationSurveyController extends Controller
         if (!$form || (string) ($form['form_type'] ?? '') !== 'assessment') {
             platform_error(404, 'Evaluación no encontrada.', ['chips' => ['Dashboard', 'Evaluaciones']]);
         }
-        $companyId = is_general_admin() ? null : (int) (current_user()['company_id'] ?? 0);
+        $companyId = $this->isGlobalEvaluationAdmin() ? null : (int) (current_user()['company_id'] ?? 0);
         $attempts = $this->attempts->attemptsForForm($formId, $companyId > 0 ? $companyId : null, $processId > 0 ? $processId : null);
         $this->render('evaluaciones_encuestas/dashboard_results', [
             'title' => 'Resultados de evaluación | e-talent',
@@ -238,7 +253,7 @@ final class EvaluationSurveyController extends Controller
         if (!$form || (string) ($form['form_type'] ?? '') !== 'assessment') {
             platform_error(404, 'Evaluación no encontrada.', ['chips' => ['Dashboard', 'Evaluaciones']]);
         }
-        $companyId = is_general_admin() ? null : (int) (current_user()['company_id'] ?? 0);
+        $companyId = $this->isGlobalEvaluationAdmin() ? null : (int) (current_user()['company_id'] ?? 0);
         $attempts = $this->attempts->attemptsForForm($formId, $companyId > 0 ? $companyId : null, $processId > 0 ? $processId : null);
         $candidates = $this->mediaEvidence->recoveryCandidatesForAttempts(array_column($attempts, 'id'));
         $requested = [];
@@ -269,7 +284,7 @@ final class EvaluationSurveyController extends Controller
         if (!$form || (string) ($form['form_type'] ?? '') !== 'assessment') {
             platform_error(404, 'Evaluación no encontrada.', ['chips' => ['Dashboard', 'Evaluaciones']]);
         }
-        $companyId = is_general_admin() ? null : (int) (current_user()['company_id'] ?? 0);
+        $companyId = $this->isGlobalEvaluationAdmin() ? null : (int) (current_user()['company_id'] ?? 0);
         $attemptToken = trim((string) ($_POST['attempt_sid'] ?? $_GET['attempt_sid'] ?? ''));
         $attemptId = $attemptToken !== '' ? secure_url_id($attemptToken, 'evaluation_survey_attempt') : 0;
         if ($attemptId <= 0) {
@@ -321,7 +336,7 @@ final class EvaluationSurveyController extends Controller
         if (!$form || (string) ($form['form_type'] ?? '') !== 'assessment') {
             platform_error(404, 'Evaluación no encontrada.', ['chips' => ['Dashboard', 'Evaluaciones']]);
         }
-        $companyId = is_general_admin() ? null : (int) (current_user()['company_id'] ?? 0);
+        $companyId = $this->isGlobalEvaluationAdmin() ? null : (int) (current_user()['company_id'] ?? 0);
         $data = $this->attempts->exportDataForForm($form, $companyId > 0 ? $companyId : null, $processId > 0 ? $processId : null);
         $workbook = $this->buildEvaluationExportWorkbook($form, $data, $exportType);
         $slug = trim(preg_replace('/[^a-z0-9]+/i', '-', (string) ($form['title'] ?? 'evaluacion')), '-');
@@ -518,7 +533,7 @@ final class EvaluationSurveyController extends Controller
     {
         require_auth();
         $user = current_user() ?: [];
-        $allowed = is_general_admin()
+        $allowed = $this->isGlobalEvaluationAdmin()
             || ((string) ($user['role'] ?? '') === 'company_admin'
                 && (int) ($user['company_id'] ?? 0) > 0);
         if (!$allowed) {
@@ -526,6 +541,12 @@ final class EvaluationSurveyController extends Controller
                 'detailRows' => ['Permiso requerido' => 'Administrador general o Administrador Cliente'],
             ]);
         }
+    }
+
+    private function isGlobalEvaluationAdmin(): bool
+    {
+        $user = current_user() ?: [];
+        return (string) ($user['role'] ?? '') !== 'company_admin' && is_general_admin($user);
     }
 
     private function requestPositiveIntList(string $key): array
@@ -540,12 +561,27 @@ final class EvaluationSurveyController extends Controller
         return array_values($values);
     }
 
+    private function integrityDateRange(): array
+    {
+        $isValidDate = static function (string $value): bool {
+            $date = DateTimeImmutable::createFromFormat('!Y-m-d', $value);
+            return $date instanceof DateTimeImmutable && $date->format('Y-m-d') === $value;
+        };
+        $from = trim((string) ($_GET['date_from'] ?? ''));
+        $through = trim((string) ($_GET['date_to'] ?? ''));
+        if (!$isValidDate($from)) $from = date('Y-m-d', strtotime('-90 days'));
+        if (!$isValidDate($through)) $through = date('Y-m-d');
+        if ($through < $from) $from = date('Y-m-d', strtotime($through . ' -90 days'));
+        $until = (new DateTimeImmutable($through))->modify('+1 day')->format('Y-m-d');
+        return ['from' => $from, 'through' => $through, 'until' => $until];
+    }
+
     public function index(): void
     {
         require_permission('manage_evaluation_surveys');
 
         $type = $this->requestedFormType();
-        if ($type === 'survey' && !is_general_admin()) {
+        if ($type === 'survey' && !$this->isGlobalEvaluationAdmin()) {
             platform_error(403, 'Las encuestas de satisfacción solo están disponibles para el administrador general.');
         }
         $this->render('evaluaciones_encuestas/index', [
@@ -559,12 +595,47 @@ final class EvaluationSurveyController extends Controller
         ]);
     }
 
+    public function moodleImport(): void
+    {
+        require_permission('manage_evaluation_surveys');
+        $result = null;
+        $errors = [];
+        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+            verify_csrf();
+            try {
+                $result = $this->moodleImport->import($_POST);
+                $importLimit = max(1, (int) ($_POST['question_display_limit'] ?? 7));
+                $questionCount = count((array) ($result['payload']['questions'] ?? []));
+                if ($importLimit > $questionCount) {
+                    throw new InvalidArgumentException('La cantidad de preguntas por intento no puede superar la batería importada (' . $questionCount . ').');
+                }
+                $result['payload']['question_display_limit'] = $importLimit;
+                $formId = $this->forms->createFromMoodle($result['payload'], (int) current_user()['id']);
+                flash('success', 'Evaluación importada correctamente como borrador. Revisa las preguntas antes de activarla.');
+                redirect(route_url('evaluation-surveys.form.edit', $formId));
+            } catch (Throwable $exception) {
+                $errors[] = $exception->getMessage();
+            }
+        }
+        $this->render('evaluaciones_encuestas/moodle_import', [
+            'title' => 'Importar evaluación desde Moodle | e-talent',
+            'currentPage' => 'evaluation-surveys.assessments',
+            'backUrl' => route_url('evaluation-surveys.assessments'),
+            'errors' => $errors,
+            'result' => $result,
+        ]);
+    }
+
     public function form(): void
     {
         require_permission('manage_evaluation_surveys');
 
         $formId = !empty($_GET['sid']) ? request_secure_id('evaluation_survey_form') : 0;
         $requestedType = $this->requestedFormType();
+        $postedType = (string) ($_POST['form_type'] ?? $requestedType);
+        if ($postedType === 'survey' && !$this->isGlobalEvaluationAdmin()) {
+            platform_error(403, 'Las encuestas de satisfacción solo están disponibles para el administrador general.');
+        }
         $form = $formId > 0 ? $this->forms->findForm($formId) : null;
         if ($formId > 0 && !$form) {
             platform_error(404, 'Formulario no encontrado.', ['chips' => ['Evaluaciones']]);
@@ -572,7 +643,19 @@ final class EvaluationSurveyController extends Controller
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             verify_csrf();
             try {
-                $savedId = $this->forms->saveForm($formId, $_POST, (int) current_user()['id']);
+                $payload = $_POST;
+                if (is_company_admin_user()) {
+                    $payload['control_mode'] = 'off';
+                    $payload['audio_visual_upload_failure_policy'] = 'continue';
+                    $payload['audio_visual_interruption_policy'] = 'pause';
+                    $payload['audio_visual_voice_policy'] = 'warn';
+                    $payload['audio_visual_permission_policy'] = 'pause';
+                    $payload['audio_visual_quality_profile'] = 'economical';
+                    $payload['show_result_to_user'] = '0';
+                    $payload['show_correction_to_user'] = '0';
+                    $payload['result_display_mode'] = 'best_only';
+                }
+                $savedId = $this->forms->saveForm($formId, $payload, (int) current_user()['id']);
                 flash('success', 'Formulario guardado correctamente.');
                 redirect(route_url('evaluation-surveys.form.edit', $savedId));
             } catch (Throwable $exception) {
@@ -594,6 +677,7 @@ final class EvaluationSurveyController extends Controller
             'statuses' => EvaluationSurveyFormModel::FORM_STATUSES,
             'questionOrderModes' => EvaluationSurveyFormModel::QUESTION_ORDER_MODES,
             'questionTypes' => EvaluationSurveyFormModel::QUESTION_TYPES,
+            'isCompanyAdmin' => is_company_admin_user(),
         ]);
     }
 
@@ -790,8 +874,72 @@ final class EvaluationSurveyController extends Controller
             platform_error(404, 'Formulario no disponible.', ['chips' => ['Evaluaciones']]);
         }
         $userId = (int) current_user()['id'];
-        if (!has_permission('manage_evaluation_surveys') && !$this->attempts->isAssignedToUser($formId, $userId, $processId > 0 ? $processId : null)) {
+        $clientAssignment = null;
+        $isParticipant = !has_permission('manage_evaluation_surveys');
+        if ($isParticipant) {
+            $companyId = (int) (current_user()['company_id'] ?? 0);
+            $clientAssignment = (new TestProcessModel())->evaluationAssignmentForUser(
+                $formId,
+                $userId,
+                $companyId,
+                $processId > 0 ? $processId : null
+            );
+            if (!$clientAssignment) {
+                platform_error(403, 'No tienes esta evaluación asignada a un proceso válido.', ['chips' => ['Evaluación', 'Asignación']]);
+            }
+            $processId = (int) $clientAssignment['process_id'];
+            $effectiveAssignment = !empty($clientAssignment['process_policy_snapshot_at'])
+                ? $clientAssignment
+                : ProcessPrerequisiteService::resolve(array_merge($form, $clientAssignment));
+            $form = array_merge($form, $effectiveAssignment);
+        } elseif (!$this->attempts->isAssignedToUser($formId, $userId, $processId > 0 ? $processId : null)) {
             platform_error(403, 'No tienes esta evaluación asignada.', ['chips' => ['Evaluación', 'Asignación']]);
+        }
+
+        // Resolve the active attempt before validating the face proof. The proof
+        // is intentionally consumed when supervised_started succeeds; it must
+        // not be required again for answer, draft, or expiry POSTs belonging to
+        // that already-authorized in-progress attempt.
+        $activeAttempt = $isParticipant
+            ? $this->attempts->activeAttemptForUser($formId, $userId, $processId)
+            : null;
+
+        if ($isParticipant) {
+            $requestPath = route_url('evaluation-surveys.form.take', $formId) . '?process_id=' . $processId . ($qrMode ? '&qr=1' : '');
+            $faceAuthorizationKey = 'evaluation:' . $formId . ':' . $processId;
+            $proof = $_SESSION['assessment_face_authorizations'][$faceAuthorizationKey] ?? null;
+            $validProof = is_array($proof)
+                && (int) ($proof['user_id'] ?? 0) === $userId
+                && (int) ($proof['company_id'] ?? 0) === (int) (current_user()['company_id'] ?? 0)
+                && (string) ($proof['activity_type'] ?? '') === 'evaluation'
+                && (int) ($proof['activity_id'] ?? 0) === $formId
+                && (int) ($proof['process_id'] ?? 0) === $processId
+                && (int) ($proof['issued_at'] ?? 0) <= time()
+                && (time() - (int) ($proof['issued_at'] ?? 0)) <= 900;
+            $attemptAlreadyAuthorized = is_array($activeAttempt)
+                && (string) ($activeAttempt['status'] ?? '') === 'in_progress';
+            $assessmentIdentityVerified = $validProof || $attemptAlreadyAuthorized;
+        } else {
+            $assessmentIdentityVerified = true;
+        }
+
+        if ($isParticipant && !$activeAttempt) {
+            $companyId = (int) (current_user()['company_id'] ?? 0);
+            $componentReview = $companyId > 0 ? (new ComponentValidationModel())->latestForUser($userId, $companyId) : null;
+            $facialStatus = $companyId > 0 ? (new FacialRecognitionModel())->enrollmentStatusForUser($userId, $companyId) : null;
+            if (!ProcessPrerequisiteService::isReady(
+                $clientAssignment,
+                (string) ($componentReview['outcome'] ?? '') === 'passed',
+                $facialStatus === 'active'
+            )) {
+                $missing = ProcessPrerequisiteService::missingLabels(
+                    $clientAssignment,
+                    (string) ($componentReview['outcome'] ?? '') === 'passed',
+                    $facialStatus === 'active'
+                );
+                flash('warning', 'Antes de iniciar esta actividad debes ' . implode(' y ', $missing) . '.');
+                redirect(route_url('my-tests'));
+            }
         }
         $processAvailability = $processId > 0
             ? $this->testSessions->availabilityForProcess($processId)
@@ -802,12 +950,17 @@ final class EvaluationSurveyController extends Controller
                 redirect(route_url('my-tests'));
             }
         }
-        $ownerResultHidden = !$this->isAdministrativeEvaluationViewer()
-            && (string) ($form['form_type'] ?? '') !== 'survey'
-            && (int) ($form['show_result_to_user'] ?? 0) !== 1;
+        // Las respuestas y resultados de una evaluación son de consulta administrativa.
+        // La configuración histórica show_result_to_user no debe exponerlos al participante.
+        $ownerResultHidden = !$this->isAdministrativeEvaluationViewer();
 
         try {
-            $attempt = $this->attempts->startAttempt($form, $userId, $processId > 0 ? $processId : null, $_SERVER['REQUEST_METHOD'] !== 'POST');
+            // Los participantes siempre pasan por `preparing`, incluso si la
+            // actividad no usa supervisión audiovisual. Solo el evento
+            // `supervised_started`, emitido al confirmar el último paso del
+            // wizard, puede activar el intento y su temporizador.
+            $attempt = $this->attempts->startAttempt($form, $userId, $processId > 0 ? $processId : null, $_SERVER['REQUEST_METHOD'] !== 'POST', $isParticipant);
+            if ($isParticipant && (string) ($attempt['status'] ?? '') === 'in_progress') unset($_SESSION['assessment_face_authorizations'][$faceAuthorizationKey]);
         } catch (Throwable $exception) {
             $message = $exception instanceof PDOException
                 ? 'No se pudo iniciar la evaluación. Inténtalo nuevamente.'
@@ -815,7 +968,8 @@ final class EvaluationSurveyController extends Controller
             flash('warning', $message);
             redirect(route_url('evaluation-surveys.assessments'));
         }
-        if ((string) ($attempt['control_mode'] ?? '') !== 'supervised_audio_visual') {
+        if ((string) ($attempt['status'] ?? '') === 'in_progress'
+            && (string) ($attempt['control_mode'] ?? '') !== 'supervised_audio_visual') {
             $this->control->record($attempt, 'attempt_opened');
         }
 
@@ -826,7 +980,7 @@ final class EvaluationSurveyController extends Controller
                 $this->control->record($attempt, 'attempt_expired');
             }
         }
-        if ($_SERVER['REQUEST_METHOD'] !== 'POST' && ($attempt['status'] ?? '') !== 'in_progress') {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST' && !in_array((string) ($attempt['status'] ?? ''), ['in_progress', 'preparing'], true)) {
             $resultUrl = $ownerResultHidden
                 ? route_url('my-tests')
                 : route_url('evaluation-surveys.attempt.result', (int) $attempt['id']) . $qrResultQuery;
@@ -841,6 +995,23 @@ final class EvaluationSurveyController extends Controller
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             verify_csrf();
+            if ((string) ($attempt['status'] ?? '') !== 'in_progress') {
+                if (in_array((string) ($attempt['status'] ?? ''), ['completed', 'expired'], true) && $this->isAjaxRequest()) {
+                    $retryAnswers = is_array($_POST['answers'] ?? null) ? $_POST['answers'] : [];
+                    $retryVerification = $this->attempts->verifyAnswersForAttempt((int) $attempt['id'], $questions, $retryAnswers);
+                    $retryEvent = (string) $attempt['status'] === 'expired' ? 'attempt_expired' : 'attempt_completed';
+                    $retryActivityRecorded = $this->control->hasEvent((int) $attempt['id'], $retryEvent);
+                    if ($retryVerification['verified'] && $retryActivityRecorded) {
+                        $resultUrl = $ownerResultHidden ? route_url('my-tests') : route_url('evaluation-surveys.attempt.result', (int) $attempt['id']) . $qrResultQuery;
+                        $payload = ['ok' => true, 'answers_saved' => true, 'answers_verified' => true, 'answers_saved_count' => $retryVerification['answered_count'], 'activity_recorded' => true, 'final_status' => $attempt['status'], 'redirect_url' => $resultUrl];
+                        if (!$ownerResultHidden) { $payload['drawer_url'] = route_url('evaluation-surveys.attempt.result', (int) $attempt['id']) . '?drawer=1' . ($qrMode ? '&qr=1' : ''); $payload['drawer_title'] = $form['form_type'] === 'survey' ? 'Encuesta enviada' : 'Resultado evaluación'; $payload['drawer_size'] = 'lg'; }
+                        $this->jsonResponse($payload);
+                        return;
+                    }
+                }
+                $this->jsonResponse(['ok' => false, 'message' => 'Completa la validación previa antes de responder.'], 409);
+                return;
+            }
             $answers = is_array($_POST['answers'] ?? null) ? $_POST['answers'] : [];
             $action = (string) ($_POST['evaluation_survey_action'] ?? 'complete');
 
@@ -852,17 +1023,24 @@ final class EvaluationSurveyController extends Controller
                 && empty($processAvailability['allowed'])
                 && in_array((string) ($processAvailability['reason'] ?? ''), ['process_ended', 'closed_now', 'process_not_active'], true);
             if ($processEnded || $action === 'process_expired') {
-                $attempt = $this->attempts->completeAttempt($form, $attempt, $questions, $answers, 'expired');
-                $this->control->record($attempt, 'attempt_expired', [
+                $this->attempts->saveDraft((int) $attempt['id'], $questions, $answers);
+                $answerVerification = $this->attempts->verifyAnswersForAttempt((int) $attempt['id'], $questions, $answers);
+                $activityRecorded = $this->control->record($attempt, 'attempt_expired', [
                     'reason' => 'process_deadline',
                     'process_reason' => (string) ($processAvailability['reason'] ?? 'process_ended'),
+                    'answered_count' => $answerVerification['answered_count'],
                 ]);
-                $resultUrl = $ownerResultHidden ? route_url('my-tests') : route_url('evaluation-surveys.attempt.result', (int) $attempt['id']) . '?drawer=1' . ($qrMode ? '&qr=1' : '');
+                if (($attempt['control_mode'] ?? 'off') === 'supervised_audio_visual' && (!$answerVerification['verified'] || !$activityRecorded)) {
+                    $this->jsonResponse(['ok' => false, 'reason' => !$answerVerification['verified'] ? 'answer_persistence_unverified' : 'activity_persistence_unavailable', 'message' => 'No se pudo confirmar el guardado de todas las respuestas y la actividad de cierre.'], 503);
+                    return;
+                }
+                $attempt = $this->attempts->completeAttempt($form, $attempt, $questions, $answers, 'expired');
+                $resultUrl = $ownerResultHidden ? route_url('my-tests') : route_url('evaluation-surveys.attempt.result', (int) $attempt['id']) . $qrResultQuery;
                 $message = 'El proceso ha finalizado. Se guardarán tus respuestas y la evidencia audiovisual antes de cerrar.';
                 if ($this->isAjaxRequest()) {
-                    $payload = ['ok' => true, 'process_expired' => true, 'message' => $message, 'redirect_url' => $resultUrl];
+                    $payload = ['ok' => true, 'process_expired' => true, 'answers_saved' => true, 'answers_verified' => true, 'answers_saved_count' => $answerVerification['answered_count'], 'activity_recorded' => $activityRecorded, 'final_status' => 'expired', 'message' => $message, 'redirect_url' => $resultUrl];
                     if (!$ownerResultHidden) {
-                        $payload['drawer_url'] = $resultUrl;
+                        $payload['drawer_url'] = route_url('evaluation-surveys.attempt.result', (int) $attempt['id']) . '?drawer=1' . ($qrMode ? '&qr=1' : '');
                         $payload['drawer_title'] = $form['form_type'] === 'survey' ? 'Encuesta enviada' : 'Resultado evaluación';
                         $payload['drawer_size'] = 'lg';
                     }
@@ -874,23 +1052,41 @@ final class EvaluationSurveyController extends Controller
             }
 
             if ($action === 'abandon') {
+                $this->attempts->saveDraft((int) $attempt['id'], $questions, $answers);
+                $answerVerification = $this->attempts->verifyAnswersForAttempt((int) $attempt['id'], $questions, $answers);
+                $activityRecorded = $this->control->record($attempt, 'attempt_expired', ['reason' => 'user_left_before_completion', 'answered_count' => $answerVerification['answered_count']]);
+                if (($attempt['control_mode'] ?? 'off') === 'supervised_audio_visual' && (!$answerVerification['verified'] || !$activityRecorded)) {
+                    $this->jsonResponse(['ok' => false, 'reason' => !$answerVerification['verified'] ? 'answer_persistence_unverified' : 'activity_persistence_unavailable', 'message' => 'No se pudo confirmar el guardado de todas las respuestas y la actividad.'], 503);
+                    return;
+                }
                 $attempt = $this->attempts->completeAttempt($form, $attempt, $questions, $answers, 'expired');
-                $this->control->record($attempt, 'attempt_expired', ['reason' => 'user_left_before_completion']);
-                $this->jsonResponse(['ok' => true, 'message' => 'La evaluación fue cerrada.']);
+                $this->jsonResponse(['ok' => true, 'answers_saved' => true, 'answers_verified' => true, 'answers_saved_count' => $answerVerification['answered_count'], 'activity_recorded' => $activityRecorded, 'final_status' => 'expired', 'message' => 'La evaluación fue cerrada.']);
                 return;
             }
 
             if ($remainingSeconds !== null && $remainingSeconds <= 0) {
+                $this->attempts->saveDraft((int) $attempt['id'], $questions, $answers);
+                $answerVerification = $this->attempts->verifyAnswersForAttempt((int) $attempt['id'], $questions, $answers);
+                $activityRecorded = $this->control->record($attempt, 'attempt_expired', ['reason' => 'time_limit', 'answered_count' => $answerVerification['answered_count']]);
+                if (($attempt['control_mode'] ?? 'off') === 'supervised_audio_visual' && (!$answerVerification['verified'] || !$activityRecorded)) {
+                    $this->jsonResponse(['ok' => false, 'reason' => !$answerVerification['verified'] ? 'answer_persistence_unverified' : 'activity_persistence_unavailable', 'message' => 'No se pudo confirmar el guardado de todas las respuestas y la actividad de vencimiento.'], 503);
+                    return;
+                }
                 $attempt = $this->attempts->completeAttempt($form, $attempt, $questions, $answers, 'expired');
                 if ($this->isAjaxRequest()) {
-                    $resultUrl = $ownerResultHidden ? route_url('my-tests') : route_url('evaluation-surveys.attempt.result', (int) $attempt['id']) . '?drawer=1' . ($qrMode ? '&qr=1' : '');
+                    $resultUrl = $ownerResultHidden ? route_url('my-tests') : route_url('evaluation-surveys.attempt.result', (int) $attempt['id']) . $qrResultQuery;
                     $payload = [
                         'ok' => true,
+                        'answers_saved' => true,
+                        'answers_verified' => true,
+                        'answers_saved_count' => $answerVerification['answered_count'],
+                        'activity_recorded' => $activityRecorded,
+                        'final_status' => 'expired',
                         'message' => (string) $this->testSettings->evaluationMessages()['expired_message'],
                         'redirect_url' => $resultUrl,
                     ];
                     if (!$ownerResultHidden) {
-                        $payload['drawer_url'] = $resultUrl;
+                        $payload['drawer_url'] = route_url('evaluation-surveys.attempt.result', (int) $attempt['id']) . '?drawer=1' . ($qrMode ? '&qr=1' : '');
                         $payload['drawer_title'] = $form['form_type'] === 'survey' ? 'Encuesta enviada' : 'Resultado evaluación';
                         $payload['drawer_size'] = 'lg';
                     }
@@ -918,31 +1114,47 @@ final class EvaluationSurveyController extends Controller
             }
 
             if ($action === 'complete_incomplete') {
+                $this->attempts->saveDraft((int) $attempt['id'], $questions, $answers);
+                $answerVerification = $this->attempts->verifyAnswersForAttempt((int) $attempt['id'], $questions, $answers);
+                $activityRecorded = $this->control->record($attempt, 'attempt_completed', ['status' => 'completed', 'incomplete' => true, 'answered_count' => $answerVerification['answered_count']]);
+                if (($attempt['control_mode'] ?? 'off') === 'supervised_audio_visual' && (!$answerVerification['verified'] || !$activityRecorded)) {
+                    $this->jsonResponse(['ok' => false, 'reason' => !$answerVerification['verified'] ? 'answer_persistence_unverified' : 'activity_persistence_unavailable', 'message' => 'No se pudo confirmar el guardado de todas las respuestas y la actividad. La evidencia no se finalizará; solicita asistencia.'], 503);
+                    return;
+                }
                 $attempt = $this->attempts->completeAttempt($form, $attempt, $questions, $answers, 'completed');
-                $this->control->record($attempt, 'attempt_completed', ['status' => 'completed', 'incomplete' => true]);
                 if ($this->isAjaxRequest()) {
-                    $resultUrl = $ownerResultHidden ? route_url('my-tests') : route_url('evaluation-surveys.attempt.result', (int) $attempt['id']) . '?drawer=1' . ($qrMode ? '&qr=1' : '');
-                    $payload = ['ok' => true, 'message' => 'Sus respuestas han sido guardadas con éxito.', 'redirect_url' => $resultUrl];
-                    if (!$ownerResultHidden) { $payload['drawer_url'] = $resultUrl; $payload['drawer_title'] = $form['form_type'] === 'survey' ? 'Encuesta enviada' : 'Resultado evaluacion'; $payload['drawer_size'] = 'lg'; }
+                    $resultUrl = $ownerResultHidden ? route_url('my-tests') : route_url('evaluation-surveys.attempt.result', (int) $attempt['id']) . $qrResultQuery;
+                    $payload = ['ok' => true, 'answers_saved' => true, 'answers_verified' => true, 'answers_saved_count' => $answerVerification['answered_count'], 'activity_recorded' => $activityRecorded, 'message' => 'Sus respuestas y el registro de actividad han sido guardados con éxito.', 'redirect_url' => $resultUrl];
+                    if (!$ownerResultHidden) { $payload['drawer_url'] = route_url('evaluation-surveys.attempt.result', (int) $attempt['id']) . '?drawer=1' . ($qrMode ? '&qr=1' : ''); $payload['drawer_title'] = $form['form_type'] === 'survey' ? 'Encuesta enviada' : 'Resultado evaluacion'; $payload['drawer_size'] = 'lg'; }
                     $this->jsonResponse($payload);
                     return;
                 }
                 flash('success', 'Sus respuestas han sido guardadas con éxito.');
                 redirect($ownerResultHidden ? route_url('my-tests') : route_url('evaluation-surveys.attempt.result', (int) $attempt['id']) . $qrResultQuery);
             }
+            $this->attempts->saveDraft((int) $attempt['id'], $questions, $answers);
+            $answerVerification = $this->attempts->verifyAnswersForAttempt((int) $attempt['id'], $questions, $answers);
+            $activityRecorded = $this->control->record($attempt, 'attempt_completed', ['status' => $attempt['status'] ?? 'completed', 'answered_count' => $answerVerification['answered_count']]);
+            if (($attempt['control_mode'] ?? 'off') === 'supervised_audio_visual' && (!$answerVerification['verified'] || !$activityRecorded)) {
+                $this->jsonResponse(['ok' => false, 'reason' => !$answerVerification['verified'] ? 'answer_persistence_unverified' : 'activity_persistence_unavailable', 'message' => 'No se pudo confirmar el guardado de todas las respuestas y la actividad. La evidencia no se finalizará; solicita asistencia.'], 503);
+                return;
+            }
             $attempt = $this->attempts->completeAttempt($form, $attempt, $questions, $answers);
-            $this->control->record($attempt, 'attempt_completed', ['status' => $attempt['status'] ?? 'completed']);
             if ($this->isAjaxRequest()) {
                     $resultUrl = $ownerResultHidden
                         ? route_url('my-tests')
-                        : route_url('evaluation-surveys.attempt.result', (int) $attempt['id']) . '?drawer=1' . ($qrMode ? '&qr=1' : '');
+                        : route_url('evaluation-surveys.attempt.result', (int) $attempt['id']) . $qrResultQuery;
                     $payload = [
                         'ok' => true,
-                        'message' => 'Sus respuestas han sido guardadas con éxito.',
+                        'answers_saved' => true,
+                        'answers_verified' => true,
+                        'answers_saved_count' => $answerVerification['answered_count'],
+                        'activity_recorded' => $activityRecorded,
+                        'message' => 'Sus respuestas y el registro de actividad han sido guardados con éxito.',
                         'redirect_url' => $resultUrl,
                     ];
                     if (!$ownerResultHidden) {
-                        $payload['drawer_url'] = $resultUrl;
+                        $payload['drawer_url'] = route_url('evaluation-surveys.attempt.result', (int) $attempt['id']) . '?drawer=1' . ($qrMode ? '&qr=1' : '');
                         $payload['drawer_title'] = $form['form_type'] === 'survey' ? 'Encuesta enviada' : 'Resultado evaluación';
                         $payload['drawer_size'] = 'lg';
                     }
@@ -973,6 +1185,11 @@ final class EvaluationSurveyController extends Controller
             'mediaFinalizeUrl' => route_url('evaluation-surveys.attempt.media.finalize', (int) $attempt['id']),
             'mediaRiskUrl' => route_url('evaluation-surveys.attempt.media.risk', (int) $attempt['id']),
             'mediaFailureUrl' => route_url('evaluation-surveys.attempt.media.failure', (int) $attempt['id']),
+            'assessmentIdentityVerified' => $assessmentIdentityVerified,
+            'assessmentEntryFlow' => $isParticipant && (string) ($attempt['status'] ?? '') === 'preparing',
+            'assessmentUserId' => $userId,
+            'assessmentReturnTo' => $requestPath,
+            'assessmentFaceSettings' => (new FacialRecognitionService())->settings(),
         ];
         $this->render('evaluaciones_encuestas/take', $takeData, 'app');
     }
@@ -983,18 +1200,23 @@ final class EvaluationSurveyController extends Controller
         $isDrawer = (string) ($_GET['drawer'] ?? '') === '1' || (string) ($_GET['partial'] ?? '') === 'drawer';
         $attemptId = request_secure_id('evaluation_survey_attempt');
         $userId = (int) current_user()['id'];
-        $attempt = $this->attempts->findAttempt($attemptId);
+        $isCompanyAdmin = is_company_admin_user();
+        $companyId = (int) (current_user()['company_id'] ?? 0);
+        $attempt = $isCompanyAdmin
+            ? $this->attempts->findAttemptForCompany($attemptId, $companyId)
+            : $this->attempts->findAttempt($attemptId);
 
         if (!$attempt) {
             platform_error(404, 'Resultado no encontrado.', ['chips' => ['Evaluaciones']]);
         }
-        $form = $this->forms->findForm((int) $attempt['form_id']);
+        $form = $isCompanyAdmin
+            ? $this->forms->findFormForCompany((int) $attempt['form_id'], $companyId)
+            : $this->forms->findForm((int) $attempt['form_id']);
         if (!$form) {
             platform_error(404, 'Formulario del resultado no encontrado.', ['chips' => ['Evaluaciones']]);
         }
         $isAdministrativeViewer = $this->isAdministrativeEvaluationViewer();
         $isOwner = (int) ($attempt['user_id'] ?? 0) === $userId;
-        $ownerCanView = $isOwner && ((string) ($form['form_type'] ?? '') === 'survey' || (int) ($form['show_result_to_user'] ?? 0) === 1);
         if (!$isAdministrativeViewer && !$isOwner) {
             platform_error(403, 'No tienes permiso para ver este resultado.', ['chips' => ['Evaluación', 'Resultado']]);
         }
@@ -1008,7 +1230,12 @@ final class EvaluationSurveyController extends Controller
         $screenCaptures = $this->mediaEvidence->screenCapturesForAttempt($attemptId);
 
         if ($form && $resultDisplayMode === 'collapsible_attempts') {
-            $finishedAttempts = $this->attempts->finishedAttemptsForFormUser((int) $form['id'], (int) $attempt['user_id'], (int) ($attempt['process_id'] ?? 0));
+            $finishedAttempts = $this->attempts->finishedAttemptsForFormUser(
+                (int) $form['id'],
+                (int) $attempt['user_id'],
+                (int) ($attempt['process_id'] ?? 0),
+                $isCompanyAdmin ? $companyId : null
+            );
             foreach ($finishedAttempts as $finishedAttempt) {
                 $finishedAttemptId = (int) $finishedAttempt['id'];
                 $resultAttemptDetails[] = [
@@ -1032,7 +1259,8 @@ final class EvaluationSurveyController extends Controller
             'mediaEvidence' => $mediaEvidence,
             'audioVisualRisks' => $audioVisualRisks,
             'screenCaptures' => $screenCaptures,
-            'resultsVisible' => $isAdministrativeViewer || $ownerCanView,
+            'isAdministrativeViewer' => $isAdministrativeViewer,
+            'resultsVisible' => $isAdministrativeViewer,
         ];
         $this->render('evaluaciones_encuestas/result', $resultData, $isDrawer ? null : 'app');
     }
@@ -1101,7 +1329,7 @@ final class EvaluationSurveyController extends Controller
             || has_permission('manage_company_processes')
             || has_permission('view_company_results')
             || has_permission('view_process_results')
-            || is_general_admin();
+            || $this->isGlobalEvaluationAdmin();
     }
 
     private function isAjaxRequest(): bool
@@ -1139,7 +1367,7 @@ final class EvaluationSurveyController extends Controller
             $this->jsonResponse(['ok' => false, 'message' => 'Evento no permitido.'], 422);
             return;
         }
-        if ((string) ($attempt['control_mode'] ?? '') === 'supervised_audio_visual' && $eventType !== 'supervised_started') {
+        if ((string) ($attempt['control_mode'] ?? '') === 'supervised_audio_visual' && !in_array($eventType, ['supervised_started', 'audio_visual_consent_accepted'], true)) {
             $started = false;
             foreach ($this->control->eventsForAttempt($attemptId) as $event) {
                 if ((string) ($event['event_type'] ?? '') === 'supervised_started') { $started = true; break; }
@@ -1151,15 +1379,62 @@ final class EvaluationSurveyController extends Controller
             }
         }
         if ($eventType === 'supervised_started') {
+            if ((string) ($attempt['status'] ?? '') === 'preparing') {
+                $proofKey = 'evaluation:' . (int) ($attempt['form_id'] ?? 0) . ':' . (int) ($attempt['process_id'] ?? 0);
+                $proof = $_SESSION['assessment_face_authorizations'][$proofKey] ?? null;
+                if (!is_array($proof) || (int) ($proof['user_id'] ?? 0) !== (int) current_user()['id']
+                    || (int) ($proof['company_id'] ?? 0) !== (int) (current_user()['company_id'] ?? 0)
+                    || (string) ($proof['activity_type'] ?? '') !== 'evaluation'
+                    || (int) ($proof['activity_id'] ?? 0) !== (int) ($attempt['form_id'] ?? 0)
+                    || (int) ($proof['process_id'] ?? 0) !== (int) ($attempt['process_id'] ?? 0)
+                    || (int) ($proof['issued_at'] ?? 0) > time()
+                    || (time() - (int) ($proof['issued_at'] ?? 0)) > 900) {
+                    $this->jsonResponse(['ok' => false, 'message' => 'Debes verificar tu identidad facial antes de iniciar.'], 403); return;
+                }
+                $processId = max(0, (int) ($attempt['process_id'] ?? 0));
+                if ($processId > 0) {
+                    $availability = $this->testSessions->availabilityForProcess($processId);
+                    if (empty($availability['allowed'])) {
+                        $this->jsonResponse(['ok' => false, 'message' => (string) ($availability['message'] ?? 'El proceso ya no está disponible.')], 409);
+                        return;
+                    }
+                }
+                $companyId = (int) (current_user()['company_id'] ?? 0);
+                $componentReview = $companyId > 0 ? (new ComponentValidationModel())->latestForUser((int) current_user()['id'], $companyId) : null;
+                $facialStatus = $companyId > 0 ? (new FacialRecognitionModel())->enrollmentStatusForUser((int) current_user()['id'], $companyId) : null;
+                $prerequisiteSnapshot = [
+                    'component_validation_required' => (int) ($attempt['process_component_validation_required'] ?? 0),
+                    'require_facial_enrollment' => (int) ($attempt['process_facial_enrollment_required'] ?? 0),
+                ];
+                if (!ProcessPrerequisiteService::isReady($prerequisiteSnapshot, (string) ($componentReview['outcome'] ?? '') === 'passed', $facialStatus === 'active')) {
+                    $this->jsonResponse(['ok' => false, 'message' => 'No se cumplen los requisitos de componentes o enrolamiento del proceso.'], 409);
+                    return;
+                }
+                if ((string) ($attempt['control_mode'] ?? '') === 'supervised_audio_visual') {
+                    $evidenceId = max(0, (int) ($metadata['evidence_id'] ?? 0));
+                    $evidence = $this->mediaEvidence->evidenceForAttempt($attemptId);
+                    if ($evidenceId <= 0 || !$evidence || (int) ($evidence['id'] ?? 0) !== $evidenceId
+                        || empty($evidence['consented_at']) || (string) ($evidence['status'] ?? '') !== 'recording') {
+                        $this->jsonResponse(['ok' => false, 'message' => 'Acepta y autoriza los componentes audiovisuales antes de iniciar.'], 409);
+                        return;
+                    }
+                }
+            }
             $form = $this->forms->findForm((int) ($attempt['form_id'] ?? 0));
             if ($form) {
                 $attempt = $this->attempts->activateTimer($attempt, $form);
             }
-            if ((string) ($attempt['control_mode'] ?? '') === 'supervised_audio_visual') {
-                $evidenceId = max(0, (int) ($metadata['evidence_id'] ?? 0));
-                if ($evidenceId > 0) {
-                    $this->mediaEvidence->markRecordingStarted($attemptId, (int) current_user()['id'], $evidenceId);
-                }
+            if ((string) ($attempt['status'] ?? '') !== 'in_progress') {
+                $this->jsonResponse(['ok' => false, 'message' => 'No se pudo activar el intento supervisado.'], 409);
+                return;
+            }
+            if (!empty($proofKey)) unset($_SESSION['assessment_face_authorizations'][$proofKey]);
+        }
+        if ($eventType === 'audio_visual_recording_started') {
+            $evidenceId = max(0, (int) ($metadata['evidence_id'] ?? 0));
+            if ($evidenceId <= 0 || !$this->mediaEvidence->markRecordingStarted($attemptId, (int) current_user()['id'], $evidenceId)) {
+                $this->jsonResponse(['ok' => false, 'message' => 'No se pudo registrar el inicio de la grabación.'], 409);
+                return;
             }
         }
         $this->control->record($attempt, $eventType, $metadata, (int) ($_POST['question_id'] ?? 0));
@@ -1174,6 +1449,14 @@ final class EvaluationSurveyController extends Controller
         $attemptId = request_secure_id('evaluation_survey_attempt');
         $result = $this->mediaEvidence->setConsent($attemptId, (int) current_user()['id'], (string) ($_POST['consented'] ?? '0') === '1');
         if (!empty($result['ok'])) {
+            $attempt = $this->mediaEvidence->attempt($attemptId, (int) current_user()['id']);
+            if ($attempt) {
+                $this->control->record($attempt, 'audio_visual_consent_accepted', [
+                    'source' => 'media_init',
+                    'video_and_microphone' => true,
+                    'screen_capture' => true,
+                ]);
+            }
             $_SESSION['evaluation_survey_media_operational'][(string) ($result['evidence_id'] ?? 0)] = $operationalSettings;
         }
         $this->jsonResponse($result, !empty($result['ok']) ? 200 : 422);
@@ -1265,10 +1548,21 @@ final class EvaluationSurveyController extends Controller
 
     public function mediaScreenshotFile(): void
     {
-        require_permission('manage_evaluation_surveys');
-        $attemptId = request_secure_id('evaluation_survey_attempt'); $captureId = max(0, (int) ($_GET['capture_id'] ?? 0));
+        require_auth();
+        if (!$this->isAdministrativeEvaluationViewer()) {
+            platform_error(403, 'No tienes permiso para consultar la evidencia audiovisual.');
+        }
+        $attemptId = request_secure_id('evaluation_survey_attempt');
+        $viewer = current_user();
+        $attempt = $this->isGlobalEvaluationAdmin()
+            ? $this->attempts->findAttempt($attemptId)
+            : $this->attempts->findAttemptForCompany($attemptId, (int) ($viewer['company_id'] ?? 0));
+        if (!$attempt) {
+            platform_error(404, 'Captura no disponible.');
+        }
+        $captureId = max(0, (int) ($_GET['capture_id'] ?? 0));
         $file = $this->mediaEvidence->screenCaptureFile($attemptId, $captureId); if (!$file) { platform_error(404, 'Captura no disponible.'); }
-        $this->mediaEvidence->auditScreenCaptureAccess($attemptId, $captureId, (int) current_user()['id']);
+        $this->mediaEvidence->auditScreenCaptureAccess($attemptId, $captureId, (int) $viewer['id']);
         header('Content-Type: ' . $file['mime_type']); header('Content-Length: ' . (string) $file['size']); header('Content-Disposition: inline; filename="captura-' . $captureId . '.jpg"'); header('Cache-Control: private, no-store'); readfile($file['path']); exit;
     }
 
@@ -1298,5 +1592,26 @@ final class EvaluationSurveyController extends Controller
         $attemptId = request_secure_id('evaluation_survey_attempt');
         $this->mediaEvidence->assemblePartial($attemptId, (int) current_user()['id']);
         redirect(route_url('evaluation-surveys.attempt.result', $attemptId));
+    }
+
+    public function questionMedia(): void
+    {
+        require_auth();
+        $mediaId = request_secure_id('evaluation_survey_question_media');
+        $db = database('evaluaciones_encuestas');
+        $media = $db->fetch('SELECT m.*, q.form_id FROM evaluation_survey_question_media m JOIN evaluation_survey_questions q ON q.id=m.question_id WHERE m.id=? LIMIT 1', [$mediaId]);
+        if (!$media) platform_error(404, 'Audio no disponible.');
+        $form = $this->forms->findForm((int) $media['form_id']);
+        if (!$form) platform_error(404, 'Audio no disponible.');
+        $relative = ltrim(str_replace('..', '', (string) $media['storage_key']), '/');
+        $root = realpath(BASE_PATH . '/storage/evaluation-question-media');
+        $file = $root ? realpath($root . '/' . $relative) : false;
+        if ($root === false || $file === false || strpos($file, $root . DIRECTORY_SEPARATOR) !== 0 || !is_file($file)) platform_error(404, 'Audio no disponible.');
+        header('Content-Type: ' . (string) $media['mime_type']);
+        header('Content-Length: ' . (string) filesize($file));
+        header('Content-Disposition: inline; filename="' . rawurlencode((string) $media['original_name']) . '"');
+        header('Cache-Control: private, no-store');
+        readfile($file);
+        exit;
     }
 }

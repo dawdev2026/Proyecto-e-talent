@@ -2,9 +2,14 @@
 $evaluationMessages = array_merge(TestSettingsModel::DEFAULTS, $evaluationMessages ?? []);
 $pendingAutoStartSession = is_array($pendingAutoStartSession ?? null) ? $pendingAutoStartSession : null;
 $pendingAutoStartSessionId = $pendingAutoStartSession ? (int) ($pendingAutoStartSession['id'] ?? 0) : 0;
-$assignedTestsFinalized = (bool) ($assignedTestsFinalized ?? false);
+$assignedActivitiesCompleted = (bool) ($assignedActivitiesCompleted ?? false);
 $interviewAppointments = is_array($interviewAppointments ?? null) ? $interviewAppointments : [];
 $evaluationAssignments = is_array($evaluationAssignments ?? null) ? $evaluationAssignments : [];
+$componentValidationPassed = (bool) ($componentValidationPassed ?? false);
+$facialEnrollmentActive = (bool) ($facialEnrollmentActive ?? false);
+$activityPrerequisitesReady = static function (array $activity) use ($componentValidationPassed, $facialEnrollmentActive): bool {
+    return ProcessPrerequisiteService::isReady($activity, $componentValidationPassed, $facialEnrollmentActive);
+};
 $statusLabels = [
     'assigned' => 'Asignada',
     'in_progress' => 'En curso',
@@ -33,12 +38,38 @@ if (!function_exists('test_entry_instructions_html')) {
         return '<p>' . nl2br(e($instructions)) . '</p>';
     }
 }
+
+$renderProcessPrerequisites = static function (array $activity) use ($componentValidationPassed, $facialEnrollmentActive): void {
+    $requirements = ProcessPrerequisiteService::requirements($activity);
+    $componentRequired = $requirements['component_required'];
+    $facialRequired = $requirements['facial_required'];
+    if (!$componentRequired && !$facialRequired) return;
+    ?>
+    <div class="d-flex flex-wrap gap-2 mt-2">
+        <?php if ($componentRequired): ?>
+            <?php if ($componentValidationPassed): ?>
+                <span class="badge text-bg-success"><i class="bi bi-check-circle me-1" aria-hidden="true"></i>Última revisión registrada: aprobada</span>
+            <?php else: ?>
+                <span class="badge text-bg-warning"><i class="bi bi-pc-display me-1" aria-hidden="true"></i>Revisión de componentes pendiente</span>
+            <?php endif; ?>
+            <a class="badge text-bg-light border text-decoration-none" href="<?= e(route_url('component-validation.review')) ?>"><i class="bi bi-arrow-repeat me-1" aria-hidden="true"></i>Revisar este equipo</a>
+        <?php endif; ?>
+        <?php if ($facialRequired): ?>
+            <?php if ($facialEnrollmentActive): ?>
+                <span class="badge text-bg-success"><i class="bi bi-person-check me-1" aria-hidden="true"></i>Usuario enrolado</span>
+            <?php else: ?>
+                <a class="badge text-bg-warning text-decoration-none" href="<?= e(route_url('facial-recognition.enroll')) ?>"><i class="bi bi-person-plus me-1" aria-hidden="true"></i>Enrolar mi identidad</a>
+            <?php endif; ?>
+        <?php endif; ?>
+    </div>
+    <?php
+};
 ?>
 <section class="page-header">
     <div>
         <p class="text-uppercase text-primary fw-bold small mb-1">Evaluaciones</p>
-        <h1 class="fw-bold mb-1">Mis evaluaciones</h1>
-        <p class="text-muted mb-0">Pruebas asignadas para responder o revisar resultados demo.</p>
+        <h1 class="fw-bold mb-1">Evaluaciones Pendientes a Realizar</h1>
+        <p class="text-muted mb-0">Pruebas asignadas que están disponibles o en curso. <?= status_help_button('Estados de la actividad', "• Asignada / Pendiente: fue asignada y aún no se ha abierto.\n• En curso: hay un intento abierto; puede tener cero respuestas y no representa por sí solo avance respondido.\n• Con respuestas: existe al menos una respuesta no vacía guardada; es una métrica, no un estado del intento.\n• Completada: se envió explícitamente, incluso si no contiene respuestas.\n• Expirada: venció el plazo sin entrega; se informa aparte y no cuenta como completada.\n• Cancelada: la asignación se retiró y se excluye de los totales activos.") ?></p>
     </div>
     <div class="server-clock-card" data-server-clock="<?= $serverNow ?>" data-server-offset="<?= (int) date('Z', $serverNow) ?>">
         <span><i class="bi bi-clock-history"></i> Hora servidor</span>
@@ -46,7 +77,69 @@ if (!function_exists('test_entry_instructions_html')) {
     </div>
 </section>
 
+<?php
+$pendingPrerequisites = [];
+$hasComponentRequirement = false;
+$hasFacialRequirement = false;
+foreach (array_merge($sessions, $evaluationAssignments) as $assignedActivity) {
+    $requirements = ProcessPrerequisiteService::requirements($assignedActivity);
+    $hasComponentRequirement = $hasComponentRequirement || ($requirements['component_required'] && !$componentValidationPassed);
+    $hasFacialRequirement = $hasFacialRequirement || ($requirements['facial_required'] && !$facialEnrollmentActive);
+}
+if ($hasComponentRequirement) {
+    $pendingPrerequisites[] = [
+        'title' => 'Revisar y verificar los componentes',
+        'description' => 'Comprueba que este equipo cumple las condiciones técnicas requeridas por el proceso.',
+        'route' => route_url('component-validation.review'),
+        'label' => 'Revisar componentes',
+        'icon' => 'bi-pc-display',
+    ];
+}
+if ($hasFacialRequirement) {
+    $pendingPrerequisites[] = [
+        'title' => 'Enrolar mi identidad facial',
+        'description' => 'Registra tu identidad facial para que el proceso pueda verificarte antes de comenzar.',
+        'route' => route_url('facial-recognition.enroll'),
+        'label' => 'Enrolar mi identidad',
+        'icon' => 'bi-person-plus',
+    ];
+}
+?>
+<?php if ($pendingPrerequisites): ?>
+    <section class="card content-panel border-warning mb-4" role="alert" aria-labelledby="pending-prerequisites-title">
+        <div class="d-flex flex-wrap align-items-start gap-3">
+            <div class="rounded-circle bg-warning-subtle text-warning-emphasis p-3" aria-hidden="true"><i class="bi bi-shield-exclamation fs-4"></i></div>
+            <div class="flex-grow-1">
+                <p class="text-uppercase text-warning-emphasis fw-bold small mb-1">Antes de responder</p>
+                <h2 id="pending-prerequisites-title" class="h4 fw-bold mb-2">Completa estos pasos para acceder a tus evaluaciones</h2>
+                <p class="text-muted mb-3">El proceso seleccionó requisitos de seguridad para estas actividades. Cuando termines, podrás responder la evaluación y el test asignados.</p>
+                <div class="row g-3">
+                    <?php foreach ($pendingPrerequisites as $index => $prerequisite): ?>
+                        <div class="col-12 col-lg-6">
+                            <div class="border rounded-3 p-3 h-100 bg-light-subtle">
+                                <div class="d-flex gap-2 align-items-start">
+                                    <span class="badge text-bg-warning rounded-pill"><?= (int) $index + 1 ?></span>
+                                    <div>
+                                        <h3 class="h6 fw-bold mb-1"><i class="<?= e($prerequisite['icon']) ?> me-1" aria-hidden="true"></i><?= e($prerequisite['title']) ?></h3>
+                                        <p class="text-muted small mb-2"><?= e($prerequisite['description']) ?></p>
+                                        <a class="btn btn-sm btn-outline-primary" href="<?= e($prerequisite['route']) ?>"><i class="bi bi-arrow-right me-1" aria-hidden="true"></i><?= e($prerequisite['label']) ?></a>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+        </div>
+    </section>
+<?php endif; ?>
+
+<?php
+$pendingAutoStartCanEnter = $pendingAutoStartSession
+    && ((string) ($pendingAutoStartSession['status'] ?? '') === 'in_progress' || $activityPrerequisitesReady($pendingAutoStartSession));
+?>
 <?php if ($pendingAutoStartSession): ?>
+    <?php if ($pendingAutoStartCanEnter): ?>
     <div
         data-auto-start-required
         data-test-name="<?= e((string) ($pendingAutoStartSession['instrument_name'] ?? 'Evaluacion')) ?>"
@@ -54,18 +147,22 @@ if (!function_exists('test_entry_instructions_html')) {
         data-test-entry-target="#auto-start-test-entry-<?= (int) $pendingAutoStartSessionId ?>"
         hidden
     ></div>
+    <?php endif; ?>
     <section class="card content-panel">
         <div class="d-flex flex-wrap align-items-center justify-content-between gap-3">
             <div>
                 <p class="text-uppercase text-primary fw-bold small mb-1">Evaluacion obligatoria</p>
                 <h2 class="h5 fw-bold mb-1"><?= e((string) ($pendingAutoStartSession['instrument_name'] ?? 'Evaluacion')) ?></h2>
                 <p class="text-muted mb-0">Debes continuar esta evaluacion antes de responder las demas.</p>
+                <?php $renderProcessPrerequisites($pendingAutoStartSession); ?>
             </div>
+            <?php if ($pendingAutoStartCanEnter): ?>
             <a
                 id="auto-start-test-entry-<?= (int) $pendingAutoStartSessionId ?>"
                 class="btn btn-primary"
                 href="<?= e(route_url('test-session.take', $pendingAutoStartSessionId)) ?>"
                 data-test-entry-confirm
+                data-assessment-sequenced-entry
                 data-test-entry-required="1"
                 data-test-name="<?= e((string) ($pendingAutoStartSession['instrument_name'] ?? 'Evaluacion')) ?>"
                 data-test-instructions-template="test-entry-instructions-auto-<?= (int) $pendingAutoStartSessionId ?>"
@@ -78,6 +175,12 @@ if (!function_exists('test_entry_instructions_html')) {
                 data-test-activity-notice="<?= e($evaluationMessages['activity_tracking_notice']) ?>"
                 data-test-activity-disabled-notice="<?= e($evaluationMessages['activity_tracking_disabled_notice']) ?>"
             ><i class="bi bi-play-circle me-1"></i> Continuar evaluacion</a>
+            <?php else: ?>
+            <button class="btn btn-outline-secondary" type="button" disabled aria-describedby="auto-start-prerequisite-note-<?= (int) $pendingAutoStartSessionId ?>">
+                <i class="bi bi-lock me-1"></i> Continuar evaluación
+            </button>
+            <div id="auto-start-prerequisite-note-<?= (int) $pendingAutoStartSessionId ?>" class="text-muted small">Completa los requisitos indicados antes de iniciar esta evaluación.</div>
+            <?php endif; ?>
             <template id="test-entry-instructions-auto-<?= (int) $pendingAutoStartSessionId ?>">
                 <?= test_entry_instructions_html((string) ($pendingAutoStartSession['instructions'] ?? '')) ?>
             </template>
@@ -162,27 +265,27 @@ if (!function_exists('test_entry_instructions_html')) {
     class="card content-panel"
     data-my-tests-panel
     data-my-tests-status-url="<?= e(app_url('my-tests/status')) ?>"
-    data-assigned-tests-finalized="<?= $assignedTestsFinalized ? '1' : '0' ?>"
+    data-assigned-activities-completed="<?= $assignedActivitiesCompleted ? '1' : '0' ?>"
 >
     <div
-        class="alert alert-success my-tests-finalized-alert d-flex align-items-center gap-2 <?= $assignedTestsFinalized ? '' : 'd-none' ?>"
+        class="alert alert-success my-tests-finalized-alert d-flex align-items-center gap-2 <?= $assignedActivitiesCompleted ? '' : 'd-none' ?>"
         role="status"
         data-inline-alert
-        data-assigned-tests-finalized-message
+        data-assigned-activities-completed-message
     >
         <i class="bi bi-check-circle-fill"></i>
-        <strong>Has finalizado los Test asignados, ahora podrás salir de plataforma.</strong>
+        <strong>Has completado todas las evaluaciones y tests asignados. Ahora puedes salir de la plataforma.</strong>
     </div>
-    <div class="table-responsive">
         <table class="table table-hover align-middle app-table app-data-table" data-export-title="Mis evaluaciones" data-export-excel="false" data-export-pdf="false">
+            <caption class="visually-hidden">Evaluaciones y pruebas pendientes a realizar o con plazo vencido.</caption>
             <thead>
                 <tr>
-                    <th>Evaluacion</th>
-                    <th>Items</th>
-                    <th>Duracion</th>
-                    <th>Disponibilidad</th>
-                    <th>Estado</th>
-                    <th class="text-end no-sort no-export">Acciones</th>
+                    <th scope="col">Evaluacion</th>
+                    <th scope="col">Items</th>
+                    <th scope="col">Duracion</th>
+                    <th scope="col">Disponibilidad</th>
+                    <th scope="col">Estado</th>
+                    <th scope="col" class="text-end no-sort no-export">Acciones</th>
                 </tr>
             </thead>
             <tbody>
@@ -191,9 +294,14 @@ if (!function_exists('test_entry_instructions_html')) {
                     $statusKey = (string) $session['status'];
                     $answersCount = max(0, (int) ($session['answers_count'] ?? 0));
                     $hasAnswers = $answersCount > 0;
-                    $statusLabel = $hasAnswers ? 'Completada: ' . $answersCount . ' respuestas enviadas' : ($statusLabels[$statusKey] ?? labelize($statusKey));
+                    $statusLabel = $statusKey === 'completed'
+                        ? 'Completada: ' . $answersCount . ' respuestas guardadas'
+                        : ($statusKey === 'expired' && $hasAnswers
+                            ? 'Expirada: ' . $answersCount . ' respuestas guardadas'
+                            : ($statusLabels[$statusKey] ?? labelize($statusKey)));
                     ?>
                     <?php $blockedByAutoStart = $pendingAutoStartSessionId > 0 && (int) ($session['id'] ?? 0) !== $pendingAutoStartSessionId && !in_array((string) ($session['status'] ?? ''), ['completed', 'expired', 'cancelled'], true); ?>
+                    <?php $prerequisitesReady = (string) ($session['status'] ?? '') === 'in_progress' || $activityPrerequisitesReady($session); ?>
                     <tr>
                         <td>
                             <div class="fw-semibold"><?= e($session['instrument_name']) ?></div>
@@ -217,7 +325,7 @@ if (!function_exists('test_entry_instructions_html')) {
                         }
                         $availabilityLabel = $sessionIsOpen
                             ? (string) ($availability['label'] ?? 'Disponible')
-                            : ($statusLabel === 'Expirada' ? 'Plazo finalizado' : $statusLabel);
+                            : ($statusKey === 'expired' ? 'Plazo finalizado' : $statusLabel);
                         ?>
                         <td>
                             <span
@@ -233,8 +341,9 @@ if (!function_exists('test_entry_instructions_html')) {
                             <?php if (!empty($session['process_name'])): ?>
                                 <div class="text-muted small mt-1"><?= e((string) $session['process_name']) ?></div>
                             <?php endif; ?>
+                            <?php $renderProcessPrerequisites($session); ?>
                         </td>
-                        <td><span class="badge <?= $hasAnswers ? 'text-bg-success' : ($statusKey === 'in_progress' ? 'text-bg-warning' : (in_array($statusKey, ['cancelled', 'expired'], true) ? 'text-bg-secondary' : 'text-bg-primary')) ?>"><?= e($statusLabel) ?></span></td>
+                        <td><span class="badge <?= $statusKey === 'completed' ? 'text-bg-success' : ($statusKey === 'in_progress' ? 'text-bg-warning' : (in_array($statusKey, ['cancelled', 'expired'], true) ? 'text-bg-secondary' : 'text-bg-primary')) ?>"><?= e($statusLabel) ?></span></td>
                         <td class="text-end">
                             <?php if (in_array($session['status'], ['completed', 'expired'], true)): ?>
                                 <span class="text-muted small">Resultado no disponible para usuarios</span>
@@ -254,11 +363,17 @@ if (!function_exists('test_entry_instructions_html')) {
                                 <button class="btn btn-sm btn-outline-secondary" type="button" disabled title="<?= e((string) ($availability['message'] ?? $availability['label'] ?? 'No disponible')) ?>">
                                     <i class="bi bi-lock me-1"></i> No disponible
                                 </button>
+                            <?php elseif (!$prerequisitesReady): ?>
+                                <button class="btn btn-sm btn-outline-secondary" type="button" disabled aria-describedby="test-prerequisite-note-<?= (int) $session['id'] ?>">
+                                    <i class="bi bi-lock me-1"></i> Responder
+                                </button>
+                                <div id="test-prerequisite-note-<?= (int) $session['id'] ?>" class="text-muted small mt-1">Completa los requisitos indicados antes de responder.</div>
                             <?php else: ?>
                                 <a
                                     class="btn btn-sm btn-primary"
                                     href="<?= e(route_url('test-session.take', (int) $session['id'])) ?>"
                                     data-test-entry-confirm
+                                    data-assessment-sequenced-entry
                                     data-test-name="<?= e($session['instrument_name']) ?>"
                                     data-test-instructions-template="test-entry-instructions-<?= (int) $session['id'] ?>"
                                     data-test-activity-tracking="<?= (int) ($session['track_activity_enabled'] ?? 0) === 1 ? '1' : '0' ?>"
@@ -270,6 +385,9 @@ if (!function_exists('test_entry_instructions_html')) {
                                     data-test-activity-notice="<?= e($evaluationMessages['activity_tracking_notice']) ?>"
                                     data-test-activity-disabled-notice="<?= e($evaluationMessages['activity_tracking_disabled_notice']) ?>"
                                 ><i class="bi bi-play-circle me-1"></i> Responder</a>
+                                <?php if ($statusKey === 'in_progress' && !$activityPrerequisitesReady($session)): ?>
+                                    <div class="text-muted small mt-1">Actividad ya iniciada: puedes continuarla.</div>
+                                <?php endif; ?>
                                 <template id="test-entry-instructions-<?= (int) $session['id'] ?>">
                                     <?= test_entry_instructions_html((string) ($session['instructions'] ?? '')) ?>
                                 </template>
@@ -282,10 +400,15 @@ if (!function_exists('test_entry_instructions_html')) {
                     $assignmentStatus = (string) ($assignment['status'] ?? 'assigned');
                     $assignmentAnswersCount = max(0, (int) ($assignment['answers_count'] ?? 0));
                     $assignmentHasAnswers = $assignmentAnswersCount > 0;
-                    $assignmentStatusLabel = $assignmentHasAnswers ? 'Completada: ' . $assignmentAnswersCount . ' respuestas enviadas' : ($statusLabels[$assignmentStatus] ?? labelize($assignmentStatus));
+                    $assignmentStatusLabel = $assignmentStatus === 'completed'
+                        ? 'Completada: ' . $assignmentAnswersCount . ' respuestas guardadas'
+                        : ($assignmentStatus === 'expired' && $assignmentHasAnswers
+                            ? 'Expirada: ' . $assignmentAnswersCount . ' respuestas guardadas'
+                            : ($statusLabels[$assignmentStatus] ?? labelize($assignmentStatus)));
                     $canAnswerAssignment = in_array($assignmentStatus, ['assigned', 'in_progress'], true);
                     $assignmentAvailability = is_array($assignment['process_availability'] ?? null) ? $assignment['process_availability'] : ['allowed' => true, 'label' => 'Disponible'];
                     $assignmentCanAnswer = $canAnswerAssignment && !empty($assignmentAvailability['allowed']);
+                    $assignmentPrerequisitesReady = $assignmentStatus === 'in_progress' || $activityPrerequisitesReady($assignment);
                     ?>
                     <tr>
                         <td>
@@ -299,11 +422,18 @@ if (!function_exists('test_entry_instructions_html')) {
                             <?php if (!empty($assignment['process_name'])): ?>
                                 <div class="text-muted small mt-1"><?= e((string) $assignment['process_name']) ?></div>
                             <?php endif; ?>
+                            <?php $renderProcessPrerequisites($assignment); ?>
                         </td>
-                        <td><span class="badge <?= $assignmentHasAnswers ? 'text-bg-success' : ($assignmentStatus === 'in_progress' ? 'text-bg-warning' : (in_array($assignmentStatus, ['expired', 'cancelled'], true) ? 'text-bg-secondary' : 'text-bg-primary')) ?>"><?= e($assignmentStatusLabel) ?></span></td>
+                        <td><span class="badge <?= $assignmentStatus === 'completed' ? 'text-bg-success' : ($assignmentStatus === 'in_progress' ? 'text-bg-warning' : (in_array($assignmentStatus, ['expired', 'cancelled'], true) ? 'text-bg-secondary' : 'text-bg-primary')) ?>"><?= e($assignmentStatusLabel) ?></span></td>
                         <td class="text-end">
-                            <?php if ($assignmentCanAnswer): ?>
+                            <?php if ($assignmentCanAnswer && $assignmentPrerequisitesReady): ?>
                                 <a class="btn btn-sm btn-primary" href="<?= e(route_url('evaluation-surveys.form.take', (int) $assignment['form_id']) . '?process_id=' . (int) ($assignment['process_id'] ?? 0)) ?>"><i class="bi bi-play-circle me-1"></i> Responder</a>
+                                <?php if ($assignmentStatus === 'in_progress' && !$activityPrerequisitesReady($assignment)): ?>
+                                    <div class="text-muted small mt-1">Actividad ya iniciada: puedes continuarla.</div>
+                                <?php endif; ?>
+                            <?php elseif ($assignmentCanAnswer && !$assignmentPrerequisitesReady): ?>
+                                <button class="btn btn-sm btn-outline-secondary" type="button" disabled aria-describedby="evaluation-prerequisite-note-<?= (int) $assignment['process_id'] ?>-<?= (int) $assignment['form_id'] ?>"><i class="bi bi-lock me-1"></i> Responder</button>
+                                <div id="evaluation-prerequisite-note-<?= (int) $assignment['process_id'] ?>-<?= (int) $assignment['form_id'] ?>" class="text-muted small mt-1">Completa los requisitos indicados antes de responder.</div>
                             <?php elseif ($canAnswerAssignment && empty($assignmentAvailability['allowed'])): ?>
                                 <button class="btn btn-sm btn-outline-secondary" type="button" disabled title="<?= e((string) ($assignmentAvailability['message'] ?? $assignmentAvailability['label'] ?? 'No disponible')) ?>"><i class="bi bi-lock me-1"></i> No disponible</button>
                             <?php elseif ($assignmentStatus === 'completed'): ?>
@@ -316,7 +446,6 @@ if (!function_exists('test_entry_instructions_html')) {
                 <?php endforeach; ?>
             </tbody>
         </table>
-    </div>
 </section>
 
 <?php if ($interviewAppointments): ?>

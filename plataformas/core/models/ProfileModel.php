@@ -40,6 +40,9 @@ final class ProfileModel
         'manage_company_processes' => 'Administrar procesos de la empresa',
         'manage_company_interviews' => 'Administrar entrevistas de la empresa',
         'view_company_results' => 'Ver resultados de la empresa',
+        'manage_facial_recognition' => 'Enrolar identidades faciales',
+        'view_company_client_portal' => 'Consultar panel de avance de empresa',
+        'validate_facial_identity' => 'Validar identidad facial',
     ];
 
     public const CORE_PERMISSIONS = [
@@ -50,6 +53,9 @@ final class ProfileModel
         'manage_company_user_fields',
         'manage_users',
         'manage_companies',
+        'manage_facial_recognition',
+        'validate_facial_identity',
+        'view_company_client_portal',
     ];
 
     public const PLATFORM_PERMISSIONS = [
@@ -127,6 +133,10 @@ final class ProfileModel
         'dashboard' => [
             'label' => 'Inicio',
             'permissions' => [],
+        ],
+        'client-admin.dashboard' => [
+            'label' => 'Inicio Administrador Cliente',
+            'permissions' => ['view_company_client_portal'],
         ],
         'companies' => [
             'label' => 'Empresas',

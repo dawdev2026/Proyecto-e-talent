@@ -17,7 +17,7 @@ if (!in_array($authTheme, ['light', 'dark'], true)) {
     <link href="<?= e(url('assets/coreui/vendors/@coreui/icons/css/free.min.css')) ?>" rel="stylesheet">
     <link href="<?= e(url('assets/css/coreui-adapter.css')) ?>" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
-    <link href="<?= e(url('assets/css/app.css')) ?>" rel="stylesheet">
+    <link href="<?= e(url('assets/css/app.css?v=' . (string) filemtime(__DIR__ . '/../../public/assets/css/app.css'))) ?>" rel="stylesheet">
     <script>
         const savedTheme = localStorage.getItem('corePlatformTheme') || '<?= e($authTheme) ?>';
         document.documentElement.setAttribute('data-theme', savedTheme);
@@ -35,6 +35,6 @@ if (!in_array($authTheme, ['light', 'dark'], true)) {
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script src="<?= e(url('assets/js/vendor/jquery.rut.local.js')) ?>"></script>
-<script src="<?= e(url('assets/js/app.js')) ?>"></script>
+<script src="<?= e(url('assets/js/app.js?v=' . (string) filemtime(__DIR__ . '/../../public/assets/js/app.js'))) ?>"></script>
 </body>
 </html>

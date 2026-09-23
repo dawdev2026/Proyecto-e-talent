@@ -13,6 +13,7 @@ final class EvaluationSurveyControlModel
         'print_blocked', 'context_menu_blocked', 'drag_blocked', 'suspicious_key_printscreen',
         'suspicious_key_print', 'suspicious_key_save', 'suspicious_key_copy', 'suspicious_key_devtools',
         'audio_visual_recording_started', 'audio_visual_recording_interrupted', 'audio_visual_recording_recovered',
+        'audio_visual_consent_accepted',
         'audio_visual_upload_completed', 'audio_visual_upload_failed', 'audio_visual_risk',
         'audio_visual_screen_capture_completed', 'multiple_voice_possible',
     ];
@@ -27,14 +28,24 @@ final class EvaluationSurveyControlModel
         return in_array($eventType, self::EVENTS, true);
     }
 
-    public function record(array $attempt, string $eventType, array $metadata = [], int $questionId = 0): void
+    public function record(array $attempt, string $eventType, array $metadata = [], int $questionId = 0): bool
     {
         if (!$this->isAllowedEvent($eventType) || (int) ($attempt['id'] ?? 0) <= 0) {
-            return;
+            return false;
         }
         $mode = (string) ($attempt['control_mode'] ?? 'off');
         if ($mode === 'off') {
-            return;
+            return false;
+        }
+        if (!empty($attempt['process_policy_snapshot_at']) && (int) ($attempt['process_record_actions'] ?? 0) !== 1) {
+            $essentialEvents = [
+                'attempt_opened', 'supervised_started', 'draft_saved', 'attempt_completed', 'attempt_expired',
+                'audio_visual_recording_started', 'audio_visual_recording_interrupted', 'audio_visual_recording_recovered',
+                'audio_visual_consent_accepted',
+                'audio_visual_upload_completed', 'audio_visual_upload_failed', 'audio_visual_risk',
+                'audio_visual_screen_capture_completed', 'multiple_voice_possible',
+            ];
+            if (!in_array($eventType, $essentialEvents, true)) return false;
         }
         $safeMetadata = [];
         foreach ($metadata as $key => $value) {
@@ -45,14 +56,20 @@ final class EvaluationSurveyControlModel
             else $safeMetadata[$key] = mb_substr(trim((string) $value), 0, 180);
         }
         $json = $safeMetadata ? json_encode($safeMetadata, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) : null;
-        $this->db->execute('INSERT INTO evaluation_survey_activity_events (attempt_id,form_id,user_id,event_type,question_id,metadata,ip_address,user_agent) VALUES (?,?,?,?,?,?,?,?)', [
+        return $this->db->execute('INSERT INTO evaluation_survey_activity_events (attempt_id,form_id,user_id,event_type,question_id,metadata,ip_address,user_agent) VALUES (?,?,?,?,?,?,?,?)', [
             (int) $attempt['id'], (int) ($attempt['form_id'] ?? 0), (int) ($attempt['user_id'] ?? 0), $eventType,
             $questionId > 0 ? $questionId : null, $json, substr((string) ($_SERVER['REMOTE_ADDR'] ?? ''), 0, 45), substr((string) ($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 255),
-        ]);
+        ]) > 0;
     }
 
     public function eventsForAttempt(int $attemptId): array
     {
         return $this->db->fetchAll('SELECT * FROM evaluation_survey_activity_events WHERE attempt_id=? ORDER BY created_at ASC,id ASC', [$attemptId]);
+    }
+
+    public function hasEvent(int $attemptId, string $eventType): bool
+    {
+        if ($attemptId <= 0 || !$this->isAllowedEvent($eventType)) return false;
+        return $this->db->fetch('SELECT id FROM evaluation_survey_activity_events WHERE attempt_id = ? AND event_type = ? ORDER BY id DESC LIMIT 1', [$attemptId, $eventType]) !== null;
     }
 }

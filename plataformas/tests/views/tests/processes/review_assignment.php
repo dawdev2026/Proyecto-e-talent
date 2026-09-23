@@ -38,7 +38,7 @@ $formatDateTime = static function ($value): string {
     <div>
         <p class="text-uppercase text-primary fw-bold small mb-1">Evaluaciones</p>
         <h1 class="fw-bold mb-1">Revisar asignacion</h1>
-        <p class="text-muted mb-0">Consulta el proceso actual de un usuario y reasignalo a un proceso activo del dia.</p>
+        <p class="text-muted mb-0">Consulta el proceso actual de un usuario y reasignalo a un proceso activo del dia. <?= status_help_button('Estados de las actividades', "• Asignada / Pendiente: fue asignada y aún no se ha abierto.\n• En curso: hay un intento abierto; puede tener cero respuestas.\n• Completada: se envió explícitamente, incluso vacía.\n• Expirada: venció el plazo sin entrega; no cuenta como completada.\n• Cancelada: la asignación se retiró y se excluye de los totales activos.") ?></p>
     </div>
     <div class="d-flex flex-wrap gap-2">
         <a class="btn btn-outline-secondary" href="<?= e(route_url('test-processes')) ?>"><i class="bi bi-kanban me-1"></i> Procesos</a>

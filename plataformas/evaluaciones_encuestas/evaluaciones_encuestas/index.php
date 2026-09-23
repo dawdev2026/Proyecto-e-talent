@@ -10,6 +10,7 @@ $newRoute = 'evaluation-surveys.form.new';
         <p class="text-muted mb-0"><?= $isSurvey ? 'Administra encuestas reutilizables.' : 'Administra evaluaciones calificadas reutilizables.' ?></p>
     </div>
     <div class="page-header-actions">
+        <?php if (!$isSurvey): ?><a class="btn btn-sm btn-outline-primary" href="<?= e(route_url('evaluation-surveys.moodle-import')) ?>"><i class="bi bi-cloud-arrow-down me-1"></i>Importar de Moodle</a><?php endif; ?>
         <a class="btn btn-sm btn-outline-primary" href="<?= e(route_url('evaluation-surveys.ai.generate') . '?form_type=' . rawurlencode($type)) ?>"><i class="bi bi-stars me-1"></i>Crear con IA</a>
         <a class="btn btn-sm btn-primary" href="<?= e(route_url($newRoute) . '?type=' . rawurlencode($type)) ?>">
             <i class="bi bi-plus-lg me-1"></i> <?= $isSurvey ? 'Nueva encuesta' : 'Nueva evaluación' ?>
@@ -18,6 +19,7 @@ $newRoute = 'evaluation-surveys.form.new';
 </section>
 
 <section class="card content-panel">
+    <?= status_help_button('Estados de la evaluación', "• Borrador: aún se configura y no está disponible para nuevas asignaciones.\n• Activa: puede asignarse conforme a las reglas del proceso.\n• Inactiva: se deshabilitó para nuevas asignaciones; los intentos y el historial existentes se conservan.") ?>
     <div class="table-responsive">
         <table class="table table-hover align-middle app-table app-data-table" data-export-title="<?= e($titleLabel) ?>">
             <thead>

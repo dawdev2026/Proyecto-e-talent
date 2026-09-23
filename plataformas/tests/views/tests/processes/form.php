@@ -10,6 +10,7 @@ $selectedUserAdmins = $selectedUserAdmins ?? [];
 $adminUsers = $adminUsers ?? [];
 $selectedAssignableProfileSet = array_flip(array_map('intval', $selectedAssignableProfileIds ?? []));
 $processId = (int) ($process['id'] ?? 0);
+$supportsProcessActivityPolicies = (bool) ($supportsProcessActivityPolicies ?? false);
 $adminAssignmentMode = (string) ($process['admin_assignment_mode'] ?? '');
 if (!in_array($adminAssignmentMode, ['user', 'profile'], true)) {
     $adminAssignmentMode = $selectedUserAdmins ? 'user' : ($selectedProfiles ? 'profile' : 'user');
@@ -54,7 +55,7 @@ if (!in_array($availabilityStatus, ['scheduled', 'open_now', 'closed_now'], true
                 <input id="process_code" class="form-control" name="code" value="<?= e((string) ($process['code'] ?? '')) ?>" placeholder="automatico">
             </div>
             <div class="col-md-2">
-                <label class="form-label" for="process_status">Estado</label>
+                <label class="form-label d-inline-flex align-items-center gap-1" for="process_status">Estado <?= status_help_button('Estados del proceso', "• Borrador: está en configuración y no disponible para iniciar actividades.\n• Activo: está habilitado; la disponibilidad efectiva también depende de sus fechas y horarios.\n• Cerrado: no acepta nuevos inicios; el historial se conserva.\n• Cancelado: fue retirado y no debe seguir generando actividad.") ?></label>
                 <select id="process_status" class="form-select" name="status">
                     <?php foreach ($statuses as $key => $label): ?>
                         <option value="<?= e($key) ?>" <?= ($process['status'] ?? 'draft') === $key ? 'selected' : '' ?>><?= e($label) ?></option>
@@ -76,6 +77,7 @@ if (!in_array($availabilityStatus, ['scheduled', 'open_now', 'closed_now'], true
                     <option value="open_now" <?= $availabilityStatus === 'open_now' ? 'selected' : '' ?>>Abierto anticipadamente</option>
                     <option value="closed_now" <?= $availabilityStatus === 'closed_now' ? 'selected' : '' ?>>Cerrado anticipadamente</option>
                 </select>
+                <div class="form-text">Según calendario: respeta las fechas configuradas. Abierto anticipadamente: permite iniciar antes de la fecha. Cerrado anticipadamente: bloquea nuevos inicios sin cambiar el estado general del proceso.</div>
             </div>
             <div class="col-md-6">
                 <label class="form-label" for="process_description">Descripcion</label>
@@ -89,6 +91,43 @@ if (!in_array($availabilityStatus, ['scheduled', 'open_now', 'closed_now'], true
                         <small>Habilita en Avance del proceso acciones para asignar un nuevo tiempo a evaluaciones expiradas o guardadas.</small>
                     </span>
                 </label>
+            </div>
+            <?php
+            $activityPolicyOptions = [
+                'inherit' => 'Usar configuración de cada actividad (Heredar)',
+                'required' => 'Exigir en todas las actividades',
+                'disabled' => 'No exigir en este proceso',
+            ];
+            $facialPolicyValue = (string) ($process['facial_enrollment_policy'] ?? ((int) ($process['require_facial_enrollment'] ?? 0) === 1 ? 'required' : 'inherit'));
+            $processPolicyFields = [
+                'facial_enrollment_policy' => ['Enrolamiento facial', $facialPolicyValue, 'El requisito se aplicará a quienes estén asignados a este proceso.'],
+                'component_validation_policy' => ['Validación de componentes', (string) ($process['component_validation_policy'] ?? 'inherit'), 'Verifica cámara, micrófono y la alternativa de captura antes de iniciar; no guarda fotos ni grabaciones. Si una actividad exige registro audiovisual, esta validación seguirá siendo obligatoria.'],
+                'audio_visual_recording_policy' => ['Registro audiovisual y capturas durante la actividad', (string) ($process['audio_visual_recording_policy'] ?? 'inherit'), 'Al exigirlo, activa el modo audiovisual existente en cada actividad. Al desactivarlo, se conserva el control de supervisión que no captura medios.'],
+                'action_logging_policy' => ['Registro de acciones', (string) ($process['action_logging_policy'] ?? 'inherit'), 'Controla el seguimiento de acciones de la actividad. El guardado de respuestas y la auditoría esencial siempre se mantienen.'],
+            ];
+            ?>
+            <div class="col-12">
+                <h3 class="h6 fw-bold mb-2">Requisitos y controles del proceso</h3>
+                <p class="text-muted small mb-3">Las opciones se resuelven por cada test o evaluación vinculada. Las actividades ya iniciadas conservan su configuración original.</p>
+                <?php foreach ($processPolicyFields as $field => [$label, $value, $help]): ?>
+                    <?php $helpId = 'help_' . $field; ?>
+                    <div class="row align-items-center g-2 mb-3">
+                        <div class="col-md-5">
+                            <label class="form-label mb-0" for="<?= e($field) ?>"><?= e($label) ?></label>
+                            <div class="form-text" id="<?= e($helpId) ?>"><?= e($help) ?></div>
+                        </div>
+                        <div class="col-md-7">
+                            <select class="form-select" id="<?= e($field) ?>" name="<?= e($field) ?>" aria-describedby="<?= e($helpId) ?>" <?= $supportsProcessActivityPolicies ? '' : 'disabled' ?>>
+                                <?php foreach ($activityPolicyOptions as $optionValue => $optionLabel): ?>
+                                    <option value="<?= e($optionValue) ?>" <?= $value === $optionValue ? 'selected' : '' ?>><?= e($optionLabel) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                    </div>
+                <?php endforeach; ?>
+                <?php if (!$supportsProcessActivityPolicies): ?>
+                    <div class="form-text text-warning">Aplica la migración 20260921_process_activity_policies.sql para habilitar estos controles.</div>
+                <?php endif; ?>
             </div>
         </div>
     </section>

@@ -32,7 +32,7 @@
             <div class="form-text">Usa 0 si no hay limite definido.</div>
         </div>
         <div class="col-12 col-lg-4">
-            <label class="form-label" for="status">Estado</label>
+            <label class="form-label d-inline-flex align-items-center gap-1" for="status">Estado <?= status_help_button('Estados del test', "• Borrador: en configuración y no asignable.\n• Activo: disponible para nuevas asignaciones.\n• Inactivo: no se asigna, pero se conserva su historial.") ?></label>
             <select id="status" class="form-select form-select-lg" name="status" required>
                 <?php foreach ($statuses as $key => $label): ?>
                     <option value="<?= e($key) ?>" <?= $values['status'] === $key ? 'selected' : '' ?>><?= e($label) ?></option>

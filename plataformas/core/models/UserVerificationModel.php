@@ -29,6 +29,42 @@ final class UserVerificationModel
         return ['user' => $user, 'active' => true, 'processes' => $this->processesForUser((int) $user['id'], $companyId)];
     }
 
+    public function recordSuccessfulVerification(int $userId, int $companyId): void
+    {
+        $this->core->insert(
+            'INSERT INTO user_verification_checks (company_id, user_id) VALUES (?, ?)',
+            [$companyId, $userId]
+        );
+    }
+
+    public function countChecksForCompany(int $companyId): int
+    {
+        $row = $this->core->fetch(
+            'SELECT COUNT(*) AS total FROM user_verification_checks c
+             JOIN users u ON u.id = c.user_id AND u.company_id = c.company_id
+             WHERE c.company_id = ? AND u.role = \'usuario\'',
+            [$companyId]
+        );
+
+        return max(0, (int) ($row['total'] ?? 0));
+    }
+
+    public function recentChecksForCompany(int $companyId, int $limit = 50, int $offset = 0): array
+    {
+        $limit = max(1, min(100, $limit));
+        $offset = max(0, $offset);
+
+        return $this->core->fetchAll(
+            'SELECT c.id, u.name, u.rut, u.email, c.created_at AS verified_at
+             FROM user_verification_checks c
+             JOIN users u ON u.id = c.user_id AND u.company_id = c.company_id
+             WHERE c.company_id = ? AND u.role = \'usuario\'
+             ORDER BY c.created_at DESC, c.id DESC
+             LIMIT ' . $limit . ' OFFSET ' . $offset,
+            [$companyId]
+        );
+    }
+
     private function processesForUser(int $userId, int $companyId): array
     {
         $processes = [];

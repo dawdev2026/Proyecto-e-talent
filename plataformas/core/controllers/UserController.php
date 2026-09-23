@@ -29,12 +29,9 @@ final class UserController extends Controller
     {
         require_company_user_management();
 
-        $listFields = $this->fields->listableForUsers();
-
         $this->render('users/index', [
             'title' => 'Usuarios | e-talent',
             'currentPage' => 'users',
-            'listFields' => $listFields,
         ]);
     }
 
@@ -50,20 +47,13 @@ final class UserController extends Controller
         $order = is_array($_GET['order'][0] ?? null) ? $_GET['order'][0] : [];
         $orderColumn = (int) ($order['column'] ?? 0);
         $orderDir = (string) ($order['dir'] ?? 'asc');
-        $listFields = $this->fields->listableForUsers();
         $page = $this->users->usersDataPage($search, $start, $length, $orderColumn, $orderDir);
-        $fieldValuesByUser = $this->fields->valuesForUsers(
-            array_map(static fn(array $user): int => (int) $user['id'], $page['rows']),
-            $listFields
-        );
 
         $this->jsonResponse([
             'draw' => $draw,
             'recordsTotal' => (int) $page['total'],
             'recordsFiltered' => (int) $page['filtered'],
-            'data' => array_map(function (array $user) use ($listFields, $fieldValuesByUser): array {
-                return $this->userTableRow($user, $listFields, $fieldValuesByUser);
-            }, $page['rows']),
+            'data' => array_map(fn(array $user): array => $this->userTableRow($user), $page['rows']),
         ]);
     }
 
@@ -74,7 +64,7 @@ final class UserController extends Controller
         $id = request_secure_id('user');
         $requester = $id ? $this->users->findUser($id) : null;
         $isDrawer = (string) ($_GET['drawer'] ?? '') === '1';
-        $isCompanyAdmin = has_permission('manage_company_users') && !has_permission('manage_users');
+        $isCompanyAdmin = is_company_admin_user() || (has_permission('manage_company_users') && !has_permission('manage_users'));
         $defaultProfile = $this->profiles->defaultRequesterProfile();
 
         if ($id && !$requester) {
@@ -326,7 +316,7 @@ final class UserController extends Controller
             'company_id' => (int) ($_POST['company_id'] ?? 0),
             'is_active' => isset($_POST['is_active']) ? 1 : 0,
         ];
-        $isCompanyAdmin = has_permission('manage_company_users') && !has_permission('manage_users');
+        $isCompanyAdmin = is_company_admin_user() || (has_permission('manage_company_users') && !has_permission('manage_users'));
         if ($isCompanyAdmin) {
             $data['role'] = 'usuario';
             $data['company_id'] = (int) (current_user()['company_id'] ?? 0);
@@ -418,7 +408,7 @@ final class UserController extends Controller
         return 'No se pudo guardar el usuario [' . $reference . ']. Revisa los datos e inténtalo nuevamente.';
     }
 
-    private function userTableRow(array $user, array $listFields, array $fieldValuesByUser): array
+    private function userTableRow(array $user): array
     {
         $row = [
             '<span class="fw-semibold">' . e((string) ($user['rut'] ?? '')) . '</span>',
@@ -431,11 +421,6 @@ final class UserController extends Controller
             e((string) ($user['profile_name'] ?? 'Sin perfil')),
             e((string) ($user['company_name'] ?? 'Sin empresa')),
         ];
-
-        foreach ($listFields as $field) {
-            $value = $fieldValuesByUser[(int) $user['id']][(int) $field['id']] ?? '';
-            $row[] = e((string) ($field['field_type'] === 'checkbox' ? ($value === '1' ? 'Si' : 'No') : $value));
-        }
 
         $row[] = '<span class="badge ' . ((int) ($user['is_active'] ?? 0) === 1 ? 'text-bg-success' : 'text-bg-secondary') . '">' . ((int) ($user['is_active'] ?? 0) === 1 ? 'Activo' : 'Inactivo') . '</span>';
         $editUrl = route_url('user.edit', (int) $user['id']);
@@ -784,7 +769,7 @@ final class UserController extends Controller
 
         try {
             $rows = $preview['rows'];
-            if (has_permission('manage_company_users') && !has_permission('manage_users')) {
+            if (is_company_admin_user() || (has_permission('manage_company_users') && !has_permission('manage_users'))) {
                 $companyId = (int) (current_user()['company_id'] ?? 0);
                 foreach ($rows as &$row) {
                     $row['data']['company_id'] = $companyId;
@@ -813,7 +798,7 @@ final class UserController extends Controller
     private function validateCoreUserData(array $data, ?int $existingId = null): array
     {
         $errors = [];
-        $isCompanyAdmin = has_permission('manage_company_users') && !has_permission('manage_users');
+        $isCompanyAdmin = is_company_admin_user() || (has_permission('manage_company_users') && !has_permission('manage_users'));
         if (!in_array($data['role'] ?? '', UserModel::ALLOWED_ROLES, true)) {
             $errors[] = 'Selecciona un tipo de usuario valido.';
         }
@@ -877,7 +862,7 @@ final class UserController extends Controller
             return $profile;
         }, $this->profiles->active());
 
-        if (has_permission('manage_company_users') && !has_permission('manage_users')) {
+        if (is_company_admin_user() || (has_permission('manage_company_users') && !has_permission('manage_users'))) {
             $profiles = array_values(array_filter($profiles, static function (array $profile): bool {
                 return (string) ($profile['role_key'] ?? '') === 'usuario';
             }));
@@ -1080,7 +1065,7 @@ final class UserController extends Controller
             }
 
             $companyKey = mb_strtolower(trim((string) ($row['data']['company_name'] ?? '')));
-            $isCompanyAdmin = has_permission('manage_company_users') && !has_permission('manage_users');
+            $isCompanyAdmin = is_company_admin_user() || (has_permission('manage_company_users') && !has_permission('manage_users'));
             if ($isCompanyAdmin) {
                 $companyId = (int) (current_user()['company_id'] ?? 0);
                 if ($companyId <= 0) {

@@ -8,6 +8,7 @@ $dbConnectionLabels = [
 ];
 $settingsTab = $settingsTab ?? '';
 $verificationActive = $settingsTab === 'verification';
+$facialActive = $settingsTab === 'facial';
 ?>
 <section class="page-header">
     <div>
@@ -18,11 +19,12 @@ $verificationActive = $settingsTab === 'verification';
 </section>
 
 <ul class="nav nav-tabs settings-tabs mb-4" role="tablist">
-    <li class="nav-item" role="presentation"><button id="settings-login-tab" class="nav-link <?= $verificationActive ? '' : 'active' ?>" role="tab" aria-controls="settings-login" aria-selected="<?= $verificationActive ? 'false' : 'true' ?>" data-bs-toggle="tab" data-bs-target="#settings-login" type="button">Login</button></li>
+    <li class="nav-item" role="presentation"><button id="settings-login-tab" class="nav-link <?= !$verificationActive && !$facialActive ? 'active' : '' ?>" role="tab" aria-controls="settings-login" aria-selected="<?= !$verificationActive && !$facialActive ? 'true' : 'false' ?>" data-bs-toggle="tab" data-bs-target="#settings-login" type="button">Login</button></li>
     <li class="nav-item" role="presentation"><button id="settings-design-tab" class="nav-link" role="tab" aria-controls="settings-design" aria-selected="false" data-bs-toggle="tab" data-bs-target="#settings-design" type="button">Diseño plataforma</button></li>
     <li class="nav-item" role="presentation"><button id="settings-mail-tab" class="nav-link" role="tab" aria-controls="settings-mail" aria-selected="false" data-bs-toggle="tab" data-bs-target="#settings-mail" type="button">Correo<?= !empty($companyBrandingMode) ? ' de la empresa' : '' ?></button></li>
     <?php if (!$companyBrandingMode): ?>
         <li class="nav-item" role="presentation"><button id="settings-operational-tab" class="nav-link" role="tab" aria-controls="settings-operational" aria-selected="false" data-bs-toggle="tab" data-bs-target="#settings-operational" type="button">Evidencia audiovisual</button></li>
+        <li class="nav-item" role="presentation"><button id="settings-facial-tab" class="nav-link <?= $facialActive ? 'active' : '' ?>" role="tab" aria-controls="settings-facial" aria-selected="<?= $facialActive ? 'true' : 'false' ?>" data-bs-toggle="tab" data-bs-target="#settings-facial" type="button">Reconocimiento facial</button></li>
         <li class="nav-item" role="presentation"><button id="settings-db-tab" class="nav-link" role="tab" aria-controls="settings-db" aria-selected="false" data-bs-toggle="tab" data-bs-target="#settings-db" type="button">Base de datos</button></li>
         <li class="nav-item" role="presentation"><button id="settings-platforms-tab" class="nav-link" role="tab" aria-controls="settings-platforms" aria-selected="false" data-bs-toggle="tab" data-bs-target="#settings-platforms" type="button">Sub-plataformas</button></li>
     <?php endif; ?>
@@ -30,7 +32,7 @@ $verificationActive = $settingsTab === 'verification';
 </ul>
 
 <div class="tab-content">
-    <section id="settings-login" role="tabpanel" aria-labelledby="settings-login-tab" tabindex="0" class="tab-pane fade <?= $verificationActive ? '' : 'show active' ?> content-panel">
+    <section id="settings-login" role="tabpanel" aria-labelledby="settings-login-tab" tabindex="0" class="tab-pane fade <?= !$verificationActive && !$facialActive ? 'show active' : '' ?> content-panel">
         <form method="post" enctype="multipart/form-data" class="row g-3 align-items-end mb-4 pb-4 border-bottom">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
             <input type="hidden" name="section" value="login_preset">
@@ -253,6 +255,36 @@ $verificationActive = $settingsTab === 'verification';
                 <input id="topbar_menu_button_color" class="form-control form-control-color w-100" type="color" name="topbar_menu_button_color" value="<?= e($designSettings['topbar_menu_button_color']) ?>">
             </div>
 
+            <div class="col-12"><hr><h2 class="h5 fw-bold mb-1">Menu lateral</h2><p class="text-muted mb-0">Configura la composición clara del template, navegación y estado activo.</p></div>
+            <div class="col-12 col-lg-4">
+                <label class="form-label" for="sidebar_background_color">Fondo menu lateral</label>
+                <input id="sidebar_background_color" class="form-control form-control-color w-100" type="color" name="sidebar_background_color" value="<?= e($designSettings['sidebar_background_color']) ?>">
+            </div>
+            <div class="col-12 col-lg-4">
+                <label class="form-label" for="sidebar_text_color">Texto menu lateral</label>
+                <input id="sidebar_text_color" class="form-control form-control-color w-100" type="color" name="sidebar_text_color" value="<?= e($designSettings['sidebar_text_color']) ?>">
+            </div>
+            <div class="col-12 col-lg-4">
+                <label class="form-label" for="sidebar_icon_color">Iconos menu lateral</label>
+                <input id="sidebar_icon_color" class="form-control form-control-color w-100" type="color" name="sidebar_icon_color" value="<?= e($designSettings['sidebar_icon_color']) ?>">
+            </div>
+            <div class="col-12 col-lg-4">
+                <label class="form-label" for="sidebar_active_background_color">Fondo opcion activa</label>
+                <input id="sidebar_active_background_color" class="form-control form-control-color w-100" type="color" name="sidebar_active_background_color" value="<?= e($designSettings['sidebar_active_background_color']) ?>">
+            </div>
+            <div class="col-12 col-lg-4">
+                <label class="form-label" for="sidebar_active_text_color">Texto opcion activa</label>
+                <input id="sidebar_active_text_color" class="form-control form-control-color w-100" type="color" name="sidebar_active_text_color" value="<?= e($designSettings['sidebar_active_text_color']) ?>">
+            </div>
+            <div class="col-12 col-lg-4">
+                <label class="form-label" for="sidebar_border_color">Borde menu lateral</label>
+                <input id="sidebar_border_color" class="form-control form-control-color w-100" type="color" name="sidebar_border_color" value="<?= e($designSettings['sidebar_border_color']) ?>">
+            </div>
+            <div class="col-12 col-lg-4">
+                <label class="form-label" for="sidebar_width">Ancho menu lateral (px)</label>
+                <input id="sidebar_width" class="form-control" type="number" min="220" max="360" name="sidebar_width" value="<?= e($designSettings['sidebar_width']) ?>">
+            </div>
+
             <div class="col-12"><hr><h2 class="h5 fw-bold mb-1">General</h2></div>
             <div class="col-12 col-lg-4">
                 <label class="form-label" for="layout_background_color">Fondo general</label>
@@ -465,4 +497,19 @@ $verificationActive = $settingsTab === 'verification';
             </div>
         </div>
     </section><?php endif; ?>
+<?php if (!$companyBrandingMode): ?>
+<section id="settings-facial" role="tabpanel" aria-labelledby="settings-facial-tab" tabindex="0" class="tab-pane fade <?= $facialActive ? 'show active' : '' ?> content-panel">
+    <form method="post" class="row g-4 needs-validation" novalidate>
+        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+        <input type="hidden" name="section" value="facial_recognition">
+        <div class="col-12"><h2 class="h5 fw-bold mb-1">Reconocimiento facial</h2><p class="text-muted mb-0">FaceX procesa detección, huella facial y prueba de vida en el navegador. El backend conserva solo la huella matemática y controla cada desafío.</p></div>
+        <div class="col-12"><div class="form-check form-switch"><input class="form-check-input" type="checkbox" role="switch" id="facial_enabled" name="facial_enabled" value="1" <?= !empty($facialSettings['enabled']) ? 'checked' : '' ?>><label class="form-check-label fw-semibold" for="facial_enabled">Activar reconocimiento facial</label></div></div>
+        <div class="col-12 col-lg-4"><label class="form-label" for="facial_similarity_threshold">Umbral de similitud</label><input id="facial_similarity_threshold" class="form-control" type="number" min="0.50" max="0.99" step="0.01" name="facial_similarity_threshold" value="<?= e($facialSettings['similarity_threshold'] ?? 0.78) ?>"></div>
+        <div class="col-12 col-lg-4"><label class="form-label" for="facial_liveness_threshold">Umbral de vida</label><input id="facial_liveness_threshold" class="form-control" type="number" min="0.50" max="0.99" step="0.01" name="facial_liveness_threshold" value="<?= e($facialSettings['liveness_threshold'] ?? 0.60) ?>"></div>
+        <div class="col-12 col-lg-4"><label class="form-label" for="facial_challenge_ttl_seconds">Vigencia del desafío (segundos)</label><input id="facial_challenge_ttl_seconds" class="form-control" type="number" min="60" max="900" name="facial_challenge_ttl_seconds" value="<?= e($facialSettings['challenge_ttl_seconds'] ?? 180) ?>"></div>
+        <div class="col-12"><div class="alert alert-info mb-0"><i class="bi bi-shield-check me-1"></i>FaceX no requiere API key ni un servidor adicional. Cada operación usa una llave de inicio, un nonce de un solo uso y una llave de término calculada por el backend.</div></div>
+        <div class="col-12"><button class="btn btn-primary" type="submit"><i class="bi bi-check2 me-1"></i>Guardar configuración facial</button></div>
+    </form>
+</section>
+<?php endif; ?>
 </div>

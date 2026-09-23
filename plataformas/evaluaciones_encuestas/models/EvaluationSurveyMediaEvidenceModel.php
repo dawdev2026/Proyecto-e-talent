@@ -14,7 +14,11 @@ final class EvaluationSurveyMediaEvidenceModel
 
     public function attempt(int $attemptId, int $userId): ?array
     {
-        return $this->db->fetch('SELECT a.*, f.control_mode, f.audio_visual_upload_failure_policy, f.audio_visual_interruption_policy, f.audio_visual_voice_policy, f.audio_visual_permission_policy, f.audio_visual_quality_profile FROM evaluation_survey_attempts a JOIN evaluation_survey_forms f ON f.id=a.form_id WHERE a.id=? AND a.user_id=? LIMIT 1', [$attemptId, $userId]);
+        // El intento conserva una instantánea del modo y las políticas con que
+        // fue asignado. No seleccionar columnas homónimas del formulario:
+        // podrían sobrescribir esos valores y rechazar media/init con 422 si
+        // la configuración del formulario cambió después de abrir el intento.
+        return $this->db->fetch('SELECT a.*, f.control_mode AS form_control_mode FROM evaluation_survey_attempts a JOIN evaluation_survey_forms f ON f.id=a.form_id WHERE a.id=? AND a.user_id=? LIMIT 1', [$attemptId, $userId]);
     }
 
     public function evidenceForAttempt(int $attemptId): ?array
@@ -126,6 +130,7 @@ final class EvaluationSurveyMediaEvidenceModel
     {
         $attempt = $this->attempt($attemptId, $userId); $evidence = $this->evidenceForAttempt($attemptId);
         if (!$attempt || !$evidence || (int) $evidence['id'] !== $evidenceId) return ['ok' => false, 'reason' => 'evidence_not_found'];
+        if ((string) ($evidence['status'] ?? '') === 'failed') return ['ok' => false, 'reason' => 'evidence_failed'];
         $chunks = $this->db->fetchAll('SELECT chunk_number, storage_key, size_bytes FROM evaluation_survey_media_chunks WHERE evidence_id=? ORDER BY chunk_number ASC', [$evidenceId]);
         if (!$chunks) { $this->markFailure($evidenceId, 'no_chunks', 'No se recibieron fragmentos audiovisuales.'); return ['ok' => false, 'reason' => 'no_chunks']; }
         $expected = 0;
@@ -135,6 +140,13 @@ final class EvaluationSurveyMediaEvidenceModel
                 return ['ok' => false, 'reason' => 'missing_chunk'];
             }
             $expected++;
+        }
+        $finalCapture = $this->db->fetch(
+            'SELECT storage_key FROM evaluation_survey_screen_captures WHERE attempt_id=? AND evidence_id=? AND event_type=? ORDER BY capture_number DESC LIMIT 1',
+            [$attemptId, $evidenceId, 'assessment_finished']
+        );
+        if (!$finalCapture || !is_file($this->absolutePath((string) ($finalCapture['storage_key'] ?? '')))) {
+            return ['ok' => false, 'reason' => 'final_screen_capture_missing'];
         }
         $mime = strtolower((string) ($evidence['mime_type'] ?? 'video/webm'));
         $extension = strpos($mime, 'video/mp4') === 0 ? 'mp4' : 'webm';

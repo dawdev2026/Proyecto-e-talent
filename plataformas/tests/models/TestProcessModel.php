@@ -26,7 +26,11 @@ final class TestProcessModel
     private ?bool $hasSessionScoreSummaryColumn = null;
     private ?bool $hasProcessAdminModeColumn = null;
     private ?bool $hasProcessAvailabilityColumns = null;
+    private ?bool $hasProcessFacialEnrollmentColumn = null;
+    private ?bool $hasProcessActivityPolicyColumns = null;
     private ?bool $hasUserLoginEventsTable = null;
+    private array $policySchemaColumnCache = [];
+    private array $policySchemaTablesLoaded = [];
 
     public function __construct(?Database $db = null)
     {
@@ -36,6 +40,9 @@ final class TestProcessModel
 
     public function allForUser(array $user): array
     {
+        if ((string) ($user['role'] ?? '') === 'company_admin' && (int) ($user['company_id'] ?? 0) <= 0) {
+            return [];
+        }
         if ($this->isGlobalProcessAdmin()) {
             return $this->db->fetchAll($this->processListSql() . ' ORDER BY p.created_at DESC, p.id DESC');
         }
@@ -98,7 +105,7 @@ final class TestProcessModel
         }
 
         $placeholders = implode(',', array_fill(0, count($ids), '?'));
-        $row = $this->db->fetch("\n            SELECT\n                COUNT(DISTINCT CASE WHEN p.status = 'closed' THEN p.id END) AS processes_completed,\n                COUNT(CASE WHEN s.status = 'completed' THEN s.id END) AS evaluations_answered,\n                COUNT(s.id) AS evaluations_total\n            FROM test_processes p\n            LEFT JOIN test_sessions s ON s.process_id = p.id\n            WHERE p.id IN ({$placeholders})\n        ", $ids) ?: [];
+        $row = $this->db->fetch("\n            SELECT\n                COUNT(DISTINCT CASE WHEN p.status = 'closed' THEN p.id END) AS processes_completed,\n                COUNT(DISTINCT CASE WHEN COALESCE(ans.answers_count, 0) > 0 THEN s.id END) AS evaluations_answered,\n                COUNT(DISTINCT s.id) AS evaluations_total\n            FROM test_processes p\n            LEFT JOIN test_sessions s ON s.process_id = p.id AND s.status <> 'cancelled'\n            LEFT JOIN (\n                SELECT session_id, SUM(CASE WHEN answer_value IS NOT NULL AND TRIM(answer_value) <> '' THEN 1 ELSE 0 END) AS answers_count\n                FROM test_answers\n                GROUP BY session_id\n            ) ans ON ans.session_id = s.id\n            WHERE p.id IN ({$placeholders})\n        ", $ids) ?: [];
 
         return [
             'processes_total' => count($processes),
@@ -170,11 +177,16 @@ final class TestProcessModel
                 ) pi ON pi.process_id = p.id
                 LEFT JOIN (
                     SELECT process_id, user_id,
-                           COUNT(DISTINCT CASE WHEN status IN ('completed', 'expired') THEN instrument_id END) AS finished_instruments,
-                           COUNT(DISTINCT CASE WHEN status IN ('in_progress', 'completed', 'expired') THEN instrument_id END) AS started_instruments
-                    FROM test_sessions
-                    WHERE status <> 'cancelled'
-                    GROUP BY process_id, user_id
+                           COUNT(DISTINCT CASE WHEN ts.status = 'completed' THEN ts.instrument_id END) AS finished_instruments,
+                           COUNT(DISTINCT CASE WHEN ts.status = 'completed' OR COALESCE(answer_stats.answers_count, 0) > 0 THEN ts.instrument_id END) AS started_instruments
+                    FROM test_sessions ts
+                    LEFT JOIN (
+                        SELECT session_id, SUM(CASE WHEN answer_value IS NOT NULL AND TRIM(answer_value) <> '' THEN 1 ELSE 0 END) AS answers_count
+                        FROM test_answers
+                        GROUP BY session_id
+                    ) answer_stats ON answer_stats.session_id = ts.id
+                    WHERE ts.status <> 'cancelled'
+                    GROUP BY ts.process_id, ts.user_id
                 ) progress ON progress.process_id = p.id AND progress.user_id = pu.user_id
                 WHERE p.id IN ({$placeholders})
                 GROUP BY p.id, p.status, p.starts_at, p.ends_at
@@ -504,33 +516,49 @@ final class TestProcessModel
                 JOIN (
                     SELECT process_id, form_id, user_id, MAX(attempt_number) AS attempt_number
                     FROM ' . $schema . '.evaluation_survey_attempts
+                    WHERE status <> "preparing"
                     GROUP BY process_id, form_id, user_id
                 ) latest_attempt ON latest_attempt.form_id = ea.form_id
                     AND latest_attempt.user_id = ea.user_id
                     AND (latest_attempt.process_id <=> ea.process_id)
                     AND latest_attempt.attempt_number = ea.attempt_number
                 LEFT JOIN (
-                    SELECT attempt_id, COUNT(*) AS answers_count
+                    SELECT attempt_id, SUM(CASE WHEN answer_value IS NOT NULL AND TRIM(answer_value) <> "" THEN 1 ELSE 0 END) AS answers_count
                     FROM ' . $schema . '.evaluation_survey_answers
                     GROUP BY attempt_id
                 ) answer_counts ON answer_counts.attempt_id = ea.id
             ) latest ON latest.process_id = a.process_id AND latest.form_id = a.form_id AND latest.user_id = a.user_id
-            WHERE a.process_id = ? AND a.status <> "cancelled"
+            WHERE a.process_id = ?
             ORDER BY a.user_id, f.sort_order, f.id
         ', [$processId]);
     }
 
-    public function evaluationAssignmentsForUser(int $userId): array
+    public function evaluationAssignmentsForUser(int $userId, ?int $companyId = null, bool $includeInactiveForms = false): array
     {
         if (!$this->tableExists('test_process_evaluation_assignments')) {
             return [];
         }
 
         $schema = database_identifier('evaluaciones_encuestas');
-        return $this->db->fetchAll('
+        $companyId = $companyId && $companyId > 0 ? $companyId : null;
+        $companyScope = $companyId
+            ? ' AND p.company_id = ? AND u.company_id = ? AND (f.company_id IS NULL OR f.company_id = ?)'
+            : '';
+        $formStatusScope = $includeInactiveForms ? '' : ' AND f.status = "active"';
+        $processPolicySelect = $this->processPolicySelect();
+        $evaluationSnapshotSelect = $this->evaluationSnapshotSelect('latest');
+        // Los primeros cuatro valores acotan los agregados al usuario antes
+        // de aplicar el scope de empresa de la consulta principal.
+        $params = [$userId, $userId, $userId, $userId];
+        if ($companyId) array_push($params, $companyId, $companyId, $companyId);
+        $rows = $this->db->fetchAll('
             SELECT a.process_id, a.form_id, a.user_id, a.status AS assignment_status,
                    f.title AS form_title, f.form_type, f.duration_minutes, f.show_result_to_user,
                    p.name AS process_name, p.starts_at AS process_starts_at, p.ends_at AS process_ends_at,
+                   ' . ($this->hasProcessFacialEnrollmentColumn() ? 'COALESCE(p.require_facial_enrollment, 0)' : '0') . ' AS require_facial_enrollment,
+                   CASE WHEN latest.status = "in_progress" THEN latest.control_mode ELSE COALESCE(f.control_mode, "off") END AS control_mode,
+                   ' . $processPolicySelect . ', ' . $evaluationSnapshotSelect . ',
+                   latest.status AS latest_attempt_status,
                    CASE WHEN COALESCE(latest.status, "assigned") = "in_progress"
                              AND latest.control_mode = "supervised_audio_visual"
                              AND latest.supervised_started_at IS NULL
@@ -542,10 +570,12 @@ final class TestProcessModel
                    COALESCE(q.questions_count, 0) AS items_count
             FROM test_process_evaluation_assignments a
             JOIN test_processes p ON p.id = a.process_id
+            JOIN ' . $this->coreSchema . '.users u ON u.id = a.user_id
             JOIN ' . $schema . '.evaluation_survey_forms f ON f.id = a.form_id
             LEFT JOIN (
                 SELECT ea.id, ea.process_id, ea.form_id, ea.user_id, ea.status, ea.control_mode, ea.final_score, ea.completed_at,
                        eme.recording_started_at,
+                       ' . $this->evaluationSnapshotSelect('ea', false) . ',
                        (SELECT MIN(ae.created_at) FROM ' . $schema . '.evaluation_survey_activity_events ae WHERE ae.attempt_id = ea.id AND ae.event_type = "supervised_started") AS supervised_started_at,
                        COALESCE(answer_counts.answers_count, 0) AS answers_count
                 FROM ' . $schema . '.evaluation_survey_attempts ea
@@ -554,17 +584,24 @@ final class TestProcessModel
                 JOIN (
                     SELECT process_id, form_id, user_id, MAX(attempt_number) AS attempt_number
                     FROM ' . $schema . '.evaluation_survey_attempts
+                    WHERE user_id = ? AND status <> "preparing"
                     GROUP BY process_id, form_id, user_id
                 ) latest_attempt ON latest_attempt.form_id = ea.form_id
                     AND latest_attempt.user_id = ea.user_id
                     AND (latest_attempt.process_id <=> ea.process_id)
                     AND latest_attempt.attempt_number = ea.attempt_number
                 LEFT JOIN (
-                    SELECT attempt_id, COUNT(*) AS answers_count
+                    SELECT attempt_id, SUM(CASE WHEN answer_value IS NOT NULL AND TRIM(answer_value) <> "" THEN 1 ELSE 0 END) AS answers_count
                     FROM ' . $schema . '.evaluation_survey_answers
-                    WHERE answer_value IS NOT NULL AND TRIM(answer_value) <> ""
+                    WHERE attempt_id IN (
+                        SELECT scoped_attempt.id
+                        FROM ' . $schema . '.evaluation_survey_attempts scoped_attempt
+                        WHERE scoped_attempt.user_id = ?
+                    )
+                      AND answer_value IS NOT NULL AND TRIM(answer_value) <> ""
                     GROUP BY attempt_id
                 ) answer_counts ON answer_counts.attempt_id = ea.id
+                WHERE ea.user_id = ?
             ) latest ON latest.process_id = a.process_id AND latest.form_id = a.form_id AND latest.user_id = a.user_id
             LEFT JOIN (
                 SELECT form_id, COUNT(*) AS questions_count
@@ -572,9 +609,66 @@ final class TestProcessModel
                 WHERE is_active = 1
                 GROUP BY form_id
             ) q ON q.form_id = a.form_id
-            WHERE a.user_id = ? AND a.status <> "cancelled" AND f.status = "active"
+            WHERE a.user_id = ? AND a.status <> "cancelled"' . $formStatusScope . $companyScope . '
             ORDER BY FIELD(COALESCE(latest.status, "assigned"), "assigned", "in_progress", "completed", "expired"), a.assigned_at DESC
-        ', [$userId]);
+        ', $params);
+        foreach ($rows as &$row) {
+            if (!empty($row['process_policy_snapshot_at']) && (string) ($row['latest_attempt_status'] ?? '') === 'in_progress') {
+                $row['require_facial_enrollment'] = (int) ($row['process_facial_enrollment_required'] ?? 0);
+                $row['component_validation_required'] = (int) ($row['process_component_validation_required'] ?? 0);
+                $row['record_audio_visual'] = (int) ($row['process_record_audio_visual'] ?? 0);
+                $row['record_activity_actions'] = (int) ($row['process_record_actions'] ?? 0);
+            } elseif ((string) ($row['status'] ?? 'assigned') === 'assigned') {
+                $row = ProcessPrerequisiteService::resolve($row);
+            }
+        }
+        unset($row);
+        return $rows;
+    }
+
+    public function evaluationAssignmentForUser(int $formId, int $userId, int $companyId, ?int $processId = null): ?array
+    {
+        if ($formId <= 0 || $userId <= 0 || $companyId <= 0) return null;
+        $schema = database_identifier('evaluaciones_encuestas');
+        $processScope = $processId && $processId > 0 ? ' AND a.process_id = ?' : '';
+        $params = [$formId, $userId, $companyId, $companyId];
+        if ($processId && $processId > 0) $params[] = $processId;
+
+        $processPolicySelect = $this->processPolicySelect();
+        $evaluationSnapshotSelect = $this->evaluationSnapshotSelect('latest');
+        $rows = $this->db->fetchAll('
+            SELECT a.process_id, a.form_id, a.user_id, a.status AS assignment_status,
+                   ' . ($this->hasProcessFacialEnrollmentColumn() ? 'COALESCE(p.require_facial_enrollment, 0)' : '0') . ' AS require_facial_enrollment,
+                   CASE WHEN latest.status = "in_progress" THEN latest.control_mode ELSE COALESCE(f.control_mode, "off") END AS control_mode,
+                   latest.status AS latest_attempt_status,
+                   ' . $processPolicySelect . ', ' . $evaluationSnapshotSelect . '
+            FROM test_process_evaluation_assignments a
+            JOIN test_processes p ON p.id = a.process_id
+            JOIN ' . $this->coreSchema . '.users u ON u.id = a.user_id
+            JOIN ' . $schema . '.evaluation_survey_forms f ON f.id = a.form_id
+            LEFT JOIN ' . $schema . '.evaluation_survey_attempts latest
+              ON latest.id = (SELECT ea.id FROM ' . $schema . '.evaluation_survey_attempts ea
+                              WHERE ea.form_id = a.form_id AND ea.user_id = a.user_id AND ea.process_id = a.process_id AND ea.status <> "preparing"
+                              ORDER BY ea.attempt_number DESC, ea.id DESC LIMIT 1)
+            WHERE a.form_id = ? AND a.user_id = ? AND a.status = "assigned"
+              AND p.company_id = u.company_id AND u.company_id = ?
+              AND (f.company_id IS NULL OR f.company_id = ?) AND f.status = "active"
+              AND p.status = "active"' . $processScope . '
+            ORDER BY a.process_id ASC
+            LIMIT 2
+        ', $params);
+
+        if (count($rows) !== 1) return null;
+        $row = $rows[0];
+        if (!empty($row['process_policy_snapshot_at']) && (string) ($row['latest_attempt_status'] ?? '') === 'in_progress') {
+            $row['require_facial_enrollment'] = (int) ($row['process_facial_enrollment_required'] ?? 0);
+            $row['component_validation_required'] = (int) ($row['process_component_validation_required'] ?? 0);
+            $row['record_audio_visual'] = (int) ($row['process_record_audio_visual'] ?? 0);
+            $row['record_activity_actions'] = (int) ($row['process_record_actions'] ?? 0);
+        } elseif ((string) ($row['latest_attempt_status'] ?? '') !== 'in_progress') {
+            $row = ProcessPrerequisiteService::resolve($row);
+        }
+        return $row;
     }
 
     public function syncEvaluationForms(int $processId, array $formIds): void
@@ -694,8 +788,15 @@ final class TestProcessModel
         $startsAt = $this->dateTimeOrNull((string) ($data['starts_at'] ?? ''));
         $endsAt = $this->dateTimeOrNull((string) ($data['ends_at'] ?? ''));
         $allowExpiredReopen = isset($data['allow_expired_reopen']) ? 1 : 0;
+        $policies = [];
+        foreach (['facial_enrollment_policy', 'component_validation_policy', 'audio_visual_recording_policy', 'action_logging_policy'] as $policyField) {
+            $policies[$policyField] = ProcessPrerequisiteService::policy($data[$policyField] ?? 'inherit');
+        }
+        $requireFacialEnrollment = $policies['facial_enrollment_policy'] === 'required' ? 1
+            : ($policies['facial_enrollment_policy'] === 'disabled' ? 0
+                : (isset($data['require_facial_enrollment']) ? 1 : ($processId > 0 ? null : 0)));
 
-        return (int) $this->db->transaction(function (Database $db) use ($processId, $code, $name, $description, $status, $adminAssignmentMode, $availabilityStatus, $startsAt, $endsAt, $allowExpiredReopen, $createdBy, $companyId): int {
+        return (int) $this->db->transaction(function (Database $db) use ($processId, $code, $name, $description, $status, $adminAssignmentMode, $availabilityStatus, $startsAt, $endsAt, $allowExpiredReopen, $requireFacialEnrollment, $policies, $createdBy, $companyId): int {
             if ($processId > 0) {
                 $fields = ['code = ?', 'name = ?', 'description = ?', 'status = ?'];
                 $params = [$code, $name, $description, $status];
@@ -713,6 +814,16 @@ final class TestProcessModel
                 $fields[] = 'ends_at = ?';
                 $fields[] = 'allow_expired_reopen = ?';
                 array_push($params, $startsAt, $endsAt, $allowExpiredReopen, $processId);
+                if ($this->hasProcessFacialEnrollmentColumn() && $requireFacialEnrollment !== null) {
+                    $fields[] = 'require_facial_enrollment = ?';
+                    array_splice($params, count($params) - 1, 0, [$requireFacialEnrollment]);
+                }
+                foreach ($policies as $field => $value) {
+                    if ($this->columnExists('test_processes', $field)) {
+                        $fields[] = $field . ' = ?';
+                        array_splice($params, count($params) - 1, 0, [$value]);
+                    }
+                }
                 $db->execute('
                     UPDATE test_processes
                     SET ' . implode(', ', $fields) . '
@@ -732,6 +843,16 @@ final class TestProcessModel
                 }
                 array_push($columns, 'starts_at', 'ends_at', 'allow_expired_reopen', 'created_by');
                 array_push($params, $startsAt, $endsAt, $allowExpiredReopen, $createdBy);
+                if ($this->hasProcessFacialEnrollmentColumn()) {
+                    $columns[] = 'require_facial_enrollment';
+                    $params[] = $requireFacialEnrollment ?? 0;
+                }
+                foreach ($policies as $field => $value) {
+                    if ($this->columnExists('test_processes', $field)) {
+                        $columns[] = $field;
+                        $params[] = $value;
+                    }
+                }
                 if ($this->hasProcessCompanyColumn()) {
                     $columns[] = 'company_id';
                     $params[] = $companyId ?: null;
@@ -1039,7 +1160,7 @@ final class TestProcessModel
             $answersRow = $db->fetch('
                 SELECT COUNT(a.id) AS answers_count
                 FROM test_sessions ts
-                JOIN test_answers a ON a.session_id = ts.id
+                JOIN test_answers a ON a.session_id = ts.id AND a.answer_value IS NOT NULL AND TRIM(a.answer_value) <> ""
                 WHERE ts.process_id = ? AND ts.user_id = ?
             ', [$sourceProcessId, $userId]);
             $answersCount = (int) ($answersRow['answers_count'] ?? 0);
@@ -1105,7 +1226,7 @@ final class TestProcessModel
             JOIN test_processes p ON p.id = pu.process_id
             LEFT JOIN test_sessions ts ON ts.process_id = pu.process_id AND ts.user_id = pu.user_id
             LEFT JOIN (
-                SELECT session_id, COUNT(*) AS answers_count
+                SELECT session_id, SUM(CASE WHEN answer_value IS NOT NULL AND TRIM(answer_value) <> "" THEN 1 ELSE 0 END) AS answers_count
                 FROM test_answers
                 GROUP BY session_id
             ) answer_stats ON answer_stats.session_id = ts.id
@@ -1133,7 +1254,7 @@ final class TestProcessModel
             JOIN test_instruments i ON i.id = ts.instrument_id
             JOIN test_processes p ON p.id = ts.process_id
             LEFT JOIN (
-                SELECT session_id, COUNT(*) AS answers_count
+                SELECT session_id, SUM(CASE WHEN answer_value IS NOT NULL AND TRIM(answer_value) <> "" THEN 1 ELSE 0 END) AS answers_count
                 FROM test_answers
                 GROUP BY session_id
             ) answer_stats ON answer_stats.session_id = ts.id
@@ -1497,17 +1618,7 @@ final class TestProcessModel
                 continue;
             }
 
-            $otherAssignment = $this->db->fetch('
-                SELECT id
-                FROM test_process_evaluation_assignments
-                WHERE form_id = ? AND user_id = ? AND process_id <> ? AND status <> "cancelled"
-                LIMIT 1
-            ', [$formId, $userId, $processId]);
-            if ($otherAssignment) {
-                continue;
-            }
-
-            $attempts = $evaluationDb->fetchAll('SELECT id FROM evaluation_survey_attempts WHERE form_id = ? AND user_id = ?', [$formId, $userId]);
+            $attempts = $evaluationDb->fetchAll('SELECT id FROM evaluation_survey_attempts WHERE process_id = ? AND form_id = ? AND user_id = ?', [$processId, $formId, $userId]);
             foreach ($attempts as $attempt) {
                 $media->deleteForAttempt((int) ($attempt['id'] ?? 0));
             }
@@ -1600,7 +1711,7 @@ final class TestProcessModel
             return false;
         }
 
-        $durationMinutes = max(1, min(1440, $durationMinutes));
+        $durationMinutes = max(1, min(120, $durationMinutes));
         $assignment = $this->db->fetch('
             SELECT a.id
             FROM test_process_evaluation_assignments a
@@ -1669,6 +1780,70 @@ final class TestProcessModel
         return $this->reopenEvaluationAssignment($processId, $formId, $userId, $durationMinutes, $authorizedBy);
     }
 
+    public function reopenExpiredEvaluationAssignments(int $processId, int $formId, int $durationMinutes, array $authorizedBy = []): array
+    {
+        if (!$this->tableExists('test_process_evaluation_assignments') || $processId <= 0 || $formId <= 0) {
+            return ['reopened' => 0, 'eligible' => 0, 'allowed' => false, 'target_found' => false];
+        }
+
+        $durationMinutes = max(1, min(120, $durationMinutes));
+        $process = $this->db->fetch('SELECT id, allow_expired_reopen, status, starts_at, ends_at FROM test_processes WHERE id = ? LIMIT 1', [$processId]);
+        if (!$process || (int) ($process['allow_expired_reopen'] ?? 0) !== 1 || (string) ($process['status'] ?? '') !== 'active') {
+            return ['reopened' => 0, 'eligible' => 0, 'allowed' => false, 'target_found' => false];
+        }
+
+        $target = $this->db->fetch('SELECT id FROM test_process_evaluation_forms WHERE process_id = ? AND form_id = ? LIMIT 1', [$processId, $formId]);
+        if (!$target) {
+            return ['reopened' => 0, 'eligible' => 0, 'allowed' => true, 'target_found' => false];
+        }
+
+        $evaluationDb = database('evaluaciones_encuestas');
+        return $evaluationDb->transaction(function (Database $db) use ($processId, $formId, $durationMinutes, $authorizedBy): array {
+            $attempts = $db->fetchAll('
+                SELECT id, user_id
+                FROM evaluation_survey_attempts
+                WHERE process_id = ? AND form_id = ? AND status = "expired"
+                ORDER BY id ASC
+                FOR UPDATE
+            ', [$processId, $formId]);
+            if (!$attempts) {
+                return ['reopened' => 0, 'eligible' => 0, 'allowed' => true, 'target_found' => true];
+            }
+
+            $expiresAt = date('Y-m-d H:i:s', time() + ($durationMinutes * 60));
+            $ids = array_map(static fn(array $attempt): int => (int) ($attempt['id'] ?? 0), $attempts);
+            $placeholders = implode(',', array_fill(0, count($ids), '?'));
+            $updated = $db->execute(
+                'UPDATE evaluation_survey_attempts SET status = "in_progress", expires_at = ?, completed_at = NULL, raw_score = NULL, final_score = NULL, passed = NULL, last_seen_at = NOW() WHERE id IN (' . $placeholders . ') AND status = "expired"',
+                array_merge([$expiresAt], $ids)
+            );
+
+            $authorizedByName = trim((string) ($authorizedBy['name'] ?? ''));
+            if ($authorizedByName === '' && (int) ($authorizedBy['id'] ?? 0) > 0) {
+                $authorizedByName = 'Usuario #' . (int) $authorizedBy['id'];
+            }
+            $metadata = json_encode([
+                'duration_minutes' => $durationMinutes,
+                'expires_at' => $expiresAt,
+                'authorized_by_id' => (int) ($authorizedBy['id'] ?? 0),
+                'authorized_by_name' => $authorizedByName,
+                'authorized_by_email' => trim((string) ($authorizedBy['email'] ?? '')),
+                'authorized_by_profile' => trim((string) ($authorizedBy['profile_name'] ?? '')),
+                'bulk_reopen' => true,
+                'process_id' => $processId,
+                'form_id' => $formId,
+            ], JSON_UNESCAPED_UNICODE);
+            foreach ($attempts as $attempt) {
+                $db->execute(
+                    'INSERT INTO evaluation_survey_activity_events (attempt_id, form_id, user_id, event_type, metadata) VALUES (?, ?, ?, "evaluation_reopened_by_admin", ?)',
+                    [(int) ($attempt['id'] ?? 0), $formId, (int) ($attempt['user_id'] ?? 0), $metadata]
+                );
+            }
+
+            return ['reopened' => (int) $updated, 'eligible' => count($attempts), 'allowed' => true, 'target_found' => true];
+        });
+    }
+
     public function resetSession(int $processId, int $sessionId): bool
     {
         $session = $this->db->fetch('
@@ -1726,7 +1901,7 @@ final class TestProcessModel
 
     public function reopenSession(int $processId, int $sessionId, int $durationMinutes, array $authorizedBy = []): bool
     {
-        $durationMinutes = max(1, min(1440, $durationMinutes));
+        $durationMinutes = max(1, min(120, $durationMinutes));
 
         return (bool) $this->db->transaction(function (Database $db) use ($processId, $sessionId, $durationMinutes, $authorizedBy): bool {
             $session = $db->fetch('
@@ -1815,7 +1990,7 @@ final class TestProcessModel
 
     public function reopenExpiredSessionsForInstrument(int $processId, int $instrumentId, int $durationMinutes, array $authorizedBy = []): array
     {
-        $durationMinutes = max(1, min(1440, $durationMinutes));
+        $durationMinutes = max(1, min(120, $durationMinutes));
 
         return $this->db->transaction(function (Database $db) use ($processId, $instrumentId, $durationMinutes, $authorizedBy): array {
             $process = $db->fetch('
@@ -1826,7 +2001,7 @@ final class TestProcessModel
             ', [$processId]);
 
             if (!$process || (int) ($process['allow_expired_reopen'] ?? 0) !== 1) {
-                return ['reopened' => 0, 'eligible' => 0, 'skipped' => 0, 'allowed' => false];
+                return ['reopened' => 0, 'eligible' => 0, 'skipped' => 0, 'allowed' => false, 'target_found' => false];
             }
 
             $instrumentInProcess = $db->fetch('
@@ -1837,7 +2012,7 @@ final class TestProcessModel
             ', [$processId, $instrumentId]);
 
             if (!$instrumentInProcess) {
-                return ['reopened' => 0, 'eligible' => 0, 'skipped' => 0, 'allowed' => true, 'instrument_found' => false];
+                return ['reopened' => 0, 'eligible' => 0, 'skipped' => 0, 'allowed' => true, 'instrument_found' => false, 'target_found' => false];
             }
 
             $sessions = $db->fetchAll('
@@ -1851,7 +2026,7 @@ final class TestProcessModel
             ', [$processId, $instrumentId]);
 
             if (!$sessions) {
-                return ['reopened' => 0, 'eligible' => 0, 'skipped' => 0, 'allowed' => true, 'instrument_found' => true];
+                return ['reopened' => 0, 'eligible' => 0, 'skipped' => 0, 'allowed' => true, 'instrument_found' => true, 'target_found' => true];
             }
 
             $sessionIds = array_map('intval', array_column($sessions, 'id'));
@@ -1915,6 +2090,7 @@ final class TestProcessModel
                 'skipped' => max(0, count($sessionIds) - $reopened),
                 'allowed' => true,
                 'instrument_found' => true,
+                'target_found' => true,
             ];
         });
     }
@@ -2294,6 +2470,9 @@ final class TestProcessModel
         }
         if ($this->tableExists('test_process_evaluation_assignments')) {
             foreach ($this->processEvaluationAssignments($processId) as $assignment) {
+                if ((string) ($assignment['assignment_status'] ?? '') === 'cancelled') {
+                    continue;
+                }
                 $status = (string) ($assignment['evaluation_status'] ?? 'assigned');
                 if ($status === 'assigned') {
                     $summary['assigned_total']++;
@@ -2318,7 +2497,7 @@ final class TestProcessModel
         }
 
         $answerCountsSql = '
-            SELECT session_id, COUNT(*) AS answers_count
+            SELECT session_id, SUM(CASE WHEN answer_value IS NOT NULL AND TRIM(answer_value) <> "" THEN 1 ELSE 0 END) AS answers_count
             FROM test_answers
             GROUP BY session_id
         ';
@@ -2676,7 +2855,7 @@ final class TestProcessModel
             SELECT ts.id, ts.completed_at, ts.updated_at, ts.created_at, COALESCE(ac.answers_count, 0) AS answers_count
             FROM test_sessions ts
             LEFT JOIN (
-                SELECT session_id, COUNT(*) AS answers_count
+                SELECT session_id, SUM(CASE WHEN answer_value IS NOT NULL AND TRIM(answer_value) <> "" THEN 1 ELSE 0 END) AS answers_count
                 FROM test_answers
                 GROUP BY session_id
             ) ac ON ac.session_id = ts.id
@@ -2974,20 +3153,27 @@ final class TestProcessModel
 
     private function processListSql(): string
     {
-        $sessionCountsSql = '0 AS completed_sessions, 0 AS sessions_count';
+        $sessionCountsSql = '0 AS completed_sessions, 0 AS answered_sessions, 0 AS in_progress_sessions, 0 AS expired_sessions, 0 AS sessions_count';
         $onlineUsersSql = '0 AS online_users_count';
         $onlineSurveySql = '';
+        $evaluationProgressJoinSql = '';
         $evaluationCountsSql = '
             0 AS evaluation_forms_count,
             0 AS evaluation_assignments_count,
-            0 AS completed_evaluation_assignments
+            0 AS completed_evaluation_assignments,
+            0 AS answered_evaluation_assignments,
+            0 AS in_progress_evaluation_assignments,
+            0 AS expired_evaluation_assignments
         ';
         $evaluationsCountSql = '(SELECT COUNT(*) FROM test_process_instruments pi WHERE pi.process_id = p.id)';
 
         if ($this->hasSessionProcessColumn()) {
             $sessionCountsSql = '
-                (SELECT COUNT(*) FROM test_sessions ts WHERE ts.process_id = p.id AND ts.status IN ("completed", "expired", "in_progress")) AS completed_sessions,
-                (SELECT COUNT(*) FROM test_sessions ts WHERE ts.process_id = p.id) AS sessions_count
+                (SELECT COUNT(*) FROM test_sessions ts WHERE ts.process_id = p.id AND ts.status = "completed") AS completed_sessions,
+                (SELECT COUNT(DISTINCT ts.id) FROM test_sessions ts JOIN test_answers ta ON ta.session_id = ts.id AND ta.answer_value IS NOT NULL AND TRIM(ta.answer_value) <> "" WHERE ts.process_id = p.id AND ts.status <> "cancelled") AS answered_sessions,
+                (SELECT COUNT(*) FROM test_sessions ts WHERE ts.process_id = p.id AND ts.status = "in_progress") AS in_progress_sessions,
+                (SELECT COUNT(*) FROM test_sessions ts WHERE ts.process_id = p.id AND ts.status = "expired") AS expired_sessions,
+                (SELECT COUNT(*) FROM test_sessions ts WHERE ts.process_id = p.id AND ts.status <> "cancelled") AS sessions_count
             ';
 
             if ($this->tableExists('test_process_evaluation_forms') && $this->tableExists('test_process_evaluation_assignments')) {
@@ -3007,26 +3193,40 @@ final class TestProcessModel
                     (SELECT COUNT(*)
                      FROM test_process_evaluation_forms pef
                      WHERE pef.process_id = p.id) AS evaluation_forms_count,
-                    (SELECT COUNT(*)
-                     FROM test_process_evaluation_assignments pea
-                     WHERE pea.process_id = p.id AND pea.status <> "cancelled") AS evaluation_assignments_count,
-                    (SELECT COUNT(*)
-                     FROM test_process_evaluation_assignments pea
-                     LEFT JOIN (
-                         SELECT ea.process_id, ea.form_id, ea.user_id, ea.status
-                         FROM ' . $evaluationSchema . '.evaluation_survey_attempts ea
-                         JOIN (
-                             SELECT process_id, form_id, user_id, MAX(attempt_number) AS attempt_number
-                             FROM ' . $evaluationSchema . '.evaluation_survey_attempts
-                             GROUP BY process_id, form_id, user_id
-                         ) latest_attempt ON latest_attempt.form_id = ea.form_id
-                             AND latest_attempt.user_id = ea.user_id
-                             AND (latest_attempt.process_id <=> ea.process_id)
-                             AND latest_attempt.attempt_number = ea.attempt_number
-                     ) latest ON latest.process_id = pea.process_id AND latest.form_id = pea.form_id AND latest.user_id = pea.user_id
-                     WHERE pea.process_id = p.id
-                       AND pea.status <> "cancelled"
-                       AND COALESCE(latest.status, "assigned") IN ("completed", "expired", "in_progress")) AS completed_evaluation_assignments
+                    COALESCE(evaluation_progress.evaluation_assignments_count, 0) AS evaluation_assignments_count,
+                    COALESCE(evaluation_progress.completed_evaluation_assignments, 0) AS completed_evaluation_assignments,
+                    COALESCE(evaluation_progress.answered_evaluation_assignments, 0) AS answered_evaluation_assignments,
+                    COALESCE(evaluation_progress.in_progress_evaluation_assignments, 0) AS in_progress_evaluation_assignments,
+                    COALESCE(evaluation_progress.expired_evaluation_assignments, 0) AS expired_evaluation_assignments
+                ';
+                $evaluationProgressJoinSql = '
+                    LEFT JOIN (
+                        SELECT pea.process_id,
+                               COUNT(*) AS evaluation_assignments_count,
+                               SUM(CASE WHEN latest.status = "completed" THEN 1 ELSE 0 END) AS completed_evaluation_assignments,
+                               SUM(CASE WHEN latest.id IS NOT NULL AND EXISTS (
+                                   SELECT 1 FROM ' . $evaluationSchema . '.evaluation_survey_answers answer_row
+                                   WHERE answer_row.attempt_id = latest.id
+                                     AND answer_row.answer_value IS NOT NULL
+                                     AND TRIM(answer_row.answer_value) <> ""
+                               ) THEN 1 ELSE 0 END) AS answered_evaluation_assignments,
+                               SUM(CASE WHEN latest.status = "in_progress" THEN 1 ELSE 0 END) AS in_progress_evaluation_assignments,
+                               SUM(CASE WHEN latest.status = "expired" THEN 1 ELSE 0 END) AS expired_evaluation_assignments
+                        FROM test_process_evaluation_assignments pea
+                        LEFT JOIN ' . $evaluationSchema . '.evaluation_survey_attempts latest
+                          ON latest.id = (
+                              SELECT ea2.id
+                              FROM ' . $evaluationSchema . '.evaluation_survey_attempts ea2
+                              WHERE ea2.process_id = pea.process_id
+                                AND ea2.form_id = pea.form_id
+                                AND ea2.user_id = pea.user_id
+                                AND ea2.status <> "preparing"
+                              ORDER BY ea2.attempt_number DESC, ea2.id DESC
+                              LIMIT 1
+                          )
+                        WHERE pea.status <> "cancelled"
+                        GROUP BY pea.process_id
+                    ) evaluation_progress ON evaluation_progress.process_id = p.id
                 ';
             }
 
@@ -3064,6 +3264,7 @@ final class TestProcessModel
                 ' . $evaluationCountsSql . ',
                 ' . $onlineUsersSql . '
             FROM test_processes p
+            ' . $evaluationProgressJoinSql . '
         ';
     }
 
@@ -3125,6 +3326,9 @@ final class TestProcessModel
     private function companyUserScopeSql(string $alias): string
     {
         $user = current_user();
+        if ($user && (string) ($user['role'] ?? '') === 'company_admin') {
+            return (int) ($user['company_id'] ?? 0) > 0 ? 'AND ' . $alias . '.company_id = ?' : 'AND 1 = 0';
+        }
         if ($user && (has_permission('manage_company_processes') || $this->isCompanySupervisor($user)) && !has_permission('manage_test_processes') && (int) ($user['company_id'] ?? 0) > 0) {
             return 'AND ' . $alias . '.company_id = ?';
         }
@@ -3135,6 +3339,9 @@ final class TestProcessModel
     private function companyUserScopeParams(): array
     {
         $user = current_user();
+        if ($user && (string) ($user['role'] ?? '') === 'company_admin') {
+            return (int) ($user['company_id'] ?? 0) > 0 ? [(int) $user['company_id']] : [];
+        }
         if ($user && (has_permission('manage_company_processes') || $this->isCompanySupervisor($user)) && !has_permission('manage_test_processes') && (int) ($user['company_id'] ?? 0) > 0) {
             return [(int) $user['company_id']];
         }
@@ -3153,6 +3360,86 @@ final class TestProcessModel
             && $this->columnExists('test_processes', 'availability_changed_by');
 
         return $this->hasProcessAvailabilityColumns;
+    }
+
+    public function supportsFacialEnrollmentRequirement(): bool
+    {
+        if ($this->hasProcessFacialEnrollmentColumn !== null) {
+            return $this->hasProcessFacialEnrollmentColumn;
+        }
+
+        $this->hasProcessFacialEnrollmentColumn = $this->columnExists('test_processes', 'require_facial_enrollment');
+        return $this->hasProcessFacialEnrollmentColumn;
+    }
+
+    public function supportsProcessActivityPolicies(): bool
+    {
+        if ($this->hasProcessActivityPolicyColumns !== null) {
+            return $this->hasProcessActivityPolicyColumns;
+        }
+        try {
+            $row = $this->db->fetch('SELECT COUNT(*) AS total FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = "test_processes" AND COLUMN_NAME IN ("facial_enrollment_policy", "component_validation_policy", "audio_visual_recording_policy", "action_logging_policy")');
+            $this->hasProcessActivityPolicyColumns = (int) ($row['total'] ?? 0) === 4;
+        } catch (Throwable $exception) {
+            error_log('Process activity policy schema check error: ' . $exception->getMessage());
+            $this->hasProcessActivityPolicyColumns = false;
+        }
+        return $this->hasProcessActivityPolicyColumns;
+    }
+
+    private function hasProcessFacialEnrollmentColumn(): bool
+    {
+        return $this->supportsFacialEnrollmentRequirement();
+    }
+
+    private function processPolicySelect(): string
+    {
+        $columns = ['facial_enrollment_policy', 'component_validation_policy', 'audio_visual_recording_policy', 'action_logging_policy'];
+        $selects = [];
+        foreach ($columns as $column) {
+            $selects[] = $this->policySchemaColumnExists('e_talent_tests', 'test_processes', $column)
+                ? 'p.' . $column . ' AS ' . $column
+                : '"inherit" AS ' . $column;
+        }
+        return implode(', ', $selects);
+    }
+
+    private function evaluationSnapshotSelect(string $alias, bool $qualified = true): string
+    {
+        $columns = [
+            'process_facial_enrollment_required', 'process_component_validation_required',
+            'process_record_audio_visual', 'process_record_actions', 'process_policy_snapshot_at',
+        ];
+        $selects = [];
+        foreach ($columns as $column) {
+            $exists = $this->policySchemaColumnExists('e_talent_evaluaciones_encuestas', 'evaluation_survey_attempts', $column);
+            if (!$exists) {
+                $selects[] = 'NULL AS ' . $column;
+            } else {
+                $selects[] = $alias . '.' . $column . ' AS ' . $column;
+            }
+        }
+        return implode(', ', $selects);
+    }
+
+    private function policySchemaColumnExists(string $schema, string $table, string $column): bool
+    {
+        $key = $schema . '.' . $table . '.' . $column;
+        if (array_key_exists($key, $this->policySchemaColumnCache)) return $this->policySchemaColumnCache[$key];
+        $tableKey = $schema . '.' . $table;
+        if (empty($this->policySchemaTablesLoaded[$tableKey])) {
+            $this->policySchemaTablesLoaded[$tableKey] = true;
+            try {
+                $rows = $this->db->fetchAll('SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?', [$schema, $table]);
+                foreach ($rows as $row) {
+                    $this->policySchemaColumnCache[$tableKey . '.' . (string) $row['COLUMN_NAME']] = true;
+                }
+            } catch (Throwable $exception) {
+                error_log('Process activity policy schema check error: ' . $exception->getMessage());
+            }
+        }
+        if (array_key_exists($key, $this->policySchemaColumnCache)) return true;
+        return $this->policySchemaColumnCache[$key] = false;
     }
 
     private function hasUserLoginEventsTable(): bool
@@ -3231,7 +3518,7 @@ final class TestProcessModel
 
     private function isGlobalProcessAdmin(): bool
     {
-        return has_permission('manage_tests') || has_permission('manage_test_processes');
+        return !is_company_admin_user() && (has_permission('manage_tests') || has_permission('manage_test_processes'));
     }
 
     private function isCompanySupervisor(array $user): bool

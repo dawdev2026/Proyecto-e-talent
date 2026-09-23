@@ -22,7 +22,7 @@ final class EvaluationSurveyDashboardModel
         $unassignedParams = [];
         if ($companyId && $companyId > 0) {
             $formScopeSql = ' AND (f.company_id IS NULL OR f.company_id = ?)';
-            $processScopeSql = ' AND (p.company_id = ? OR u.company_id = ?)';
+            $processScopeSql = ' AND p.company_id = ? AND u.company_id = ?';
             $processParams = [$companyId, $companyId, $companyId];
             $unassignedParams = [$companyId, $companyId];
         }
@@ -34,15 +34,17 @@ final class EvaluationSurveyDashboardModel
             'SELECT f.id, f.title, f.status, f.max_score, f.passing_score,
                     p.id AS process_id, p.name AS process_name, p.code AS process_code,
                     COUNT(DISTINCT pea.user_id) AS assigned_people,
-                    COUNT(DISTINCT CASE WHEN a.status IN ("in_progress", "completed", "expired") THEN pea.user_id END) AS answered_people,
-                    COUNT(DISTINCT CASE WHEN a.status IN ("completed", "expired") THEN pea.user_id END) AS finished_people,
-                    COUNT(DISTINCT CASE WHEN a.status IN ("completed", "expired") AND a.final_score IS NOT NULL THEN pea.user_id END) AS graded_people,
-                    COUNT(DISTINCT CASE WHEN a.status IN ("completed", "expired") AND a.final_score >= COALESCE(f.passing_score, f.max_score + 1) THEN pea.user_id END) AS approved_people,
-                    COUNT(DISTINCT CASE WHEN a.status IN ("completed", "expired") AND a.final_score IS NOT NULL AND a.final_score < COALESCE(f.passing_score, f.max_score + 1) THEN pea.user_id END) AS failed_people,
-                    COALESCE(AVG(CASE WHEN a.status IN ("completed", "expired") THEN a.final_score END), 0) AS average_score,
-                    COALESCE(SUM(CASE WHEN a.status IN ("completed", "expired") THEN COALESCE(ast.correct_answers, 0) ELSE 0 END), 0) AS correct_answers,
-                    COALESCE(SUM(CASE WHEN a.status IN ("completed", "expired") THEN COALESCE(ast.incorrect_answers, 0) ELSE 0 END), 0) AS incorrect_answers,
-                    COALESCE(SUM(CASE WHEN a.status IN ("completed", "expired") THEN COALESCE(q.total_questions, 0) - COALESCE(ast.answered_answers, 0) ELSE 0 END), 0) AS unanswered_answers
+                    COUNT(DISTINCT CASE WHEN COALESCE(ast.answered_answers, 0) > 0 THEN pea.user_id END) AS answered_people,
+                    COUNT(DISTINCT CASE WHEN a.status = "in_progress" THEN pea.user_id END) AS in_progress_people,
+                    COUNT(DISTINCT CASE WHEN a.status = "completed" THEN pea.user_id END) AS finished_people,
+                    COUNT(DISTINCT CASE WHEN a.status = "expired" THEN pea.user_id END) AS expired_people,
+                    COUNT(DISTINCT CASE WHEN a.status = "completed" AND a.final_score IS NOT NULL THEN pea.user_id END) AS graded_people,
+                    COUNT(DISTINCT CASE WHEN a.status = "completed" AND a.final_score >= COALESCE(f.passing_score, f.max_score + 1) THEN pea.user_id END) AS approved_people,
+                    COUNT(DISTINCT CASE WHEN a.status = "completed" AND a.final_score IS NOT NULL AND a.final_score < COALESCE(f.passing_score, f.max_score + 1) THEN pea.user_id END) AS failed_people,
+                    COALESCE(AVG(CASE WHEN a.status = "completed" THEN a.final_score END), 0) AS average_score,
+                    COALESCE(SUM(CASE WHEN a.status = "completed" THEN COALESCE(ast.correct_answers, 0) ELSE 0 END), 0) AS correct_answers,
+                    COALESCE(SUM(CASE WHEN a.status = "completed" THEN COALESCE(ast.incorrect_answers, 0) ELSE 0 END), 0) AS incorrect_answers,
+                    COALESCE(SUM(CASE WHEN a.status = "completed" THEN COALESCE(q.total_questions, 0) - COALESCE(ast.answered_answers, 0) ELSE 0 END), 0) AS unanswered_answers
              FROM ' . $this->testsSchema . '.test_process_evaluation_forms pef
              JOIN ' . $this->testsSchema . '.test_processes p ON p.id = pef.process_id
              JOIN evaluation_survey_forms f ON f.id = pef.form_id AND f.form_type = "assessment"' . $formScopeSql . '
@@ -54,9 +56,10 @@ final class EvaluationSurveyDashboardModel
               AND a.user_id = pea.user_id
               AND a.attempt_number = (
                   SELECT MAX(a2.attempt_number)
-                  FROM evaluation_survey_attempts a2
-                  WHERE a2.form_id = pea.form_id
+                 FROM evaluation_survey_attempts a2
+                 WHERE a2.form_id = pea.form_id
                     AND a2.user_id = pea.user_id
+                    AND a2.status <> "preparing"
                     AND (
                         a2.process_id = pea.process_id
                         OR (
@@ -90,7 +93,7 @@ final class EvaluationSurveyDashboardModel
                  SELECT ea.attempt_id,
                         SUM(CASE WHEN ea.answer_value IS NOT NULL AND ea.answer_value <> "" AND ea.score_value > 0 THEN 1 ELSE 0 END) AS correct_answers,
                         SUM(CASE WHEN ea.answer_value IS NOT NULL AND ea.answer_value <> "" AND COALESCE(ea.score_value, 0) <= 0 THEN 1 ELSE 0 END) AS incorrect_answers,
-                        COUNT(*) AS answered_answers
+                        SUM(CASE WHEN ea.answer_value IS NOT NULL AND TRIM(ea.answer_value) <> "" THEN 1 ELSE 0 END) AS answered_answers
                  FROM evaluation_survey_answers ea
                  GROUP BY ea.attempt_id
              ) ast ON ast.attempt_id = a.id
@@ -111,15 +114,17 @@ final class EvaluationSurveyDashboardModel
             'SELECT f.id, f.title, f.status, f.max_score, f.passing_score,
                     NULL AS process_id, NULL AS process_name, NULL AS process_code,
                     COUNT(DISTINCT a.user_id) AS assigned_people,
-                    COUNT(DISTINCT CASE WHEN a.status IN ("in_progress", "completed", "expired") THEN a.user_id END) AS answered_people,
-                    COUNT(DISTINCT CASE WHEN a.status IN ("completed", "expired") THEN a.user_id END) AS finished_people,
-                    COUNT(DISTINCT CASE WHEN a.status IN ("completed", "expired") AND a.final_score IS NOT NULL THEN a.user_id END) AS graded_people,
-                    COUNT(DISTINCT CASE WHEN a.status IN ("completed", "expired") AND a.final_score >= COALESCE(f.passing_score, f.max_score + 1) THEN a.user_id END) AS approved_people,
-                    COUNT(DISTINCT CASE WHEN a.status IN ("completed", "expired") AND a.final_score IS NOT NULL AND a.final_score < COALESCE(f.passing_score, f.max_score + 1) THEN a.user_id END) AS failed_people,
-                    COALESCE(AVG(CASE WHEN a.status IN ("completed", "expired") THEN a.final_score END), 0) AS average_score,
-                    COALESCE(SUM(CASE WHEN a.status IN ("completed", "expired") THEN COALESCE(ast.correct_answers, 0) ELSE 0 END), 0) AS correct_answers,
-                    COALESCE(SUM(CASE WHEN a.status IN ("completed", "expired") THEN COALESCE(ast.incorrect_answers, 0) ELSE 0 END), 0) AS incorrect_answers,
-                    COALESCE(SUM(CASE WHEN a.status IN ("completed", "expired") THEN COALESCE(q.total_questions, 0) - COALESCE(ast.answered_answers, 0) ELSE 0 END), 0) AS unanswered_answers
+                    COUNT(DISTINCT CASE WHEN COALESCE(ast.answered_answers, 0) > 0 THEN a.user_id END) AS answered_people,
+                    COUNT(DISTINCT CASE WHEN a.status = "in_progress" THEN a.user_id END) AS in_progress_people,
+                    COUNT(DISTINCT CASE WHEN a.status = "completed" THEN a.user_id END) AS finished_people,
+                    COUNT(DISTINCT CASE WHEN a.status = "expired" THEN a.user_id END) AS expired_people,
+                    COUNT(DISTINCT CASE WHEN a.status = "completed" AND a.final_score IS NOT NULL THEN a.user_id END) AS graded_people,
+                    COUNT(DISTINCT CASE WHEN a.status = "completed" AND a.final_score >= COALESCE(f.passing_score, f.max_score + 1) THEN a.user_id END) AS approved_people,
+                    COUNT(DISTINCT CASE WHEN a.status = "completed" AND a.final_score IS NOT NULL AND a.final_score < COALESCE(f.passing_score, f.max_score + 1) THEN a.user_id END) AS failed_people,
+                    COALESCE(AVG(CASE WHEN a.status = "completed" THEN a.final_score END), 0) AS average_score,
+                    COALESCE(SUM(CASE WHEN a.status = "completed" THEN COALESCE(ast.correct_answers, 0) ELSE 0 END), 0) AS correct_answers,
+                    COALESCE(SUM(CASE WHEN a.status = "completed" THEN COALESCE(ast.incorrect_answers, 0) ELSE 0 END), 0) AS incorrect_answers,
+                    COALESCE(SUM(CASE WHEN a.status = "completed" THEN COALESCE(q.total_questions, 0) - COALESCE(ast.answered_answers, 0) ELSE 0 END), 0) AS unanswered_answers
              FROM evaluation_survey_forms f
              JOIN evaluation_survey_attempts a ON a.form_id = f.id
              LEFT JOIN ' . $this->coreSchema . '.users u ON u.id = a.user_id
@@ -127,7 +132,7 @@ final class EvaluationSurveyDashboardModel
                  SELECT ea.attempt_id,
                         SUM(CASE WHEN ea.answer_value IS NOT NULL AND ea.answer_value <> "" AND ea.score_value > 0 THEN 1 ELSE 0 END) AS correct_answers,
                         SUM(CASE WHEN ea.answer_value IS NOT NULL AND ea.answer_value <> "" AND COALESCE(ea.score_value, 0) <= 0 THEN 1 ELSE 0 END) AS incorrect_answers,
-                        COUNT(*) AS answered_answers
+                        SUM(CASE WHEN ea.answer_value IS NOT NULL AND TRIM(ea.answer_value) <> "" THEN 1 ELSE 0 END) AS answered_answers
                  FROM evaluation_survey_answers ea
                  GROUP BY ea.attempt_id
              ) ast ON ast.attempt_id = a.id
@@ -139,26 +144,26 @@ final class EvaluationSurveyDashboardModel
              ) q ON q.form_id = f.id
              WHERE f.form_type = "assessment"
                AND a.process_id IS NULL' . $formScopeSql . '
-               AND (' . ($companyId && $companyId > 0 ? 'u.company_id = ? OR ' : '') . 'NOT EXISTS (
-                    SELECT 1
-                    FROM ' . $this->testsSchema . '.test_process_evaluation_assignments pea
-                    WHERE pea.form_id = a.form_id AND pea.user_id = a.user_id AND pea.status <> "cancelled"
-               ) OR 2 <= (
-                    SELECT COUNT(DISTINCT pea2.process_id)
-                    FROM ' . $this->testsSchema . '.test_process_evaluation_assignments pea2
-                    WHERE pea2.form_id = a.form_id AND pea2.user_id = a.user_id AND pea2.status <> "cancelled"
-               ))
+               AND ' . ($companyId && $companyId > 0 ? 'u.company_id = ? AND ' : '') . '(NOT EXISTS (
+                        SELECT 1
+                        FROM ' . $this->testsSchema . '.test_process_evaluation_assignments pea
+                        WHERE pea.form_id = a.form_id AND pea.user_id = a.user_id AND pea.status <> "cancelled"
+                    ) OR 2 <= (
+                        SELECT COUNT(DISTINCT pea2.process_id)
+                        FROM ' . $this->testsSchema . '.test_process_evaluation_assignments pea2
+                        WHERE pea2.form_id = a.form_id AND pea2.user_id = a.user_id AND pea2.status <> "cancelled"
+                    ))
              GROUP BY f.id, f.title, f.status, f.max_score, f.passing_score
              ORDER BY f.updated_at DESC, f.id DESC',
             $unassignedParams
         );
         $rows = array_merge($rows, $unassignedRows);
 
-        $summary = ['forms' => count($rows), 'assigned_people' => 0, 'answered_people' => 0, 'finished' => 0, 'approved' => 0, 'failed' => 0, 'average_score' => 0.0];
+        $summary = ['forms' => count($rows), 'assigned_people' => 0, 'answered_people' => 0, 'in_progress' => 0, 'finished' => 0, 'expired' => 0, 'approved' => 0, 'failed' => 0, 'average_score' => 0.0];
         $weightedScore = 0.0;
         $gradedTotal = 0;
         foreach ($rows as &$row) {
-            foreach (['assigned_people', 'answered_people', 'finished_people', 'graded_people', 'approved_people', 'failed_people'] as $key) {
+            foreach (['assigned_people', 'answered_people', 'in_progress_people', 'finished_people', 'expired_people', 'graded_people', 'approved_people', 'failed_people'] as $key) {
                 $row[$key] = (int) ($row[$key] ?? 0);
             }
             $row['average_score'] = (float) ($row['average_score'] ?? 0);
@@ -170,7 +175,9 @@ final class EvaluationSurveyDashboardModel
                 : null;
             $summary['assigned_people'] += $row['assigned_people'];
             $summary['answered_people'] += $row['answered_people'];
+            $summary['in_progress'] += $row['in_progress_people'];
             $summary['finished'] += $row['finished_people'];
+            $summary['expired'] += $row['expired_people'];
             $summary['approved'] += $row['approved_people'];
             $summary['failed'] += $row['failed_people'];
             $weightedScore += $row['average_score'] * $row['graded_people'];
@@ -186,8 +193,11 @@ final class EvaluationSurveyDashboardModel
      * Consolidates integrity signals only for process-evaluation assignments.
      * Signals are observations for manual review, not findings of misconduct.
      */
-    public function integrityReport(?int $companyId = null, ?array $processIds = null, ?array $formIds = null, ?array $testIds = null): array
+    public function integrityReport(?int $companyId = null, ?array $processIds = null, ?array $formIds = null, ?array $testIds = null, string $domain = 'both', ?string $dateFrom = null, ?string $dateUntil = null): array
     {
+        $dateFrom = $dateFrom ?: date('Y-m-d', strtotime('-90 days'));
+        $dateUntil = $dateUntil ?: date('Y-m-d', strtotime('+1 day'));
+        $dateParams = [$dateFrom, $dateUntil];
         $conditions = ['pea.status <> "cancelled"', 'f.form_type = "assessment"'];
         $params = [];
         $activityAttentionEvents = ['tab_hidden', 'window_blurred', 'fullscreen_exited', 'fullscreen_failed', 'fullscreen_denied', 'fullscreen_unavailable', 'inactive_detected', 'copy_blocked', 'cut_blocked', 'paste_blocked', 'print_blocked', 'context_menu_blocked', 'drag_blocked', 'audio_visual_recording_interrupted', 'audio_visual_upload_failed', 'multiple_voice_possible'];
@@ -202,11 +212,18 @@ final class EvaluationSurveyDashboardModel
             $params[] = $companyId;
             $params[] = $companyId;
         }
+        // El reporte incluye asignaciones creadas en el rango, intentos
+        // iniciados en el rango y actividad ocurrida en el rango aunque el
+        // intento haya comenzado antes.
+        $conditions[] = '(pea.assigned_at >= ? AND pea.assigned_at < ? OR a.created_at >= ? AND a.created_at < ? OR EXISTS (SELECT 1 FROM evaluation_survey_activity_events ae WHERE ae.attempt_id = a.id AND ae.created_at >= ? AND ae.created_at < ?) OR EXISTS (SELECT 1 FROM evaluation_survey_media_risk_events me WHERE me.attempt_id = a.id AND me.created_at >= ? AND me.created_at < ?))';
+        array_push($params, ...$dateParams, ...$dateParams, ...$dateParams, ...$dateParams);
         $processIds = $this->positiveIds($processIds);
         $formIds = $this->positiveIds($formIds);
         $testIds = $this->positiveIds($testIds);
-        $includeEvaluations = !$testIds || $formIds;
-        $includeTests = !$formIds || $testIds;
+        $includeEvaluations = $domain === 'evaluations' || ($domain === 'both' && (!$testIds || $formIds));
+        $includeTests = $domain === 'tests' || ($domain === 'both' && (!$formIds || $testIds));
+        if ($domain === 'evaluations') $testIds = [];
+        if ($domain === 'tests') $formIds = [];
         if (!$includeEvaluations) $conditions[] = '1 = 0';
         if ($processIds) {
             $conditions[] = 'pea.process_id IN (' . implode(',', array_fill(0, count($processIds), '?')) . ')';
@@ -216,6 +233,26 @@ final class EvaluationSurveyDashboardModel
             $conditions[] = 'pea.form_id IN (' . implode(',', array_fill(0, count($formIds), '?')) . ')';
             array_push($params, ...$formIds);
         }
+
+        // Limitar las subconsultas de eventos a intentos que pertenecen a las
+        // asignaciones visibles del reporte evita agregar actividad de todo
+        // el sistema para cada consulta de cliente.
+        $eventScopeConditions = ['pea_scope.status <> "cancelled"', 'f_scope.form_type = "assessment"'];
+        $eventScopeParams = [];
+        if ($companyId && $companyId > 0) {
+            $eventScopeConditions[] = 'p_scope.company_id = ? AND u_scope.company_id = ? AND (f_scope.company_id IS NULL OR f_scope.company_id = ?)';
+            array_push($eventScopeParams, $companyId, $companyId, $companyId);
+        }
+        if ($processIds) {
+            $eventScopeConditions[] = 'pea_scope.process_id IN (' . implode(',', array_fill(0, count($processIds), '?')) . ')';
+            array_push($eventScopeParams, ...$processIds);
+        }
+        if ($formIds) {
+            $eventScopeConditions[] = 'pea_scope.form_id IN (' . implode(',', array_fill(0, count($formIds), '?')) . ')';
+            array_push($eventScopeParams, ...$formIds);
+        }
+        if (!$includeEvaluations) $eventScopeConditions[] = '1 = 0';
+        $eventAttemptScopeSql = 'SELECT DISTINCT a_scope.id FROM evaluation_survey_attempts a_scope JOIN ' . $this->testsSchema . '.test_process_evaluation_assignments pea_scope ON pea_scope.form_id = a_scope.form_id AND pea_scope.user_id = a_scope.user_id AND (a_scope.process_id = pea_scope.process_id OR a_scope.process_id IS NULL) JOIN ' . $this->testsSchema . '.test_processes p_scope ON p_scope.id = pea_scope.process_id JOIN evaluation_survey_forms f_scope ON f_scope.id = pea_scope.form_id JOIN ' . $this->coreSchema . '.users u_scope ON u_scope.id = pea_scope.user_id WHERE ' . implode(' AND ', $eventScopeConditions);
 
         $rows = $this->db->fetchAll(
             'SELECT pea.process_id, p.name AS process_name, p.code AS process_code,
@@ -236,7 +273,7 @@ final class EvaluationSurveyDashboardModel
              JOIN ' . $this->coreSchema . '.users u ON u.id = pea.user_id
              LEFT JOIN evaluation_survey_attempts a
                ON a.id = (SELECT a2.id FROM evaluation_survey_attempts a2
-                          WHERE a2.form_id = pea.form_id AND a2.user_id = pea.user_id
+                          WHERE a2.form_id = pea.form_id AND a2.user_id = pea.user_id AND a2.status <> "preparing"
                             AND (a2.process_id = pea.process_id OR a2.process_id IS NULL)
                           ORDER BY (a2.process_id = pea.process_id) DESC, a2.attempt_number DESC, a2.id DESC LIMIT 1)
              LEFT JOIN (
@@ -244,21 +281,21 @@ final class EvaluationSurveyDashboardModel
                         SUM(event_type IN (' . $activityAttentionSql . ')) AS attention_events,
                         SUM(event_type IN (' . $activityRiskSql . ')) AS risk_events,
                         GROUP_CONCAT(DISTINCT CASE WHEN event_type IN (' . $activityAttentionSql . ',' . $activityRiskSql . ') THEN event_type END ORDER BY event_type SEPARATOR ",") AS event_types
-                 FROM evaluation_survey_activity_events GROUP BY attempt_id
+                 FROM evaluation_survey_activity_events WHERE created_at >= ? AND created_at < ? AND attempt_id IN (' . $eventAttemptScopeSql . ') GROUP BY attempt_id
              ) act ON act.attempt_id = a.id
              LEFT JOIN (
                  SELECT attempt_id, COUNT(*) AS total_events,
                         SUM(CASE WHEN event_type IN ("multiple_voice_possible","audio_visual_risk","audio_visual_capture_failed","audio_visual_screen_failed","screen_capture_upload_failed","recording_upload_failed","audio_visual_recorder_failed","audio_visual_recorder_error","audio_visual_start_failed","permission_or_recording_failed","audio_visual_upload_failed","finalize_failed") AND severity = "attention" THEN 1 ELSE 0 END) AS attention_events,
                         SUM(CASE WHEN event_type IN ("multiple_voice_possible","audio_visual_risk","audio_visual_capture_failed","audio_visual_screen_failed","screen_capture_upload_failed","recording_upload_failed","audio_visual_recorder_failed","audio_visual_recorder_error","audio_visual_start_failed","permission_or_recording_failed","audio_visual_upload_failed","finalize_failed") AND severity = "risk" THEN 1 ELSE 0 END) AS risk_events,
                         GROUP_CONCAT(DISTINCT CASE WHEN event_type IN ("multiple_voice_possible","audio_visual_risk","audio_visual_capture_failed","audio_visual_screen_failed","screen_capture_upload_failed","recording_upload_failed","audio_visual_recorder_failed","audio_visual_recorder_error","audio_visual_start_failed","permission_or_recording_failed","audio_visual_upload_failed","finalize_failed") THEN event_type END ORDER BY event_type SEPARATOR ",") AS risk_types
-                 FROM evaluation_survey_media_risk_events GROUP BY attempt_id
+                 FROM evaluation_survey_media_risk_events WHERE created_at >= ? AND created_at < ? AND attempt_id IN (' . $eventAttemptScopeSql . ') GROUP BY attempt_id
              ) rsk ON rsk.attempt_id = a.id
              LEFT JOIN evaluation_survey_media_evidence e ON e.attempt_id = a.id
              WHERE ' . implode(' AND ', $conditions) . '
              ORDER BY (COALESCE(act.risk_events, 0) + COALESCE(rsk.risk_events, 0)) DESC,
                       (COALESCE(act.attention_events, 0) + COALESCE(rsk.attention_events, 0)) DESC,
                       p.name ASC, u.name ASC',
-            $params
+            array_merge($dateParams, $eventScopeParams, $dateParams, $eventScopeParams, $params)
         );
 
         // Los tests psicométricos no usan evaluation_survey_attempts: su unidad
@@ -272,6 +309,8 @@ final class EvaluationSurveyDashboardModel
             $testParams[] = $companyId;
             $testParams[] = $companyId;
         }
+        $testConditions[] = '(COALESCE(ts.started_at, ts.created_at) >= ? AND COALESCE(ts.started_at, ts.created_at) < ? OR EXISTS (SELECT 1 FROM ' . $this->testsSchema . '.test_activity_events tae0 WHERE tae0.session_id = ts.id AND tae0.created_at >= ? AND tae0.created_at < ?) OR EXISTS (SELECT 1 FROM ' . $this->testsSchema . '.test_audio_visual_risk_events tar0 WHERE tar0.session_id = ts.id AND tar0.created_at >= ? AND tar0.created_at < ?))';
+        array_push($testParams, ...$dateParams, ...$dateParams, ...$dateParams);
         if ($processIds) {
             $testConditions[] = 'ts.process_id IN (' . implode(',', array_fill(0, count($processIds), '?')) . ')';
             array_push($testParams, ...$processIds);
@@ -288,6 +327,9 @@ final class EvaluationSurveyDashboardModel
             $testScopeParams[] = $companyId;
             $testScopeParams[] = $companyId;
         }
+        // La agregación de eventos usa el rango por fecha del evento. Mantener
+        // todas las sesiones del cliente permite contar eventos de sesiones
+        // iniciadas antes del rango.
         if ($processIds) {
             $testScopeConditions[] = 'ts0.process_id IN (' . implode(',', array_fill(0, count($processIds), '?')) . ')';
             array_push($testScopeParams, ...$processIds);
@@ -326,6 +368,7 @@ final class EvaluationSurveyDashboardModel
                         GROUP_CONCAT(DISTINCT CASE WHEN event_type IN (' . $testActivityAttentionSql . ',' . $testActivityRiskSql . ') THEN event_type END ORDER BY event_type SEPARATOR ",") AS event_types
                  FROM ' . $this->testsSchema . '.test_activity_events tae
                  JOIN (' . $testSessionScopeSql . ') scoped_sessions ON scoped_sessions.id = tae.session_id
+                 WHERE tae.created_at >= ? AND tae.created_at < ?
                  GROUP BY session_id
              ) act ON act.session_id = ts.id
              LEFT JOIN (
@@ -335,25 +378,27 @@ final class EvaluationSurveyDashboardModel
                         GROUP_CONCAT(DISTINCT CASE WHEN event_type IN (' . $testMediaSignalSql . ') THEN event_type END ORDER BY event_type SEPARATOR ",") AS risk_types
                  FROM ' . $this->testsSchema . '.test_audio_visual_risk_events tar
                  JOIN (' . $testSessionScopeSql . ') scoped_sessions ON scoped_sessions.id = tar.session_id
+                 WHERE tar.created_at >= ? AND tar.created_at < ?
                  GROUP BY session_id
              ) rsk ON rsk.session_id = ts.id
-             LEFT JOIN (
-                 SELECT session_id, MAX(id) AS evidence_id
-                 FROM ' . $this->testsSchema . '.test_media_evidence GROUP BY session_id
-             ) latest_ev ON latest_ev.session_id = ts.id
-             LEFT JOIN ' . $this->testsSchema . '.test_media_evidence ev ON ev.id = latest_ev.evidence_id
+             LEFT JOIN ' . $this->testsSchema . '.test_media_evidence ev
+               ON ev.id = (
+                   SELECT MAX(ev2.id)
+                   FROM ' . $this->testsSchema . '.test_media_evidence ev2
+                   WHERE ev2.session_id = ts.id
+               )
              WHERE ' . implode(' AND ', $testConditions) . '
              ORDER BY (COALESCE(act.risk_events, 0) + COALESCE(rsk.risk_events, 0)) DESC,
                       (COALESCE(act.attention_events, 0) + COALESCE(rsk.attention_events, 0)) DESC,
                       p.name ASC, u.name ASC',
-            array_merge($testScopeParams, $testScopeParams, $testParams)
+            array_merge($testScopeParams, $dateParams, $testScopeParams, $dateParams, $testParams)
         );
         $rows = array_merge($rows, $testRows);
 
-        $eventCounts = $this->integrityEventCounts(array_values(array_unique(array_filter(array_map(static fn(array $row): int => (int) ($row['attempt_id'] ?? 0), $rows)))));
+        $eventCounts = $this->integrityEventCounts(array_values(array_unique(array_filter(array_map(static fn(array $row): int => (int) ($row['attempt_id'] ?? 0), $rows)))), $dateFrom, $dateUntil);
 
         $summary = ['assigned_people' => count($rows), 'distinct_assigned_people' => count(array_unique(array_filter(array_column($rows, 'user_id')))), 'attempted_people' => 0, 'finished_people' => 0,
-            'people_with_incidents' => 0, 'review_cases' => 0, 'high_alert_cases' => 0,
+            'expired_people' => 0, 'people_with_incidents' => 0, 'review_cases' => 0, 'high_alert_cases' => 0,
             'activity_events' => 0, 'media_events' => 0];
         foreach ($rows as &$row) {
             $activityRisk = (int) ($row['activity_risk_total'] ?? 0);
@@ -374,7 +419,8 @@ final class EvaluationSurveyDashboardModel
             if ($technicalFailure) $row['signal_counts']['evidence_' . (string) ($row['evidence_status'] ?? 'failure')] = 1;
             if ($row['signal_counts']) $row['signal_types'] = array_values(array_unique(array_merge(array_keys(array_intersect_key($row['signal_counts'], $reportSignalTypes)), $row['signal_types'])));
             $summary['attempted_people'] += !empty($row['attempt_id']) || in_array((string) ($row['attempt_status'] ?? ''), ['in_progress', 'completed', 'expired'], true) ? 1 : 0;
-            $summary['finished_people'] += in_array((string) ($row['attempt_status'] ?? ''), ['completed', 'expired'], true) ? 1 : 0;
+            $summary['finished_people'] += (string) ($row['attempt_status'] ?? '') === 'completed' ? 1 : 0;
+            $summary['expired_people'] += (string) ($row['attempt_status'] ?? '') === 'expired' ? 1 : 0;
             $summary['people_with_incidents'] += $total > 0 || $technicalFailure ? 1 : 0;
             $summary['activity_events'] += (int) ($row['activity_events_total'] ?? 0);
             $summary['media_events'] += (int) ($row['media_risk_events_total'] ?? 0);
@@ -395,7 +441,7 @@ final class EvaluationSurveyDashboardModel
         return ['summary' => $summary, 'rows' => $rows, 'analysis' => $analysis];
     }
 
-    public function integrityFilterOptions(?int $companyId = null): array
+    public function integrityFilterOptions(?int $companyId = null, string $domain = 'both'): array
     {
         $conditions = ['pea.status <> "cancelled"', 'f.form_type = "assessment"'];
         $params = [];
@@ -403,7 +449,7 @@ final class EvaluationSurveyDashboardModel
             $conditions[] = 'p.company_id = ? AND u.company_id = ? AND (f.company_id IS NULL OR f.company_id = ?)';
             $params = [$companyId, $companyId, $companyId];
         }
-        $rows = $this->db->fetchAll('SELECT DISTINCT f.id AS form_id, f.title AS form_title, 0 AS test_id, "" AS test_name, p.id AS process_id, p.name AS process_name FROM ' . $this->testsSchema . '.test_process_evaluation_assignments pea JOIN ' . $this->testsSchema . '.test_processes p ON p.id = pea.process_id JOIN evaluation_survey_forms f ON f.id = pea.form_id JOIN ' . $this->coreSchema . '.users u ON u.id = pea.user_id WHERE ' . implode(' AND ', $conditions) . ' ORDER BY f.title ASC, p.name ASC', $params);
+        $rows = $domain === 'tests' ? [] : $this->db->fetchAll('SELECT DISTINCT f.id AS form_id, f.title AS form_title, 0 AS test_id, "" AS test_name, p.id AS process_id, p.name AS process_name FROM ' . $this->testsSchema . '.test_process_evaluation_assignments pea JOIN ' . $this->testsSchema . '.test_processes p ON p.id = pea.process_id JOIN evaluation_survey_forms f ON f.id = pea.form_id JOIN ' . $this->coreSchema . '.users u ON u.id = pea.user_id WHERE ' . implode(' AND ', $conditions) . ' ORDER BY f.title ASC, p.name ASC', $params);
         $testConditions = ['ts.process_id IS NOT NULL', 'ts.status <> "cancelled"'];
         $testParams = [];
         if ($companyId && $companyId > 0) {
@@ -411,7 +457,7 @@ final class EvaluationSurveyDashboardModel
             $testParams[] = $companyId;
             $testParams[] = $companyId;
         }
-        $testProcessRows = $this->db->fetchAll('SELECT DISTINCT 0 AS form_id, i.name AS form_title, i.id AS test_id, i.name AS test_name, p.id AS process_id, p.name AS process_name FROM ' . $this->testsSchema . '.test_sessions ts JOIN ' . $this->testsSchema . '.test_processes p ON p.id = ts.process_id JOIN ' . $this->testsSchema . '.test_instruments i ON i.id = ts.instrument_id JOIN ' . $this->coreSchema . '.users u ON u.id = ts.user_id WHERE ' . implode(' AND ', $testConditions) . ' ORDER BY p.name ASC, i.name ASC', $testParams);
+        $testProcessRows = $domain === 'evaluations' ? [] : $this->db->fetchAll('SELECT DISTINCT 0 AS form_id, i.name AS form_title, i.id AS test_id, i.name AS test_name, p.id AS process_id, p.name AS process_name FROM ' . $this->testsSchema . '.test_sessions ts JOIN ' . $this->testsSchema . '.test_processes p ON p.id = ts.process_id JOIN ' . $this->testsSchema . '.test_instruments i ON i.id = ts.instrument_id JOIN ' . $this->coreSchema . '.users u ON u.id = ts.user_id WHERE ' . implode(' AND ', $testConditions) . ' ORDER BY p.name ASC, i.name ASC', $testParams);
         $rows = array_merge($rows, $testProcessRows);
         $forms = []; $tests = []; $processes = [];
         foreach ($rows as $row) {
@@ -422,13 +468,14 @@ final class EvaluationSurveyDashboardModel
         return ['forms' => $forms, 'tests' => $tests, 'processes' => $processes];
     }
 
-    private function integrityEventCounts(array $attemptIds): array
+    private function integrityEventCounts(array $attemptIds, string $dateFrom, string $dateUntil): array
     {
         if (!$attemptIds) return [];
         $placeholders = implode(',', array_fill(0, count($attemptIds), '?'));
+        $params = array_merge($attemptIds, [$dateFrom, $dateUntil]);
         $counts = [];
-        foreach ($this->db->fetchAll('SELECT attempt_id, event_type, COUNT(*) AS total FROM evaluation_survey_activity_events WHERE attempt_id IN (' . $placeholders . ') GROUP BY attempt_id, event_type', $attemptIds) as $event) $counts[(int) $event['attempt_id']][(string) $event['event_type']] = (int) $event['total'];
-        foreach ($this->db->fetchAll('SELECT attempt_id, event_type, COUNT(*) AS total FROM evaluation_survey_media_risk_events WHERE attempt_id IN (' . $placeholders . ') GROUP BY attempt_id, event_type', $attemptIds) as $event) $counts[(int) $event['attempt_id']][(string) $event['event_type']] = ($counts[(int) $event['attempt_id']][(string) $event['event_type']] ?? 0) + (int) $event['total'];
+        foreach ($this->db->fetchAll('SELECT attempt_id, event_type, COUNT(*) AS total FROM evaluation_survey_activity_events WHERE attempt_id IN (' . $placeholders . ') AND created_at >= ? AND created_at < ? GROUP BY attempt_id, event_type', $params) as $event) $counts[(int) $event['attempt_id']][(string) $event['event_type']] = (int) $event['total'];
+        foreach ($this->db->fetchAll('SELECT attempt_id, event_type, COUNT(*) AS total FROM evaluation_survey_media_risk_events WHERE attempt_id IN (' . $placeholders . ') AND created_at >= ? AND created_at < ? GROUP BY attempt_id, event_type', $params) as $event) $counts[(int) $event['attempt_id']][(string) $event['event_type']] = ($counts[(int) $event['attempt_id']][(string) $event['event_type']] ?? 0) + (int) $event['total'];
         return $counts;
     }
 

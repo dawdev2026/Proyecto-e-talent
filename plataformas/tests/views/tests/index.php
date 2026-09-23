@@ -10,7 +10,7 @@ $sessionStatusLabels = [
 <section class="page-header">
     <div>
         <p class="text-uppercase text-primary fw-bold small mb-1">Evaluaciones</p>
-        <h1 class="fw-bold mb-1">Instrumentos</h1>
+        <h1 class="fw-bold mb-1">Instrumentos <?= status_help_button('Estados del instrumento', "• Borrador: está en configuración y no debe ofrecerse para nuevas asignaciones.\n• Activo: puede seleccionarse para asignaciones, sujeto a la configuración del proceso.\n• Inactivo: no está disponible para nuevas asignaciones; su historial se conserva.") ?></h1>
         <p class="text-muted mb-0">Administra el catalogo base de pruebas antes de cargar items y baremos autorizados.</p>
     </div>
     <div class="d-flex flex-wrap gap-2">
@@ -107,14 +107,18 @@ $sessionStatusLabels = [
             $sessionUsers[$userId]['sessions'][$instrumentId] = $session;
         }
 
-        if (in_array($session['status'], ['completed', 'expired'], true)) {
-            $sessionUsers[$userId]['finished_count']++;
+    }
+    foreach ($sessionUsers as &$sessionUser) {
+        foreach ($sessionUser['sessions'] as $session) {
+            if ((string) ($session['status'] ?? '') !== 'completed') continue;
+            $sessionUser['finished_count']++;
             $finishedAt = (string) ($session['completed_at'] ?? $session['updated_at'] ?? $session['created_at'] ?? '');
-            if ($finishedAt !== '' && ($sessionUsers[$userId]['latest_finished_at'] === '' || strtotime($finishedAt) > strtotime($sessionUsers[$userId]['latest_finished_at']))) {
-                $sessionUsers[$userId]['latest_finished_at'] = $finishedAt;
+            if ($finishedAt !== '' && ($sessionUser['latest_finished_at'] === '' || strtotime($finishedAt) > strtotime($sessionUser['latest_finished_at']))) {
+                $sessionUser['latest_finished_at'] = $finishedAt;
             }
         }
     }
+    unset($sessionUser);
     uasort($sessionInstruments, static fn(array $a, array $b): int => strcmp($a['name'], $b['name']));
     uasort($sessionUsers, static fn(array $a, array $b): int => strcmp($a['name'], $b['name']));
     ?>
@@ -148,7 +152,7 @@ $sessionStatusLabels = [
                     <?php foreach ($sessionInstruments as $instrument): ?>
                         <th><?= e($instrument['name']) ?></th>
                     <?php endforeach; ?>
-                    <th>Terminadas</th>
+                    <th>Completadas</th>
                     <th class="text-end no-sort no-export">Acciones</th>
                 </tr>
             </thead>

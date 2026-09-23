@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 144" role="img" aria-labelledby="title desc">
+  <title id="title">e-talent</title>
+  <desc id="desc">Logotipo e-talent con ficha de perfil evaluado</desc>
+  <g transform="translate(8 8)">
+    <rect width="128" height="128" rx="36" fill="#FFFFFF"/>
+    <rect x="25" y="22" width="78" height="88" rx="15" fill="#EEF2FF"/>
+    <circle cx="51" cy="51" r="13" fill="#5B4AE8"/>
+    <path d="M32 83c3-12 10-18 19-18s16 6 19 18" fill="#5B4AE8"/>
+    <circle cx="88" cy="84" r="21" fill="#36C7B4" stroke="#FFFFFF" stroke-width="5"/>
+    <path d="m78 84 7 7 13-15" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M76 44h15M76 55h15" stroke="#2146D0" stroke-width="6" stroke-linecap="round"/>
+  </g>
+  <text x="162" y="95" fill="#FFFFFF" font-family="Inter, Arial, sans-serif" font-size="68" font-weight="750" letter-spacing="-2">e<tspan fill="#B9F3E8">·</tspan>talent</text>
+</svg>

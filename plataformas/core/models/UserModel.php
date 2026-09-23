@@ -120,6 +120,32 @@ final class UserModel
         ', array_merge([$id], $this->companyScopeParams()));
     }
 
+    /**
+     * Fetch only the authenticated participant for their own facial enrollment.
+     * This deliberately bypasses the broad company-admin query scope while
+     * keeping the lookup pinned to the current session identity.
+     */
+    public function findAuthenticatedUserForSelfEnrollment(int $id): ?array
+    {
+        $sessionUser = current_user() ?: [];
+        if ($id < 1 || (int) ($sessionUser['id'] ?? 0) !== $id || !in_array((string) ($sessionUser['role'] ?? ''), ['usuario', 'company_admin'], true)) {
+            return null;
+        }
+
+        $companyId = (int) ($sessionUser['company_id'] ?? 0);
+        if ($companyId <= 0) {
+            return null;
+        }
+
+        return $this->db->fetch(
+            'SELECT id, rut, first_names, last_names, name, email, role, company_id, is_active
+             FROM users
+             WHERE id = ? AND role IN (\'usuario\', \'company_admin\') AND company_id = ? AND is_active = 1
+             LIMIT 1',
+            [$id, $companyId]
+        );
+    }
+
     public function findRequester(int $id): ?array
     {
         return $this->db->fetch('
@@ -581,9 +607,17 @@ final class UserModel
     private function companyScopeSql(string $alias = 'u'): string
     {
         $user = current_user();
-        if (!$user || has_permission('manage_users')) {
+        if (!$user) {
             return '1 = 1';
         }
+
+        if ((string) ($user['role'] ?? '') === 'company_admin') {
+            if ((int) ($user['company_id'] ?? 0) <= 0) return '1 = 0';
+            $column = $alias !== '' ? $alias . '.company_id' : 'company_id';
+            return $column . ' = ?';
+        }
+
+        if (has_permission('manage_users')) return '1 = 1';
 
         if (has_permission('manage_company_users') && (int) ($user['company_id'] ?? 0) > 0) {
             $column = $alias !== '' ? $alias . '.company_id' : 'company_id';
@@ -596,7 +630,7 @@ final class UserModel
     private function companyScopeParams(): array
     {
         $user = current_user();
-        if ($user && !has_permission('manage_users') && has_permission('manage_company_users') && (int) ($user['company_id'] ?? 0) > 0) {
+        if ($user && ((string) ($user['role'] ?? '') === 'company_admin' || (!has_permission('manage_users') && has_permission('manage_company_users'))) && (int) ($user['company_id'] ?? 0) > 0) {
             return [(int) $user['company_id']];
         }
 

@@ -32,6 +32,7 @@ $isDrawer = (string) ($_GET['drawer'] ?? '') === '1';
     <p class="text-muted mb-0"><?= e((string) ($form['title'] ?? 'Evaluación')) ?></p>
 </div><?php endif; ?>
 <section class="card content-panel">
+    <?= status_help_button('Estados del intento y resultado', "• Asignada: todavía no abierta.\n• En curso: abierta, posiblemente sin respuestas.\n• Completada: enviada explícitamente, aunque esté vacía.\n• Expirada: venció sin envío y no cuenta como completada.\n• Cancelada: retirada del flujo.\n• Aprobado/Reprobado: se determina comparando la nota con el umbral configurado.") ?>
     <?php if (!$attempts): ?>
         <div class="alert alert-info mb-0">No hay intentos registrados para esta evaluación en el alcance disponible.</div>
     <?php else: ?>

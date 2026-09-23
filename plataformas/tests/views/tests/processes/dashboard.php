@@ -1,7 +1,7 @@
 <?php
 $processes = $processes ?? [];
 $processRows = $processRows ?? [];
-$overall = $overall ?? ['users_total' => 0, 'evaluated' => 0, 'in_progress' => 0, 'pending' => 0, 'sessions_total' => 0, 'sessions_finished' => 0];
+$overall = $overall ?? ['users_total' => 0, 'evaluated' => 0, 'in_progress' => 0, 'expired' => 0, 'pending' => 0, 'sessions_total' => 0, 'sessions_finished' => 0];
 $trend = $trend ?? [];
 $filters = $filters ?? ['process_id' => 0, 'fields' => []];
 $dashboardFields = $dashboardFields ?? [];
@@ -23,6 +23,7 @@ $usersTotal = max(0, (int) ($overall['users_total'] ?? 0));
 $evaluated = max(0, (int) ($overall['evaluated'] ?? 0));
 $inProgress = max(0, (int) ($overall['in_progress'] ?? 0));
 $pending = max(0, (int) ($overall['pending'] ?? 0));
+$expired = max(0, (int) ($overall['expired'] ?? 0));
 $rankingRecommended = max(0, (int) ($overall['ranking_recommended'] ?? 0));
 $rankingObservation = max(0, (int) ($overall['ranking_observation'] ?? 0));
 $rankingNotRecommended = max(0, (int) ($overall['ranking_not_recommended'] ?? 0));
@@ -62,10 +63,9 @@ unset($rankingCompleteQuery['process_id']);
 $rankingCompleteQueryString = http_build_query($rankingCompleteQuery);
 $rankingCompleteUrl = route_url('test-process.ranking-all') . ($rankingCompleteQueryString !== '' ? '?' . $rankingCompleteQueryString : '');
 $rankingPresetRedirectTo = route_url('test-process.dashboard') . ($dashboardQueryString !== '' ? '?' . $dashboardQueryString : '');
-$progressPercent = $usersTotal > 0 ? (int) round(($evaluated / $usersTotal) * 100) : 0;
-$donutEvaluated = $usersTotal > 0 ? ($evaluated / $usersTotal) * 100 : 0;
-$donutInProgress = $usersTotal > 0 ? ($inProgress / $usersTotal) * 100 : 0;
-$donutPending = max(0, 100 - $donutEvaluated - $donutInProgress);
+$sessionsTotal = max(0, (int) ($overall['sessions_total'] ?? 0));
+$sessionsAnswered = max(0, (int) ($overall['sessions_answered'] ?? 0));
+$progressPercent = $sessionsTotal > 0 ? (int) round(($sessionsAnswered / $sessionsTotal) * 100) : 0;
 $trendMax = 1;
 foreach ($trend as $point) {
     $trendMax = max($trendMax, (int) ($point['count'] ?? 0));
@@ -78,44 +78,37 @@ if (!is_array($chartData)) {
         'evaluated' => array_map(static fn(array $row): int => (int) ($row['evaluated'] ?? 0), $chartRows),
         'inProgress' => array_map(static fn(array $row): int => (int) ($row['in_progress'] ?? 0), $chartRows),
         'pending' => array_map(static fn(array $row): int => (int) ($row['pending'] ?? 0), $chartRows),
+        'expired' => array_map(static fn(array $row): int => (int) ($row['expired'] ?? 0), $chartRows),
         'trendLabels' => array_map(static fn(array $point): string => (string) ($point['label'] ?? ''), $trend),
         'trendCounts' => array_map(static fn(array $point): int => (int) ($point['count'] ?? 0), $trend),
         'distribution' => [
             'evaluated' => $evaluated,
             'inProgress' => $inProgress,
             'pending' => $pending,
+            'expired' => $expired,
         ],
     ];
 }
 $dashboardMetricHelp = [
     'users_total' => 'Personas asignadas en los procesos visibles del dashboard. La regla esperada es que cada persona este activa en un solo proceso.',
-    'evaluated' => 'Personas que tienen todos los test del proceso finalizados en estado Completada o Expirada.',
-    'in_progress' => 'Personas con al menos un test en estado En curso, Completada o Expirada, pero que aun no tienen todos los test del proceso finalizados.',
-    'pending' => 'Personas sin avance en los test del proceso; no tienen evaluaciones En curso, Completadas ni Expiradas.',
+    'evaluated' => 'Personas que entregaron explícitamente todos los test requeridos. Las entregas pueden tener cero respuestas.',
+    'in_progress' => 'Personas con al menos un test abierto y no todas las actividades completadas. Abrir no equivale a responder.',
+    'expired' => 'Personas sin actividades abiertas que tienen al menos una actividad expirada y aún no completaron todas. Las expiradas se separan y no cuentan como completas.',
+    'pending' => 'Personas sin actividades abiertas ni expiradas que aún no han completado todas las actividades. Pueden haber completado alguna y tener otras sin iniciar.',
     'ranking' => 'Resultados generales calculados con la configuracion activa del ranking. R: Recomendado, RO: Recomendado con observacion, NR: No recomendado.',
-    'supervision' => implode('<br>', [
-        '<strong>Eventos:</strong> total de eventos registrados durante las evaluaciones supervisadas.',
-        '<strong>Atencion:</strong> eventos que requieren revision por posibles distracciones o perdida de foco.',
-        '<strong>Riesgo:</strong> eventos de mayor criticidad que pueden afectar la validez de la evaluacion.',
+    'supervision' => implode("\n", [
+        '• Eventos: total de eventos registrados durante las evaluaciones supervisadas.',
+        '• Atención: eventos que requieren revisión por posibles distracciones o pérdida de foco.',
+        '• Riesgo: eventos de mayor criticidad que pueden afectar la validez de la evaluación.',
     ]),
 ];
 
 if (!function_exists('process_dashboard_help_header')) {
-    function process_dashboard_help_header(string $label, string $help, bool $html = false): string
+    function process_dashboard_help_header(string $label, string $help): string
     {
-        $htmlAttr = $html ? ' data-bs-html="true"' : '';
-
         return '<span class="d-inline-flex align-items-center gap-1">'
             . e($label)
-            . '<button class="btn btn-sm btn-link p-0 text-muted" type="button" data-bs-toggle="popover" data-bs-trigger="focus" data-bs-placement="bottom" data-bs-title="'
-            . e($label)
-            . '" data-bs-content="'
-            . e($help)
-            . '"'
-            . $htmlAttr
-            . ' aria-label="Ver explicacion de '
-            . e($label)
-            . '"><i class="bi bi-info-circle"></i></button>'
+            . status_help_button($label, $help)
             . '</span>';
     }
 }
@@ -125,13 +118,7 @@ if (!function_exists('process_dashboard_help_label')) {
     {
         return '<span class="d-inline-flex align-items-center gap-1">'
             . e($label)
-            . '<button class="btn btn-sm btn-link p-0 text-muted" type="button" data-bs-toggle="popover" data-bs-trigger="focus" data-bs-placement="bottom" data-bs-title="'
-            . e($label)
-            . '" data-bs-content="'
-            . e($help)
-            . '" aria-label="Ver explicacion de '
-            . e($label)
-            . '"><i class="bi bi-info-circle"></i></button>'
+            . status_help_button($label, $help)
             . '</span>';
     }
 }
@@ -244,18 +231,7 @@ if (!function_exists('process_dashboard_help_label')) {
         <h1 class="fw-bold mb-1">Dashboard de Avance</h1>
         <p class="text-muted mb-0">
             Seguimiento general y por proceso de evaluaciones.
-            <button
-                class="btn btn-link btn-sm p-0 ms-1"
-                type="button"
-                aria-label="Ayuda sobre metricas de avance"
-                data-bs-toggle="popover"
-                data-bs-trigger="focus"
-                data-bs-placement="bottom"
-                data-bs-title="Metricas de avance"
-                data-bs-content="Evaluadas: <?= e($dashboardMetricHelp['evaluated']) ?> En evaluacion: <?= e($dashboardMetricHelp['in_progress']) ?> Pendientes: <?= e($dashboardMetricHelp['pending']) ?>"
-            >
-                <i class="bi bi-info-circle" aria-hidden="true"></i>
-            </button>
+            <?= status_help_button('Estados y métricas de avance', "• Evaluadas: " . $dashboardMetricHelp['evaluated'] . "\n• En evaluación: " . $dashboardMetricHelp['in_progress'] . "\n• Con expiradas: " . $dashboardMetricHelp['expired'] . "\n• Pendientes: " . $dashboardMetricHelp['pending']) ?>
         </p>
     </div>
     <div class="d-flex flex-wrap gap-2">
@@ -554,11 +530,16 @@ if (!function_exists('process_dashboard_help_label')) {
         <strong><?= $inProgress ?></strong>
     </div>
     <div class="process-dashboard-kpi is-muted">
+        <?= process_dashboard_help_label('Con expiradas', $dashboardMetricHelp['expired']) ?>
+        <strong><?= $expired ?></strong>
+    </div>
+    <div class="process-dashboard-kpi is-muted">
         <?= process_dashboard_help_label('Pendientes', $dashboardMetricHelp['pending']) ?>
         <strong><?= $pending ?></strong>
     </div>
     <div class="process-dashboard-kpi is-primary">
         <span>Avance general</span>
+        <span class="d-inline-flex align-items-center gap-1"><?= status_help_button('Avance general', 'Porcentaje de asignaciones activas con al menos una respuesta no vacía guardada: ' . $sessionsAnswered . ' de ' . $sessionsTotal . '. Abrir no cuenta como avance; las canceladas se excluyen.') ?></span>
         <strong><?= $progressPercent ?>%</strong>
     </div>
 </section>
@@ -625,7 +606,7 @@ if (!function_exists('process_dashboard_help_label')) {
         <div class="d-flex flex-wrap align-items-start justify-content-between gap-2 mb-3">
             <div>
                 <h2 class="h5 fw-bold mb-1">Avance por proceso</h2>
-                <p class="text-muted mb-0">Usuarios evaluados, en evaluacion y pendientes por proceso.</p>
+                <p class="text-muted mb-0">Resumen de tests psicolaborales por proceso. Las evaluaciones con nota se consultan en <a href="<?= e(route_url('evaluation-surveys.dashboard')) ?>">Dashboard de evaluaciones</a>. Responder y completar son métricas distintas.</p>
             </div>
         </div>
 
@@ -647,6 +628,7 @@ if (!function_exists('process_dashboard_help_label')) {
         <div class="process-dashboard-donut-list">
             <span><i class="is-success"></i> Evaluadas <strong><?= $evaluated ?></strong></span>
             <span><i class="is-warning"></i> En evaluacion <strong><?= $inProgress ?></strong></span>
+            <span><i class="is-expired"></i> Con expiradas <strong><?= $expired ?></strong></span>
             <span><i class="is-pending"></i> Pendientes <strong><?= $pending ?></strong></span>
         </div>
     </aside>
@@ -656,7 +638,7 @@ if (!function_exists('process_dashboard_help_label')) {
     <div class="d-flex flex-wrap align-items-start justify-content-between gap-2 mb-3">
         <div>
             <h2 class="h5 fw-bold mb-1">Evolucion de evaluaciones finalizadas</h2>
-            <p class="text-muted mb-0">Sesiones completadas o expiradas durante los ultimos 8 dias.</p>
+            <p class="text-muted mb-0">Entregas explícitamente completadas durante los últimos 8 días. Las expiraciones no se incluyen.</p>
         </div>
     </div>
     <div class="process-dashboard-chart process-dashboard-chart-md">
@@ -685,11 +667,12 @@ if (!function_exists('process_dashboard_help_label')) {
                     <th>Usuarios</th>
                     <th><?= process_dashboard_help_header('Evaluadas', $dashboardMetricHelp['evaluated']) ?></th>
                     <th><?= process_dashboard_help_header('En evaluacion', $dashboardMetricHelp['in_progress']) ?></th>
+                    <th><?= process_dashboard_help_header('Con expiradas', $dashboardMetricHelp['expired']) ?></th>
                     <th><?= process_dashboard_help_header('Pendientes', $dashboardMetricHelp['pending']) ?></th>
                     <th><?= process_dashboard_help_header('Resultados', $dashboardMetricHelp['ranking']) ?></th>
                     <th>Promedio</th>
                     <th>Knockouts</th>
-                    <th><?= process_dashboard_help_header('Supervision', $dashboardMetricHelp['supervision'], true) ?></th>
+                    <th><?= process_dashboard_help_header('Supervision', $dashboardMetricHelp['supervision']) ?></th>
                     <th>Avance</th>
                     <th class="no-sort no-export">Acciones</th>
                 </tr>
@@ -705,6 +688,7 @@ if (!function_exists('process_dashboard_help_label')) {
                         <td><?= (int) ($row['users_total'] ?? 0) ?></td>
                         <td><span class="badge text-bg-success"><?= (int) ($row['evaluated'] ?? 0) ?></span></td>
                         <td><span class="badge text-bg-warning"><?= (int) ($row['in_progress'] ?? 0) ?></span></td>
+                        <td><span class="badge text-bg-secondary"><?= (int) ($row['expired'] ?? 0) ?></span></td>
                         <td><span class="badge text-bg-light border"><?= (int) ($row['pending'] ?? 0) ?></span></td>
                         <td>
                             <?php $rankingSummary = is_array($row['ranking_summary'] ?? null) ? $row['ranking_summary'] : []; ?>
@@ -905,6 +889,7 @@ if (!function_exists('process_dashboard_help_label')) {
                 datasets: [
                     { label: 'Evaluadas', data: dashboardData.evaluated, backgroundColor: successColor, borderRadius: 5 },
                     { label: 'En evaluacion', data: dashboardData.inProgress, backgroundColor: warningColor, borderRadius: 5 },
+                    { label: 'Con expiradas', data: dashboardData.expired, backgroundColor: '#667085', borderRadius: 5 },
                     { label: 'Pendientes', data: dashboardData.pending, backgroundColor: pendingColor, borderRadius: 5 }
                 ]
             },
@@ -940,14 +925,15 @@ if (!function_exists('process_dashboard_help_label')) {
             type: 'doughnut',
             plugins: [doughnutValueLabels],
             data: {
-                labels: ['Evaluadas', 'En evaluacion', 'Pendientes'],
+                labels: ['Evaluadas', 'En evaluacion', 'Con expiradas', 'Pendientes'],
                 datasets: [{
                     data: [
                         dashboardData.distribution.evaluated,
                         dashboardData.distribution.inProgress,
+                        dashboardData.distribution.expired,
                         dashboardData.distribution.pending
                     ],
-                    backgroundColor: [successColor, warningColor, pendingColor],
+                    backgroundColor: [successColor, warningColor, '#667085', pendingColor],
                     borderColor: styles.getPropertyValue('--card-content-bg').trim() || '#fff',
                     borderWidth: 3
                 }]

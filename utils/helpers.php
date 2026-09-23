@@ -6,6 +6,15 @@ function e(?string $value): string
     return htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8');
 }
 
+function status_help_button(string $title, string $content): string
+{
+    return '<button class="btn btn-link btn-sm p-0 status-help-trigger" type="button" data-status-help'
+        . ' data-status-help-title="' . e($title) . '" data-status-help-content="' . e((string) json_encode($content, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)) . '"'
+        . ' aria-haspopup="dialog" aria-label="Ayuda: ' . e($title) . '">'
+        . '<i class="bi bi-question-circle" aria-hidden="true"></i>'
+        . '</button>';
+}
+
 function evaluation_rich_text_html(?string $value): string
 {
     $html = trim((string) $value);
@@ -248,6 +257,7 @@ function route_url(string $route, ?int $id = null): string
         'login' => 'login',
         'logout' => 'logout',
         'my-tests' => 'my-tests',
+        'my-tests.completed' => 'my-tests/realizadas',
         'tests' => 'tests',
         'tests.progress' => 'tests/progress',
         'tests.progress-ranking' => 'tests/progress/ranking',
@@ -281,11 +291,21 @@ function route_url(string $route, ?int $id = null): string
         'evaluation-surveys.ai.settings' => 'evaluaciones-encuestas/ai-settings',
         'evaluation-surveys.ai.generate' => 'evaluaciones-encuestas/ai-generate',
         'evaluation-surveys.form.new' => 'evaluaciones-encuestas/formularios/new',
+        'evaluation-surveys.moodle-import' => 'evaluaciones-encuestas/formularios/moodle-import',
         'evaluation-surveys.dashboard' => 'evaluaciones-encuestas/dashboard',
         'evaluation-surveys.dashboard.summary.xlsx' => 'evaluaciones-encuestas/dashboard/resumen.xlsx',
         'evaluation-surveys.dashboard.integrity' => 'evaluaciones-encuestas/dashboard/incidencias',
         'evaluation-surveys.dashboard.integrity.pdf' => 'evaluaciones-encuestas/dashboard/incidencias/pdf',
         'evaluation-surveys.dashboard.integrity.xlsx' => 'evaluaciones-encuestas/dashboard/incidencias/xlsx',
+        'client-admin.evaluation-incidents' => 'administrador-cliente/reportes/incidencias-evaluaciones',
+        'client-admin.test-incidents' => 'administrador-cliente/reportes/incidencias-tests',
+        'client-admin.dashboard' => 'administrador-cliente/inicio',
+        'client-admin.evaluation-progress' => 'administrador-cliente/avance/evaluaciones',
+        'client-admin.test-progress' => 'administrador-cliente/avance/tests',
+        'client-admin.user-lookup' => 'administrador-cliente/avance/consultar-usuario',
+        'client-admin.component-reviews' => 'administrador-cliente/avance/revision-componentes',
+        'client-admin.user-verifications' => 'administrador-cliente/procesos/verificacion-usuarios',
+        'component-validation.review' => 'componentes/revision',
         'tests.cancel-all' => 'tests/assignments/cancel',
         'tests.clear-results' => 'tests/results/clear',
         'test.new' => 'tests/new',
@@ -296,6 +316,10 @@ function route_url(string $route, ?int $id = null): string
         'companies' => 'companies',
         'company.new' => 'companies/new',
         'company.verification' => 'verificar-usuario',
+        'facial-recognition.enroll' => 'reconocimiento-facial/enrolar',
+        'facial-recognition.enrolled' => 'reconocimiento-facial/enrolados',
+        'facial-recognition.validate' => 'reconocimiento-facial/validar-identidad',
+        'facial-recognition.assessment-entry' => 'reconocimiento-facial/ingreso-evaluacion',
         'profiles' => 'profiles',
         'profile.new' => 'profiles/new',
         'user-fields' => 'user-fields',
@@ -372,6 +396,7 @@ function route_url(string $route, ?int $id = null): string
         'evaluation-surveys.question.new' => ['evaluaciones-encuestas/formularios/%s/questions/new', 'evaluation_survey_form'],
         'evaluation-surveys.question.edit' => ['evaluaciones-encuestas/preguntas/%s/edit', 'evaluation_survey_question'],
         'evaluation-surveys.question.delete' => ['evaluaciones-encuestas/preguntas/%s/delete', 'evaluation_survey_question'],
+        'evaluation-surveys.question.media' => ['evaluaciones-encuestas/preguntas-media/%s', 'evaluation_survey_question_media'],
         'evaluation-surveys.questions.reorder' => ['evaluaciones-encuestas/formularios/%s/questions/reorder', 'evaluation_survey_form'],
         'evaluation-surveys.attempt.result' => ['evaluaciones-encuestas/intentos/%s/result', 'evaluation_survey_attempt'],
         'evaluation-surveys.attempt.activity' => ['evaluaciones-encuestas/intentos/%s/activity', 'evaluation_survey_attempt'],
@@ -402,7 +427,7 @@ function is_protected_asset_path(string $path): bool
         return false;
     }
 
-    if (!preg_match('/\.(css|js|png|jpe?g|webp|gif|ico|svg|mp4|webm|mov|woff2?|ttf|eot|pdf)$/i', $cleanPath)) {
+    if (!preg_match('/\.(css|js|png|jpe?g|webp|gif|ico|svg|mp4|webm|mov|woff2?|ttf|eot|pdf|bin|wasm)$/i', $cleanPath)) {
         return false;
     }
 

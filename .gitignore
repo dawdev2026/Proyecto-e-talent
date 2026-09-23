@@ -17,8 +17,16 @@ outputs/
 database/*
 !database/
 !database/*.sql
+!database/MIGRATIONS.md
+!database/migrations/
+database/migrations/*
+!database/migrations/20260921_test_process_facial_enrollment_requirement.sql
+!database/migrations/*.sql
 docs/
 scripts/
+!scripts/
+scripts/*
+!scripts/db-migrate.php
 
 # Credenciales y claves locales
 config/database.php
@@ -58,6 +66,9 @@ database/tmp/*
 config/ambientes.local.env
 deployment-*.txt
 reports/db-structure/
+
+# XML de prueba pesado; se conserva únicamente en el entorno local
+xml_test/preguntas-PRUEBAAULAS-26-top-20260921-1039.xml
 
 # Cargas de usuarios; se conservan solo los assets de branding del proyecto
 public/uploads/*

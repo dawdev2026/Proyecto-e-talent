@@ -638,6 +638,97 @@ CREATE TABLE `users` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
+-- Table structure for table `component_validation_events`
+--
+
+DROP TABLE IF EXISTS `component_validation_events`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `component_validation_events` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `company_id` int(10) unsigned NOT NULL,
+  `user_id` int(10) unsigned NOT NULL,
+  `device_type` enum('desktop','tablet','mobile','unknown') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'unknown',
+  `os_name` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'Desconocido',
+  `browser_name` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'Desconocido',
+  `browser_version` varchar(24) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `outcome` enum('passed','partial','failed') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `metadata` json NOT NULL,
+  `user_agent` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_component_validation_company_date` (`company_id`,`created_at`,`id`),
+  KEY `idx_component_validation_user_company_date` (`user_id`,`company_id`,`created_at`,`id`),
+  CONSTRAINT `fk_component_validation_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_component_validation_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `facial_recognition_enrollments`
+--
+
+DROP TABLE IF EXISTS `facial_recognition_enrollments`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `facial_recognition_enrollments` (
+  `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
+  `company_id` int(10) unsigned DEFAULT NULL,
+  `user_id` int(10) unsigned NOT NULL,
+  `provider` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'facex',
+  `face_embedding` mediumtext COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `model_version` varchar(80) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'facex-wasm-1.0',
+  `status` enum('active','revoked','failed') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'active',
+  `consent_version` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `consented_at` datetime NOT NULL,
+  `enrolled_at` datetime DEFAULT NULL,
+  `revoked_at` datetime DEFAULT NULL,
+  `created_by` int(10) unsigned DEFAULT NULL,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_facial_enrollment_user_company` (`company_id`,`user_id`),
+  KEY `idx_facial_enrollment_provider` (`provider`),
+  KEY `idx_facial_enrollment_status` (`status`),
+  KEY `fk_facial_enrollment_user` (`user_id`),
+  KEY `fk_facial_enrollment_creator` (`created_by`),
+  CONSTRAINT `fk_facial_enrollment_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_facial_enrollment_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_facial_enrollment_creator` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Table structure for table `facial_recognition_attempts`
+--
+
+DROP TABLE IF EXISTS `facial_recognition_attempts`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `facial_recognition_attempts` (
+  `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
+  `enrollment_id` int(10) unsigned DEFAULT NULL,
+  `company_id` int(10) unsigned DEFAULT NULL,
+  `user_id` int(10) unsigned DEFAULT NULL,
+  `context` varchar(80) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'identity_validation',
+  `result` enum('verified','not_verified','review','unavailable','error') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `similarity` decimal(7,5) DEFAULT NULL,
+  `liveness` decimal(7,5) DEFAULT NULL,
+  `provider` varchar(40) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'facex',
+  `reason` varchar(120) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `request_id` varchar(80) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_facial_attempt_company_date` (`company_id`,`created_at`),
+  KEY `idx_facial_attempt_user_date` (`user_id`,`created_at`),
+  KEY `fk_facial_attempt_enrollment` (`enrollment_id`),
+  CONSTRAINT `fk_facial_attempt_enrollment` FOREIGN KEY (`enrollment_id`) REFERENCES `facial_recognition_enrollments` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_facial_attempt_company` FOREIGN KEY (`company_id`) REFERENCES `companies` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `fk_facial_attempt_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
 -- Dumping events for database 'e_talent_core'
 --
 

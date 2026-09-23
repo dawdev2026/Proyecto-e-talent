@@ -31,6 +31,8 @@ final class UserVerificationController extends Controller
                     $error = 'El correo no existe en esta empresa.';
                 } elseif (!$result['active']) {
                     $error = 'El usuario existe, pero no está activo.';
+                } else {
+                    $this->verification->recordSuccessfulVerification((int) $result['user']['id'], (int) $company['id']);
                 }
             }
         }

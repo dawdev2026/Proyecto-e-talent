@@ -77,7 +77,7 @@ if ($isDrawer) {
             </div>
             <div class="form-check form-switch">
                 <input id="is_active" class="form-check-input" type="checkbox" name="is_active" <?= (int) ($question['is_active'] ?? 1) === 1 ? 'checked' : '' ?>>
-                <label class="form-check-label" for="is_active">Activa</label>
+                <label class="form-check-label d-inline-flex align-items-center gap-1" for="is_active">Activa <?= status_help_button('Estado de la pregunta', 'Activa: la pregunta se incluye en la aplicación. Inactiva: se conserva configurada, pero no aparece a quien responde.') ?></label>
             </div>
         </div>
         <div class="col-12<?= $selectedType === '' ? ' d-none' : '' ?>" data-question-rule-section>

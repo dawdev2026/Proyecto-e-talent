@@ -20,7 +20,7 @@ final class EvaluationSurveyAttemptModel
             JOIN (
                 SELECT form_id, MAX(attempt_number) AS attempt_number
                 FROM evaluation_survey_attempts
-                WHERE user_id = ?
+                WHERE user_id = ? AND status <> "preparing"
                 GROUP BY form_id
             ) latest ON latest.form_id = a.form_id AND latest.attempt_number = a.attempt_number
             WHERE a.user_id = ?
@@ -67,6 +67,9 @@ final class EvaluationSurveyAttemptModel
 
         $summaries = [];
         foreach ($rows as $row) {
+            // La preparación de permisos no es un intento iniciado ni debe
+            // alterar contadores, avance o el estado visible al participante.
+            if ((string) ($row['status'] ?? '') === 'preparing') continue;
             $formId = (int) $row['form_id'];
             if (!isset($summaries[$formId])) {
                 $summaries[$formId] = [
@@ -97,6 +100,44 @@ final class EvaluationSurveyAttemptModel
 
     public function attemptsForForm(int $formId, ?int $companyId = null, ?int $processId = null): array
     {
+        $companyId = $companyId && $companyId > 0 ? $companyId : null;
+        $processId = $processId && $processId > 0 ? $processId : null;
+        $processJoinScope = $companyId ? ' AND p.company_id = ?' : '';
+        $assignedProcessScope = $companyId ? ' AND assigned_process.company_id = ?' : '';
+        $companyAttemptScope = $companyId ? ' AND u.company_id = ? AND (a.process_id IS NULL OR p.id IS NOT NULL)' : '';
+        $processFilter = '';
+        if ($processId) {
+            $companyAssignmentScope = $companyId
+                ? ' AND EXISTS (SELECT 1 FROM ' . database_identifier('tests') . '.test_processes pea_process WHERE pea_process.id = pea.process_id AND pea_process.company_id = ?)'
+                : '';
+            // Ambiguity is global by design: an attempt with no process_id
+            // must not be assigned to this company if another active process
+            // assignment exists elsewhere. This counts IDs only and reveals
+            // no foreign process metadata.
+            $companyOtherAssignmentScope = '';
+            $processFilter = ' AND (a.process_id = ? OR (a.process_id IS NULL AND EXISTS (
+                SELECT 1
+                FROM ' . database_identifier('tests') . '.test_process_evaluation_assignments pea
+                WHERE pea.process_id = ? AND pea.form_id = a.form_id AND pea.user_id = a.user_id AND pea.status <> "cancelled"' . $companyAssignmentScope . '
+            ) AND NOT EXISTS (
+                SELECT 1
+                FROM ' . database_identifier('tests') . '.test_process_evaluation_assignments other_pea
+                WHERE other_pea.form_id = a.form_id AND other_pea.user_id = a.user_id AND other_pea.status <> "cancelled" AND other_pea.process_id <> ?' . $companyOtherAssignmentScope . '
+            )))';
+        }
+
+        $params = [];
+        if ($companyId) $params[] = $companyId;
+        $params[] = $processId ?: 0;
+        if ($companyId) $params[] = $companyId;
+        $params[] = $formId;
+        if ($processId) {
+            array_push($params, $processId, $processId);
+            if ($companyId) $params[] = $companyId;
+            $params[] = $processId;
+        }
+        if ($companyId) $params[] = $companyId;
+
         return $this->db->fetchAll('
             SELECT a.*,
                    COALESCE(p.name, assigned_process.name) AS process_name,
@@ -106,20 +147,12 @@ final class EvaluationSurveyAttemptModel
                     WHERE ea.attempt_id = a.id AND ea.answer_value IS NOT NULL AND TRIM(ea.answer_value) <> "") AS answer_count
             FROM evaluation_survey_attempts a
             JOIN ' . $this->coreSchema . '.users u ON u.id = a.user_id
-            LEFT JOIN ' . database_identifier('tests') . '.test_processes p ON p.id = a.process_id
+            LEFT JOIN ' . database_identifier('tests') . '.test_processes p ON p.id = a.process_id' . $processJoinScope . '
             LEFT JOIN ' . database_identifier('tests') . '.test_processes assigned_process
-              ON assigned_process.id = ?
-            WHERE a.form_id = ?' . ($processId && $processId > 0 ? ' AND (a.process_id = ? OR (a.process_id IS NULL AND EXISTS (
-                SELECT 1
-                FROM ' . database_identifier('tests') . '.test_process_evaluation_assignments pea
-                WHERE pea.process_id = ? AND pea.form_id = a.form_id AND pea.user_id = a.user_id AND pea.status <> "cancelled"
-            ) AND NOT EXISTS (
-                SELECT 1
-                FROM ' . database_identifier('tests') . '.test_process_evaluation_assignments other_pea
-                WHERE other_pea.form_id = a.form_id AND other_pea.user_id = a.user_id AND other_pea.status <> "cancelled" AND other_pea.process_id <> ?
-            )))' : '') . ($companyId && $companyId > 0 ? ' AND u.company_id = ?' : '') . '
+              ON assigned_process.id = ?' . $assignedProcessScope . '
+            WHERE a.form_id = ? AND a.status <> "preparing"' . $processFilter . $companyAttemptScope . '
             ORDER BY a.completed_at DESC, a.updated_at DESC, a.id DESC
-        ', array_values(array_filter([$processId && $processId > 0 ? $processId : null, $formId, $processId && $processId > 0 ? $processId : null, $processId && $processId > 0 ? $processId : null, $processId && $processId > 0 ? $processId : null, $companyId && $companyId > 0 ? $companyId : null], static fn($value): bool => $value !== null)));
+        ', $params);
     }
 
     public function reprocessableAttempt(int $attemptId, int $formId, ?int $companyId = null, ?int $processId = null): ?array
@@ -208,7 +241,7 @@ final class EvaluationSurveyAttemptModel
     {
         $testsSchema = database_identifier('tests');
         $companySql = $companyId && $companyId > 0
-            ? ' AND (f.company_id IS NULL OR f.company_id = ?) AND u.company_id = ?'
+            ? ' AND (f.company_id IS NULL OR f.company_id = ?) AND u.company_id = ? AND (a.process_id IS NULL OR p.id IS NOT NULL)'
             : '';
         $params = $companyId && $companyId > 0 ? [$companyId, $companyId] : [];
 
@@ -224,6 +257,7 @@ final class EvaluationSurveyAttemptModel
                         FROM ' . $testsSchema . '.test_process_evaluation_assignments pea2
                         JOIN ' . $testsSchema . '.test_processes p2 ON p2.id = pea2.process_id
                         WHERE pea2.form_id = a.form_id AND pea2.user_id = a.user_id AND pea2.status <> "cancelled"
+                          AND p2.company_id = u.company_id
                     ) END) AS process_name,
                     COALESCE(ast.correct_answers, 0) AS correct_answers,
                     COALESCE(ast.incorrect_answers, 0) AS incorrect_answers,
@@ -232,7 +266,7 @@ final class EvaluationSurveyAttemptModel
              FROM evaluation_survey_attempts a
              JOIN evaluation_survey_forms f ON f.id = a.form_id AND f.form_type = "assessment"
              JOIN ' . $this->coreSchema . '.users u ON u.id = a.user_id
-             LEFT JOIN ' . database_identifier('tests') . '.test_processes p ON p.id = a.process_id
+             LEFT JOIN ' . database_identifier('tests') . '.test_processes p ON p.id = a.process_id AND p.company_id = u.company_id
              LEFT JOIN (
                  SELECT ea.attempt_id,
                         SUM(CASE WHEN ea.answer_value IS NOT NULL AND TRIM(ea.answer_value) <> "" AND ea.score_value > 0 THEN 1 ELSE 0 END) AS correct_answers,
@@ -283,6 +317,26 @@ final class EvaluationSurveyAttemptModel
         ', [$attemptId]);
     }
 
+    public function findAttemptForCompany(int $attemptId, int $companyId): ?array
+    {
+        if ($attemptId <= 0 || $companyId <= 0) return null;
+        return $this->db->fetch(
+            'SELECT a.*, f.title AS form_title, f.form_type, f.show_result_to_user, f.result_display_mode,
+                    f.show_correction_to_user, f.passing_score,
+                    u.name AS user_name, u.email AS user_email,
+                    p.name AS process_name, p.code AS process_code
+             FROM evaluation_survey_attempts a
+             JOIN evaluation_survey_forms f ON f.id = a.form_id
+             JOIN ' . $this->coreSchema . '.users u ON u.id = a.user_id
+             LEFT JOIN ' . database_identifier('tests') . '.test_processes p ON p.id = a.process_id
+             WHERE a.id = ? AND u.company_id = ?
+               AND (f.company_id IS NULL OR f.company_id = ?)
+               AND (a.process_id IS NULL OR p.company_id = ?)
+             LIMIT 1',
+            [$attemptId, $companyId, $companyId, $companyId]
+        );
+    }
+
     public function findAttemptForUser(int $attemptId, int $userId): ?array
     {
         $attempt = $this->findAttempt($attemptId);
@@ -293,21 +347,32 @@ final class EvaluationSurveyAttemptModel
         return $attempt;
     }
 
-    public function finishedAttemptsForFormUser(int $formId, int $userId, ?int $processId = null): array
+    public function finishedAttemptsForFormUser(int $formId, int $userId, ?int $processId = null, ?int $companyId = null): array
     {
         if ($formId <= 0 || $userId <= 0) {
             return [];
         }
 
+        $companyId = $companyId && $companyId > 0 ? $companyId : null;
+        $companyScope = $companyId
+            ? ' AND u.company_id = ? AND (a.process_id IS NULL OR p.company_id = ?) AND (f.company_id IS NULL OR f.company_id = ?)'
+            : '';
+        $params = [$formId, $userId];
+        if ($processId && $processId > 0) $params[] = $processId;
+        if ($companyId) array_push($params, $companyId, $companyId, $companyId);
+
         return $this->db->fetchAll('
-            SELECT *
-            FROM evaluation_survey_attempts
-            WHERE form_id = ? AND user_id = ? AND status IN ("completed", "expired")' . ($processId && $processId > 0 ? ' AND process_id = ?' : '') . '
-            ORDER BY attempt_number DESC, id DESC
-        ', $processId && $processId > 0 ? [$formId, $userId, $processId] : [$formId, $userId]);
+            SELECT a.*
+            FROM evaluation_survey_attempts a
+            JOIN ' . $this->coreSchema . '.users u ON u.id = a.user_id
+            JOIN evaluation_survey_forms f ON f.id = a.form_id
+            LEFT JOIN ' . database_identifier('tests') . '.test_processes p ON p.id = a.process_id
+            WHERE a.form_id = ? AND a.user_id = ? AND a.status IN ("completed", "expired")' . ($processId && $processId > 0 ? ' AND a.process_id = ?' : '') . $companyScope . '
+            ORDER BY a.attempt_number DESC, a.id DESC
+        ', $params);
     }
 
-    public function startAttempt(array $form, int $userId, ?int $processId = null, bool $expireActive = true): array
+    public function startAttempt(array $form, int $userId, ?int $processId = null, bool $expireActive = true, bool $deferActivation = false): array
     {
         $formId = (int) $form['id'];
         $maxAttempts = max(1, (int) ($form['max_attempts'] ?? 1));
@@ -315,7 +380,7 @@ final class EvaluationSurveyAttemptModel
         $active = $this->db->fetch('
             SELECT *
             FROM evaluation_survey_attempts
-            WHERE form_id = ? AND user_id = ? AND status = "in_progress"' . ($processId && $processId > 0 ? ' AND process_id = ?' : ' AND process_id IS NULL') . '
+            WHERE form_id = ? AND user_id = ? AND status IN ("preparing", "in_progress")' . ($processId && $processId > 0 ? ' AND process_id = ?' : ' AND process_id IS NULL') . '
             ORDER BY id DESC
             LIMIT 1
         ', $processId && $processId > 0 ? [$formId, $userId, $processId] : [$formId, $userId]);
@@ -326,7 +391,7 @@ final class EvaluationSurveyAttemptModel
         $row = $this->db->fetch('
             SELECT COALESCE(MAX(attempt_number), 0) AS last_attempt
             FROM evaluation_survey_attempts
-            WHERE form_id = ? AND user_id = ?' . ($processId && $processId > 0 ? ' AND process_id = ?' : ' AND process_id IS NULL') . '
+            WHERE form_id = ? AND user_id = ? AND status <> "preparing"' . ($processId && $processId > 0 ? ' AND process_id = ?' : ' AND process_id IS NULL') . '
         ', $processId && $processId > 0 ? [$formId, $userId, $processId] : [$formId, $userId]);
         $nextAttempt = (int) ($row['last_attempt'] ?? 0) + 1;
         if ($nextAttempt > $maxAttempts) {
@@ -336,14 +401,34 @@ final class EvaluationSurveyAttemptModel
         $durationMinutes = max(0, (int) ($form['duration_minutes'] ?? 0));
         // En el modo audiovisual el tiempo comienza cuando el cliente termina
         // la validación y registra supervised_started, no al abrir la pantalla.
-        $expiresAt = $durationMinutes > 0 && (string) ($form['control_mode'] ?? 'off') !== 'supervised_audio_visual'
+        $isSupervised = $deferActivation || in_array((string) ($form['control_mode'] ?? 'off'), ['supervised', 'supervised_audio_visual'], true);
+        $expiresAt = $durationMinutes > 0 && !$isSupervised
             ? date('Y-m-d H:i:s', time() + ($durationMinutes * 60))
             : null;
         try {
-            $attemptId = $this->db->insert('
-                INSERT INTO evaluation_survey_attempts (form_id, user_id, process_id, control_mode, audio_visual_upload_failure_policy, audio_visual_interruption_policy, audio_visual_voice_policy, audio_visual_permission_policy, audio_visual_quality_profile, attempt_number, expires_at, max_score, last_seen_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
-            ', [$formId, $userId, $processId ?: null, (string) ($form['control_mode'] ?? 'off'), (string) ($form['audio_visual_upload_failure_policy'] ?? 'continue'), (string) ($form['audio_visual_interruption_policy'] ?? 'pause'), (string) ($form['audio_visual_voice_policy'] ?? 'warn'), (string) ($form['audio_visual_permission_policy'] ?? 'pause'), (string) ($form['audio_visual_quality_profile'] ?? 'economical'), $nextAttempt, $expiresAt, (float) ($form['max_score'] ?? 100)]);
+            $columns = ['form_id', 'user_id', 'process_id', 'control_mode', 'audio_visual_upload_failure_policy', 'audio_visual_interruption_policy', 'audio_visual_voice_policy', 'audio_visual_permission_policy', 'audio_visual_quality_profile', 'attempt_number', 'expires_at', 'max_score', 'last_seen_at'];
+            $values = ['?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?', '?', 'NOW()'];
+            $params = [$formId, $userId, $processId ?: null, (string) ($form['control_mode'] ?? 'off'), (string) ($form['audio_visual_upload_failure_policy'] ?? 'continue'), (string) ($form['audio_visual_interruption_policy'] ?? 'pause'), (string) ($form['audio_visual_voice_policy'] ?? 'warn'), (string) ($form['audio_visual_permission_policy'] ?? 'pause'), (string) ($form['audio_visual_quality_profile'] ?? 'economical'), $nextAttempt, $expiresAt, (float) ($form['max_score'] ?? 100)];
+            if ($isSupervised) {
+                $columns[] = 'status';
+                $values[] = '?';
+                $params[] = 'preparing';
+            }
+            if ($processId && array_key_exists('component_validation_policy', $form) && $this->hasProcessPolicySnapshotColumns()) {
+                foreach ([
+                    'process_facial_enrollment_required' => (int) ($form['require_facial_enrollment'] ?? 0),
+                    'process_component_validation_required' => (int) ($form['component_validation_required'] ?? 0),
+                    'process_record_audio_visual' => (int) ($form['record_audio_visual'] ?? 0),
+                    'process_record_actions' => (int) ($form['record_activity_actions'] ?? $form['track_activity_enabled'] ?? 0),
+                ] as $column => $value) {
+                    $columns[] = $column;
+                    $values[] = '?';
+                    $params[] = $value;
+                }
+                $columns[] = 'process_policy_snapshot_at';
+                $values[] = 'NOW()';
+            }
+            $attemptId = $this->db->insert('INSERT INTO evaluation_survey_attempts (' . implode(', ', $columns) . ') VALUES (' . implode(', ', $values) . ')', $params);
         } catch (Throwable $exception) {
             // Two requests can start the same QR evaluation at the same time
             // (for example, a double click or a pending-assessment prompt).
@@ -367,13 +452,62 @@ final class EvaluationSurveyAttemptModel
         return $this->findAttempt($attemptId) ?: $attempt;
     }
 
+    private function hasProcessPolicySnapshotColumns(): bool
+    {
+        try {
+            $row = $this->db->fetch('SELECT COUNT(*) AS total FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = "evaluation_survey_attempts" AND COLUMN_NAME IN ("process_facial_enrollment_required", "process_component_validation_required", "process_record_audio_visual", "process_record_actions", "process_policy_snapshot_at")');
+            return (int) ($row['total'] ?? 0) === 5;
+        } catch (Throwable $exception) {
+            error_log('Evaluation attempt policy schema check error: ' . $exception->getMessage());
+            return false;
+        }
+    }
+
+    public function activeAttemptForUser(int $formId, int $userId, int $processId): ?array
+    {
+        if ($formId <= 0 || $userId <= 0 || $processId <= 0) return null;
+        return $this->db->fetch(
+            'SELECT a.id, a.status, a.process_id FROM evaluation_survey_attempts a
+             WHERE a.form_id = ? AND a.user_id = ? AND a.process_id = ? AND a.status IN ("preparing", "in_progress")
+               AND NOT EXISTS (
+                   SELECT 1 FROM evaluation_survey_attempts newer
+                   WHERE newer.form_id = a.form_id AND newer.user_id = a.user_id AND newer.process_id = a.process_id
+                     AND (newer.attempt_number > a.attempt_number OR (newer.attempt_number = a.attempt_number AND newer.id > a.id))
+               )
+               AND NOT (
+                   a.control_mode = "supervised_audio_visual"
+                   AND NOT EXISTS (
+                       SELECT 1 FROM evaluation_survey_activity_events e
+                       WHERE e.attempt_id = a.id AND e.event_type = "supervised_started"
+                   )
+                   AND NOT EXISTS (
+                       SELECT 1 FROM evaluation_survey_media_evidence m
+                       WHERE m.attempt_id = a.id
+                         AND m.segment_number = (
+                             SELECT MAX(m2.segment_number)
+                             FROM evaluation_survey_media_evidence m2
+                             WHERE m2.attempt_id = a.id
+                         )
+                         AND m.recording_started_at IS NOT NULL
+                   )
+               )
+             ORDER BY a.id DESC LIMIT 1',
+            [$formId, $userId, $processId]
+        );
+    }
+
     public function activateTimer(array $attempt, array $form): array
     {
         $attemptId = (int) ($attempt['id'] ?? 0);
         $durationMinutes = max(0, (int) ($form['duration_minutes'] ?? 0));
-        if ($attemptId <= 0 || ($attempt['status'] ?? '') !== 'in_progress' || $durationMinutes <= 0 || !empty($attempt['expires_at'])) {
+        if ($attemptId <= 0 || !in_array((string) ($attempt['status'] ?? ''), ['preparing', 'in_progress'], true)) {
             return $attempt;
         }
+        if ((string) ($attempt['status'] ?? '') === 'preparing') {
+            $this->db->execute('UPDATE evaluation_survey_attempts SET status = "in_progress", last_seen_at = NOW() WHERE id = ? AND user_id = ? AND status = "preparing"', [$attemptId, (int) ($attempt['user_id'] ?? 0)]);
+            $attempt = $this->findAttempt($attemptId) ?: $attempt;
+        }
+        if ($durationMinutes <= 0 || !empty($attempt['expires_at'])) return $attempt;
 
         $this->db->execute(
             'UPDATE evaluation_survey_attempts SET expires_at = ? WHERE id = ? AND status = "in_progress" AND expires_at IS NULL',
@@ -580,6 +714,23 @@ final class EvaluationSurveyAttemptModel
         }
 
         return $answers;
+    }
+
+    public function verifyAnswersForAttempt(int $attemptId, array $questions, array $submittedAnswers): array
+    {
+        $persisted = $this->answersForAttempt($attemptId);
+        $answeredCount = 0;
+        $missingQuestionIds = [];
+        foreach ($questions as $question) {
+            $questionId = (int) ($question['id'] ?? 0);
+            if ($questionId <= 0 || !array_key_exists($questionId, $submittedAnswers)) continue;
+            $expected = $this->answerValue($submittedAnswers[$questionId]);
+            if ($expected !== '') $answeredCount++;
+            $saved = trim((string) ($persisted[$questionId]['answer_value'] ?? ''));
+            if ($saved !== $expected) $missingQuestionIds[] = $questionId;
+        }
+
+        return ['verified' => !$missingQuestionIds, 'answered_count' => $answeredCount, 'missing_question_ids' => $missingQuestionIds];
     }
 
     public function expireIfNeeded(array $attempt): array

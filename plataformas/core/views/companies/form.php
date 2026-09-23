@@ -2,7 +2,7 @@
     <div>
         <p class="dashboard-kicker mb-2">Administracion</p>
         <h1 class="fw-bold mb-1"><?= $id ? 'Editar empresa' : 'Nueva empresa' ?></h1>
-        <p class="text-muted mb-0">Define la empresa que agrupa usuarios solicitantes.</p>
+        <p class="text-muted mb-0">Define la empresa que agrupa usuarios solicitantes. Los administradores se crean desde Usuarios.</p>
     </div>
 </section>
 
@@ -49,44 +49,6 @@
                 </div>
             </div>
         </div>
-
-        <?php if (!$id || empty($companyAdmins)): ?>
-            <div class="user-form-section">
-                <div class="user-form-section-head">
-                    <span><i class="bi bi-person-badge"></i></span>
-                    <div>
-                        <h2><?= $id ? 'Regularizar administrador' : 'Administrador inicial' ?></h2>
-                        <p><?= $id ? 'Esta empresa no tiene un administrador activo. Completa estos datos para habilitar su acceso.' : 'Se creara un administrador con acceso a usuarios, procesos y entrevistas de esta empresa.' ?></p>
-                    </div>
-                </div>
-                <div class="row g-3">
-                    <div class="col-12 col-lg-6">
-                        <div class="form-floating">
-                            <input id="admin_first_names" class="form-control form-control-lg" name="admin_first_names" value="<?= e($values['admin_first_names'] ?? '') ?>" maxlength="120" placeholder="Nombres" required>
-                            <label for="admin_first_names">Nombres</label>
-                        </div>
-                    </div>
-                    <div class="col-12 col-lg-6">
-                        <div class="form-floating">
-                            <input id="admin_last_names" class="form-control form-control-lg" name="admin_last_names" value="<?= e($values['admin_last_names'] ?? '') ?>" maxlength="120" placeholder="Apellidos" required>
-                            <label for="admin_last_names">Apellidos</label>
-                        </div>
-                    </div>
-                    <div class="col-12 col-lg-6">
-                        <div class="form-floating">
-                            <input id="admin_email" class="form-control form-control-lg" type="email" name="admin_email" value="<?= e($values['admin_email'] ?? '') ?>" maxlength="160" placeholder="Correo" required>
-                            <label for="admin_email">Correo de acceso</label>
-                        </div>
-                    </div>
-                    <div class="col-12 col-lg-6">
-                        <div class="form-floating">
-                            <input id="admin_password" class="form-control form-control-lg" type="password" name="admin_password" minlength="8" placeholder="Contraseña" required>
-                            <label for="admin_password">Contraseña inicial</label>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        <?php endif; ?>
 
         <div class="user-form-actions">
             <button class="btn btn-primary px-4" type="submit"><i class="bi bi-check2 me-1"></i> <?= $id ? 'Guardar cambios' : 'Crear empresa' ?></button>

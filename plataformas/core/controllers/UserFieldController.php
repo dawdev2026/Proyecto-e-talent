@@ -112,9 +112,9 @@ final class UserFieldController extends Controller
         verify_csrf();
 
         $data = [
-            'company_id' => has_permission('manage_company_user_fields') && !has_permission('manage_user_fields')
+            'company_id' => is_company_admin_user()
                 ? (int) (current_user()['company_id'] ?? 0)
-                : null,
+                : (has_permission('manage_company_user_fields') && !has_permission('manage_user_fields') ? (int) (current_user()['company_id'] ?? 0) : null),
             'scope' => $_POST['scope'] ?? 'core:core',
             'label' => trim($_POST['label'] ?? ''),
             'field_type' => $_POST['field_type'] ?? 'text',

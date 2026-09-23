@@ -2,7 +2,10 @@
 $userResult = $userResult ?? [];
 $results = $results ?? [];
 $evaluationResults = $evaluationResults ?? [];
+$progressActivities = $progressActivities ?? [];
 $process = $process ?? null;
+$canReopenActivities = $canReopenActivities ?? false;
+$allowActivityReopen = (int) ($process['allow_expired_reopen'] ?? 0) === 1 && !empty($canReopenActivities);
 $sessionStatusLabels = [
     'assigned' => 'Asignada',
     'in_progress' => 'En curso',
@@ -412,6 +415,7 @@ if (!function_exists('test_activity_label')) {
             'drag_blocked' => 'Arrastre bloqueado',
             'print_blocked' => 'Impresion bloqueada',
             'audio_visual_recording_started' => 'Control audiovisual iniciado',
+            'audio_visual_consent_accepted' => 'Consentimiento audiovisual aceptado',
             'audio_visual_recording_interrupted' => 'Control audiovisual interrumpido',
             'audio_visual_recording_recovered' => 'Control audiovisual recuperado',
             'audio_visual_upload_started' => 'Carga de evidencia audiovisual iniciada',
@@ -709,18 +713,54 @@ if (!function_exists('test_user_results_activity_rows')) {
             <?= $process ? ' · Proceso: ' . e((string) ($process['name'] ?? '')) : '' ?>
         </p>
     </div>
-    <a class="btn btn-back" data-page-back="1" href="<?= e(back_url(has_permission('manage_tests') ? 'tests' : 'dashboard')) ?>"><i class="bi bi-arrow-left me-1"></i> Volver</a>
 </section>
 
 <section class="card content-panel">
-    <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
-        <div>
-            <h2 class="h5 fw-bold mb-1">Evaluaciones terminadas</h2>
-            <p class="text-muted mb-0">Resultados separados por evaluacion, con resumen de actividad y detalle de acciones por instrumento.</p>
+    <?php if ($progressActivities): ?>
+        <?php require __DIR__ . '/partials/activity_status_help.php'; ?>
+        <div class="mb-4">
+            <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+                <div>
+                    <h2 class="h5 fw-bold mb-1">Avance por test y evaluación</h2>
+                    <p class="text-muted mb-0">Aquí puedes revisar qué actividades tiene asignadas la persona y cuánto ha respondido.</p>
+                </div>
+                <span class="badge text-bg-light border"><?= count($progressActivities) ?> actividades</span>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0">
+                    <thead><tr><th>Actividad</th><th>Estado</th><th style="min-width:220px">Avance</th><th>Última actividad</th></tr></thead>
+                    <tbody>
+                    <?php foreach ($progressActivities as $activity): ?>
+                        <?php
+                        $activityStatus = (string) ($activity['status'] ?? 'assigned');
+                        $activityTotal = (int) ($activity['total'] ?? 0);
+                        $activityAnswered = (int) ($activity['answered'] ?? 0);
+                        $activityPercent = $activityTotal > 0 ? min(100, (int) round(($activityAnswered / $activityTotal) * 100)) : ($activityStatus === 'completed' ? 100 : 0);
+                        $activityStatusLabel = $sessionStatusLabels[$activityStatus] ?? ucfirst($activityStatus);
+                        ?>
+                        <tr>
+                            <td><div class="fw-semibold"><?= e((string) ($activity['name'] ?? 'Actividad')) ?></div><small class="text-muted"><?= e((string) ($activity['type'] ?? '')) ?></small></td>
+                            <td><span class="badge text-bg-light border"><?= e($activityStatusLabel) ?></span></td>
+                            <td><div class="d-flex align-items-center gap-2"><div class="progress flex-grow-1" style="height:.45rem"><div class="progress-bar" style="width:<?= $activityPercent ?>%"></div></div><strong><?= $activityPercent ?>%</strong></div><small class="text-muted"><?= $activityAnswered ?> de <?= $activityTotal ?> preguntas respondidas</small></td>
+                            <td class="text-muted small"><?= $activity['last_activity'] !== '' ? e((string) $activity['last_activity']) : 'Sin actividad' ?>
+                                <?php if ($allowActivityReopen && in_array($activityStatus, ['completed', 'in_progress', 'expired'], true)): ?>
+                                    <form method="post" class="mt-2 d-flex align-items-center gap-1" action="<?= e(app_url('tests/processes/' . secure_url_token((int) ($process['id'] ?? 0), 'test_process') . ($activity['kind'] === 'evaluation' ? '/reopen-expired-evaluation-assignment' : '/reopen-session'))) ?>">
+                                        <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                        <?php if ($activity['kind'] === 'evaluation'): ?><input type="hidden" name="form_id" value="<?= (int) ($activity['form_id'] ?? 0) ?>"><input type="hidden" name="user_id" value="<?= (int) ($activity['user_id'] ?? 0) ?>"><?php else: ?><input type="hidden" name="session_id" value="<?= (int) ($activity['session_id'] ?? 0) ?>"><?php endif; ?>
+                                        <input class="form-control form-control-sm" style="width:78px" type="number" name="duration_minutes" min="1" max="120" value="30" required aria-label="Minutos adicionales (1 a 120)">
+                                        <button class="btn btn-sm btn-outline-primary" type="submit" title="Reabrir con minutos adicionales"><i class="bi bi-unlock me-1"></i>Reabrir</button>
+                                    </form>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
         </div>
-        <span class="badge text-bg-success"><?= count($results) + count($evaluationResults) ?> terminadas</span>
-    </div>
-
+        <hr class="mb-4">
+    <?php endif; ?>
+    <?php if ($results): ?>
     <div class="user-results-stack">
         <?php foreach ($results as $resultIndex => $result): ?>
             <?php
@@ -749,20 +789,12 @@ if (!function_exists('test_user_results_activity_rows')) {
             $videoDrawerId = 'user-video-detail-drawer-' . ((int) ($session['id'] ?? 0) ?: ((int) $resultIndex + 1));
             $resultExportUrl = !empty($session['id']) ? route_url('test-session.result-export', (int) $session['id']) : '#';
             ?>
+            <details class="user-result-accordion" open>
+                <summary class="user-result-accordion-summary">
+                    <span><strong><?= e((string) ($session['instrument_name'] ?? 'Evaluacion')) ?></strong><small><?= e((string) ($session['instrument_code'] ?? '')) ?><?= !empty($session['completed_at']) ? ' · Finalizada: ' . e((string) $session['completed_at']) : '' ?></small></span>
+                    <span class="badge text-bg-success">Completada</span>
+                </summary>
             <article class="user-result-card">
-                <div class="user-result-card-header">
-                    <div>
-                        <h3 class="h6 fw-bold mb-1"><?= e((string) ($session['instrument_name'] ?? 'Evaluacion')) ?></h3>
-                        <p class="text-muted small mb-0">
-                            <?= e((string) ($session['instrument_code'] ?? '')) ?>
-                            <?= !empty($session['completed_at']) ? ' · Finalizada: ' . e((string) $session['completed_at']) : '' ?>
-                        </p>
-                    </div>
-                    <span class="badge <?= ($session['status'] ?? '') === 'completed' ? 'text-bg-success' : 'text-bg-secondary' ?>">
-                        <?= e($sessionStatusLabels[(string) ($session['status'] ?? 'completed')] ?? labelize((string) ($session['status'] ?? 'completed'))) ?>
-                    </span>
-                </div>
-
                 <div class="row g-3">
                     <div class="col-md-3">
                         <div class="result-metric">
@@ -832,7 +864,7 @@ if (!function_exists('test_user_results_activity_rows')) {
 
                 <?php foreach (array_slice($mediaEvidences, 0, -1) as $mediaSegment): ?>
                     <?php $segmentCaptures = array_values(array_filter($screenCaptures, static fn(array $capture): bool => (int) ($capture['evidence_id'] ?? 0) === (int) ($mediaSegment['id'] ?? 0))); ?>
-                    <section class="border rounded p-3 mt-3"><div class="d-flex justify-content-between gap-2"><h4 class="h6 fw-bold mb-1">Control audiovisual · reapertura <?= (int) ($mediaSegment['segment_number'] ?? 1) ?></h4><span class="badge text-bg-secondary"><?= e(['saved' => 'Video guardado', 'partial' => 'Video parcial', 'failed' => 'Video no guardado', 'uploading' => 'Carga no finalizada'][$mediaSegment['status'] ?? ''] ?? 'Sin estado') ?></span></div><?php if (in_array((string) ($mediaSegment['status'] ?? ''), ['saved', 'partial'], true)): ?><video class="w-100 rounded border mt-2" controls preload="metadata" src="<?= e(route_url('test-session.media-evidence', (int) ($session['id'] ?? 0)) . '?evidence_id=' . (int) $mediaSegment['id']) ?>"></video><?php endif; ?><?php if ($segmentCaptures): ?><div class="row g-2 mt-2"><?php foreach ($segmentCaptures as $capture): $captureUrl = route_url('test-session.media-screenshot-file', (int) ($session['id'] ?? 0)) . '?capture_id=' . (int) $capture['id']; ?><div class="col-6"><img class="img-fluid rounded border" loading="lazy" src="<?= e($captureUrl) ?>" alt="Captura <?= (int) $capture['capture_number'] ?>"></div><?php endforeach; ?></div><?php endif; ?></section>
+                    <section class="border rounded p-3 mt-3"><div class="d-flex justify-content-between gap-2"><h4 class="h6 fw-bold mb-1">Control audiovisual · reapertura <?= (int) ($mediaSegment['segment_number'] ?? 1) ?></h4><span class="badge text-bg-secondary"><?= e(['saved' => 'Video guardado', 'partial' => 'Video parcial', 'failed' => 'Video no guardado', 'uploading' => 'Carga no finalizada'][$mediaSegment['status'] ?? ''] ?? 'Sin estado') ?></span></div><?php if (in_array((string) ($mediaSegment['status'] ?? ''), ['saved', 'partial'], true)): ?><video class="w-100 rounded border mt-2" controls preload="metadata" src="<?= e(route_url('test-session.media-evidence', (int) ($session['id'] ?? 0)) . '?evidence_id=' . (int) $mediaSegment['id']) ?>"></video><?php endif; ?><?php if ($segmentCaptures): ?><div class="row g-2 mt-2 capture-gallery"><?php foreach ($segmentCaptures as $capture): $captureUrl = route_url('test-session.media-screenshot-file', (int) ($session['id'] ?? 0)) . '?capture_id=' . (int) $capture['id']; ?><div class="col-6"><a href="<?= e($captureUrl) ?>" data-screen-capture-view><img class="img-fluid rounded border" loading="lazy" src="<?= e($captureUrl) ?>" alt="Captura <?= (int) $capture['capture_number'] ?>"></a></div><?php endforeach; ?></div><?php endif; ?></section>
                 <?php endforeach; ?>
                 <?php if ($mediaEvidences): ?>
                     <section class="border rounded p-3 mt-3 d-none">
@@ -850,7 +882,7 @@ if (!function_exists('test_user_results_activity_rows')) {
                             <div class="col-12 col-lg-8">
                                 <?php if (in_array($mediaStatus, ['saved', 'partial'], true)): ?>
                                     <div class="small fw-semibold mb-2">Grabación <?= (int) ($mediaEvidence['segment_number'] ?? 1) ?></div><video class="w-100 rounded border" controls preload="none" src="<?= e(route_url('test-session.media-evidence', (int) ($session['id'] ?? 0)) . '?evidence_id=' . (int) $mediaEvidence['id']) ?>"></video>
-                                    <?php if ($latestSegmentCaptures): ?><div class="row g-2 mt-2"><?php foreach ($latestSegmentCaptures as $capture): $captureUrl = route_url('test-session.media-screenshot-file', (int) ($session['id'] ?? 0)) . '?capture_id=' . (int) $capture['id']; ?><div class="col-6"><a href="<?= e($captureUrl) ?>" data-screen-capture-view><img class="img-fluid rounded border" loading="lazy" src="<?= e($captureUrl) ?>" alt="Captura <?= (int) $capture['capture_number'] ?>"></a></div><?php endforeach; ?></div><?php endif; ?>
+                                    <?php if ($latestSegmentCaptures): ?><div class="row g-2 mt-2 capture-gallery"><?php foreach ($latestSegmentCaptures as $capture): $captureUrl = route_url('test-session.media-screenshot-file', (int) ($session['id'] ?? 0)) . '?capture_id=' . (int) $capture['id']; ?><div class="col-6"><a href="<?= e($captureUrl) ?>" data-screen-capture-view><img class="img-fluid rounded border" loading="lazy" src="<?= e($captureUrl) ?>" alt="Captura <?= (int) $capture['capture_number'] ?>"></a></div><?php endforeach; ?></div><?php endif; ?>
                                     <div class="text-muted small mt-2">Tamaño: <?= e(number_format(((int) ($mediaEvidence['file_size'] ?? 0)) / 1048576, 2, ',', '.')) ?> MB · Duración: <?= (int) ($mediaEvidence['duration_seconds'] ?? 0) ?> s</div>
                                     <?php if ($mediaStatus === 'partial'): ?><div class="alert alert-warning mt-2 mb-0">Evidencia parcial: solo se unieron los fragmentos disponibles hasta el primer faltante.</div><?php endif; ?>
                                 <?php else: ?>
@@ -858,7 +890,7 @@ if (!function_exists('test_user_results_activity_rows')) {
                                     <?php if (!empty($mediaEvidence['failure_reason'])): ?>
                                         <div class="text-muted small">Motivo: <?= e((string) $mediaEvidence['failure_reason']) ?></div>
                                     <?php endif; ?>
-                                    <?php if ($latestSegmentCaptures): ?><h5 class="h6 fw-bold mt-3">Capturas de pantalla (<?= count($latestSegmentCaptures) ?>)</h5><div class="row g-2"><?php foreach ($latestSegmentCaptures as $capture): $captureUrl = route_url('test-session.media-screenshot-file', (int) ($session['id'] ?? 0)) . '?capture_id=' . (int) $capture['id']; ?><div class="col-6"><a href="<?= e($captureUrl) ?>" data-screen-capture-view><img class="img-fluid rounded border" loading="lazy" src="<?= e($captureUrl) ?>" alt="Captura <?= (int) $capture['capture_number'] ?>"></a></div><?php endforeach; ?></div><?php endif; ?>
+                                    <?php if ($latestSegmentCaptures): ?><h5 class="h6 fw-bold mt-3">Capturas de pantalla (<?= count($latestSegmentCaptures) ?>)</h5><div class="row g-2 capture-gallery"><?php foreach ($latestSegmentCaptures as $capture): $captureUrl = route_url('test-session.media-screenshot-file', (int) ($session['id'] ?? 0)) . '?capture_id=' . (int) $capture['id']; ?><div class="col-6"><a href="<?= e($captureUrl) ?>" data-screen-capture-view><img class="img-fluid rounded border" loading="lazy" src="<?= e($captureUrl) ?>" alt="Captura <?= (int) $capture['capture_number'] ?>"></a></div><?php endforeach; ?></div><?php endif; ?>
                                     <?php if (in_array($mediaStatus, ['uploading', 'failed'], true)): ?><form method="post" action="<?= e(route_url('test-session.media-partial', (int) ($session['id'] ?? 0))) ?>" class="mt-2" onsubmit="return window.confirm('¿Deseas unir los fragmentos audiovisuales disponibles y ver la evidencia parcial?');"><input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><button class="btn btn-sm btn-outline-warning" type="submit">Unir fragmentos disponibles y ver video parcial</button></form><?php endif; ?>
                                 <?php endif; ?>
                             </div>
@@ -880,7 +912,7 @@ if (!function_exists('test_user_results_activity_rows')) {
                 <?php endif; ?>
 
                 <?php if ($mediaEvidences): ?>
-                    <template id="<?= e($videoDrawerId) ?>"><div class="drawer-detail-heading"><div><p class="text-uppercase text-primary fw-bold small mb-1">Control audiovisual</p><h3 class="h5 fw-bold mb-1">Videos y capturas</h3><p class="text-muted mb-0">Evidencia registrada por cada apertura o reapertura del test.</p></div></div><?php foreach ($mediaEvidences as $mediaSegment): $segmentCaptures = array_values(array_filter($screenCaptures, static fn(array $capture): bool => (int) ($capture['evidence_id'] ?? 0) === (int) ($mediaSegment['id'] ?? 0))); ?><div class="border rounded p-3 mt-3"><div class="d-flex justify-content-between gap-2"><h4 class="h6 fw-bold mb-1">Grabación <?= (int) ($mediaSegment['segment_number'] ?? 1) ?></h4><span class="badge text-bg-light border"><?= e(['saved' => 'Video guardado', 'partial' => 'Video parcial', 'failed' => 'Video no guardado', 'uploading' => 'Carga no finalizada', 'processing' => 'Procesando'][$mediaSegment['status'] ?? ''] ?? 'Sin estado') ?></span></div><?php if (in_array((string) ($mediaSegment['status'] ?? ''), ['saved', 'partial'], true)): ?><video class="w-100 rounded border mt-2" controls preload="metadata" src="<?= e(route_url('test-session.media-evidence', (int) ($session['id'] ?? 0)) . '?evidence_id=' . (int) $mediaSegment['id']) ?>"></video><?php else: ?><p class="text-muted small mt-2 mb-0">El video no está disponible para reproducción.</p><?php endif; ?><?php if ($segmentCaptures): ?><h5 class="h6 fw-bold mt-3">Capturas de pantalla (<?= count($segmentCaptures) ?>)</h5><div class="row g-2"><?php foreach ($segmentCaptures as $capture): $captureUrl = route_url('test-session.media-screenshot-file', (int) ($session['id'] ?? 0)) . '?capture_id=' . (int) $capture['id']; ?><div class="col-6"><a href="<?= e($captureUrl) ?>" data-screen-capture-view><img class="img-fluid rounded border" loading="lazy" src="<?= e($captureUrl) ?>" alt="Captura <?= (int) $capture['capture_number'] ?>"></a></div><?php endforeach; ?></div><?php else: ?><p class="text-muted small mt-2 mb-0">No hay capturas registradas para este segmento.</p><?php endif; ?></div><?php endforeach; ?><div class="import-drawer-actions"><button class="btn btn-outline-secondary" type="button" data-app-drawer-close>Cerrar</button></div></template>
+                    <template id="<?= e($videoDrawerId) ?>"><?php foreach ($mediaEvidences as $mediaSegment): $segmentCaptures = array_values(array_filter($screenCaptures, static fn(array $capture): bool => (int) ($capture['evidence_id'] ?? 0) === (int) ($mediaSegment['id'] ?? 0))); ?><div class="border rounded p-3 mt-3"><div class="d-flex justify-content-between gap-2"><h4 class="h6 fw-bold mb-1">Grabación <?= (int) ($mediaSegment['segment_number'] ?? 1) ?></h4><span class="badge text-bg-light border"><?= e(['saved' => 'Video guardado', 'partial' => 'Video parcial', 'failed' => 'Video no guardado', 'uploading' => 'Carga no finalizada', 'processing' => 'Procesando'][$mediaSegment['status'] ?? ''] ?? 'Sin estado') ?></span></div><?php if (in_array((string) ($mediaSegment['status'] ?? ''), ['saved', 'partial'], true)): ?><video class="w-100 rounded border mt-2" controls preload="metadata" src="<?= e(route_url('test-session.media-evidence', (int) ($session['id'] ?? 0)) . '?evidence_id=' . (int) $mediaSegment['id']) ?>"></video><?php else: ?><p class="text-muted small mt-2 mb-0">El video no está disponible para reproducción.</p><?php endif; ?><?php if ($segmentCaptures): ?><h5 class="h6 fw-bold mt-3">Capturas de pantalla (<?= count($segmentCaptures) ?>)</h5><div class="row g-2 capture-gallery"><?php foreach ($segmentCaptures as $capture): $captureUrl = route_url('test-session.media-screenshot-file', (int) ($session['id'] ?? 0)) . '?capture_id=' . (int) $capture['id']; ?><div class="col-6"><a href="<?= e($captureUrl) ?>" data-screen-capture-view><img class="img-fluid rounded border" loading="lazy" src="<?= e($captureUrl) ?>" alt="Captura <?= (int) $capture['capture_number'] ?>"></a></div><?php endforeach; ?></div><?php else: ?><p class="text-muted small mt-2 mb-0">No hay capturas registradas para este segmento.</p><?php endif; ?></div><?php endforeach; ?><div class="import-drawer-actions"><button class="btn btn-outline-secondary" type="button" data-app-drawer-close>Cerrar</button></div></template>
                 <?php endif; ?>
 
                 <template id="<?= e($drawerId) ?>">
@@ -935,12 +967,6 @@ if (!function_exists('test_user_results_activity_rows')) {
                 </template>
 
                 <template id="<?= e($answerDrawerId) ?>">
-                    <div class="drawer-detail-heading">
-                        <p class="text-uppercase text-primary fw-bold small mb-1">Detalle de respuestas</p>
-                        <h3 class="h5 fw-bold mb-1"><?= e((string) ($session['instrument_name'] ?? 'Evaluacion')) ?></h3>
-                        <p class="text-muted mb-0">Evaluacion completa con la respuesta seleccionada o ingresada por el usuario.</p>
-                    </div>
-
                     <?php test_user_results_answer_detail_html($answeredItemsForResult); ?>
 
                     <div class="import-drawer-actions">
@@ -1032,18 +1058,13 @@ if (!function_exists('test_user_results_activity_rows')) {
                     </div>
                 <?php endif; ?>
             </article>
+            </details>
         <?php endforeach; ?>
     </div>
+    <?php endif; ?>
 
     <?php if ($evaluationResults): ?>
-        <div class="mt-4 pt-4 border-top">
-            <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
-                <div>
-                    <h2 class="h5 fw-bold mb-1">Evaluaciones y encuestas</h2>
-                    <p class="text-muted mb-0">Resultados, respuestas y registro de actividad de los formularios finalizados.</p>
-                </div>
-                <span class="badge text-bg-success"><?= count($evaluationResults) ?> terminadas</span>
-            </div>
+        <div class="<?= $results ? 'mt-4 pt-4 border-top' : '' ?>">
 
             <div class="user-results-stack">
                 <?php foreach ($evaluationResults as $evaluationResult): ?>
@@ -1067,20 +1088,12 @@ if (!function_exists('test_user_results_activity_rows')) {
                     $answerDrawerId = 'evaluation-answer-detail-drawer-' . $attemptId;
                     $videoDrawerId = 'evaluation-video-detail-drawer-' . $attemptId;
                     ?>
+                    <details class="user-result-accordion">
+                        <summary class="user-result-accordion-summary">
+                            <span><strong><?= e($evaluationName) ?></strong><small><?= e(['assessment' => 'Evaluación', 'survey' => 'Encuesta'][(string) ($attempt['form_type'] ?? 'assessment')] ?? 'Evaluación') ?><?= !empty($attempt['completed_at']) ? ' · Finalizada: ' . e((string) $attempt['completed_at']) : '' ?></small></span>
+                            <span class="badge text-bg-<?= $evaluationStatus === 'completed' ? 'success' : 'light border' ?>"><?= e($sessionStatusLabels[$evaluationStatus] ?? ucfirst($evaluationStatus)) ?></span>
+                        </summary>
                     <article class="user-result-card">
-                        <div class="user-result-card-header">
-                            <div>
-                                <h3 class="h6 fw-bold mb-1"><?= e($evaluationName) ?></h3>
-                                <p class="text-muted small mb-0">
-                                    <?= e(['assessment' => 'Evaluación', 'survey' => 'Encuesta'][(string) ($attempt['form_type'] ?? 'assessment')] ?? (string) ($attempt['form_type'] ?? 'Evaluación')) ?>
-                                    <?= !empty($attempt['completed_at']) ? ' · Finalizada: ' . e((string) $attempt['completed_at']) : '' ?>
-                                </p>
-                            </div>
-                            <span class="badge <?= $evaluationStatus === 'completed' ? 'text-bg-success' : 'text-bg-secondary' ?>">
-                                <?= $evaluationStatus === 'completed' ? 'Completada' : 'Expirada' ?>
-                            </span>
-                        </div>
-
                         <div class="row g-3 mb-3">
                             <?php if (($attempt['form_type'] ?? '') === 'assessment'): ?>
                                 <div class="col-12 col-md-3"><div class="result-metric"><span class="result-metric-label">Nota</span><strong><?= number_format((float) ($attempt['final_score'] ?? 0), 2, ',', '.') ?></strong></div></div>
@@ -1099,17 +1112,13 @@ if (!function_exists('test_user_results_activity_rows')) {
                         <template id="<?= e($activityDrawerId) ?>"><div class="drawer-detail-heading"><p class="text-uppercase text-primary fw-bold small mb-1">Registro de actividades</p><h3 class="h5 fw-bold mb-1">Detalle de acciones</h3><p class="text-muted mb-0"><?= e($evaluationName) ?></p></div><?php if (!$activityRows): ?><p class="text-muted mt-3 mb-0">Sin actividad registrada para esta evaluación.</p><?php else: ?><div class="table-responsive mt-3"><table class="table table-hover align-middle app-table"><thead><tr><th>Evento</th><th>Fecha</th><th>Detalle</th><th>IP</th></tr></thead><tbody><?php foreach ($activityRows as $event): ?><?php $metadata = test_activity_metadata_label($event['metadata'] ?? null); ?><tr><td class="fw-semibold"><?= e(test_activity_label((string) ($event['event_type'] ?? 'Evento'))) ?><?= test_activity_help_button((string) ($event['event_type'] ?? 'Evento')) ?></td><td><?= e((string) ($event['created_at'] ?? '')) ?></td><td><?= $metadata !== '' ? e($metadata) : '-' ?></td><td><?= e((string) ($event['ip_address'] ?? '-')) ?></td></tr><?php endforeach; ?></tbody></table></div><?php endif; ?><div class="import-drawer-actions"><button class="btn btn-outline-secondary" type="button" data-app-drawer-close>Cerrar</button></div></template>
 
                         <template id="<?= e($answerDrawerId) ?>">
-                            <div class="drawer-detail-heading">
-                                <p class="text-uppercase text-primary fw-bold small mb-1">Detalle de respuestas</p>
-                                <h3 class="h5 fw-bold mb-1"><?= e($evaluationName) ?></h3>
-                                <p class="text-muted mb-0">Respuestas registradas por la persona evaluada.</p>
-                            </div>
                             <?php test_user_results_evaluation_answer_detail_html($questions, $answers); ?>
                             <div class="import-drawer-actions"><button class="btn btn-outline-secondary" type="button" data-app-drawer-close>Cerrar</button></div>
                         </template>
 
-                        <?php if ($media || $screenCaptures): ?><template id="<?= e($videoDrawerId) ?>"><div class="drawer-detail-heading"><p class="text-uppercase text-primary fw-bold small mb-1">Evidencia audiovisual</p><h3 class="h5 fw-bold mb-1"><?= e($evaluationName) ?></h3><p class="text-muted mb-0">Registro de video y capturas obtenidas durante la evaluación.</p></div><?php foreach ($media as $mediaSegment): ?><?php if (in_array((string) ($mediaSegment['status'] ?? ''), ['saved', 'partial'], true)): ?><div class="border rounded p-3 mt-3"><h4 class="h6 fw-bold mb-2">Grabación <?= (int) ($mediaSegment['segment_number'] ?? 1) ?></h4><video class="w-100 rounded border" controls preload="metadata" src="<?= e(route_url('evaluation-surveys.attempt.media.evidence', $attemptId) . '?evidence_id=' . (int) $mediaSegment['id']) ?>"></video><p class="text-muted small mt-2 mb-0">Duración: <?= (int) ($mediaSegment['duration_seconds'] ?? 0) ?> segundos.</p><?php if (($mediaSegment['status'] ?? '') === 'partial'): ?><div class="alert alert-warning mt-2 mb-0">Evidencia parcial.</div><?php endif; ?><?php $segmentCaptures = array_values(array_filter($screenCaptures, static fn(array $capture): bool => (int) ($capture['evidence_id'] ?? 0) === (int) ($mediaSegment['id'] ?? 0))); ?><?php if ($segmentCaptures): ?><h5 class="h6 fw-bold mt-3">Capturas de pantalla (<?= count($segmentCaptures) ?>)</h5><div class="row g-2"><?php foreach ($segmentCaptures as $capture): $captureUrl = route_url('evaluation-surveys.attempt.media.screenshot-file', $attemptId) . '?capture_id=' . (int) $capture['id']; ?><div class="col-6"><a href="<?= e($captureUrl) ?>" data-screen-capture-view><img class="img-fluid rounded border" loading="lazy" src="<?= e($captureUrl) ?>" alt="Captura <?= (int) $capture['capture_number'] ?>"></a></div><?php endforeach; ?></div><?php endif; ?></div><?php endif; ?><?php endforeach; ?><?php if ($risks): ?><div class="table-responsive mt-3"><table class="table table-sm table-hover align-middle app-table"><thead><tr><th>Señal<?= test_activity_help_button('audio_visual_risk', 'Señal audiovisual') ?></th><th>Severidad</th><th>Fecha</th></tr></thead><tbody><?php foreach ($risks as $risk): ?><tr><td><?= e(test_audio_visual_risk_label($risk['event_type'] ?? null)) ?></td><td><?= e((string) ($risk['severity'] ?? '')) ?></td><td><?= e((string) ($risk['created_at'] ?? '')) ?></td></tr><?php endforeach; ?></tbody></table></div><?php endif; ?><div class="import-drawer-actions"><button class="btn btn-outline-secondary" type="button" data-app-drawer-close>Cerrar</button></div></template><?php endif; ?>
+                        <?php if ($media || $screenCaptures): ?><template id="<?= e($videoDrawerId) ?>"><?php foreach ($media as $mediaSegment): ?><?php if (in_array((string) ($mediaSegment['status'] ?? ''), ['saved', 'partial'], true)): ?><div class="border rounded p-3 mt-3"><h4 class="h6 fw-bold mb-2">Grabación <?= (int) ($mediaSegment['segment_number'] ?? 1) ?></h4><video class="w-100 rounded border" controls preload="metadata" src="<?= e(route_url('evaluation-surveys.attempt.media.evidence', $attemptId) . '?evidence_id=' . (int) $mediaSegment['id']) ?>"></video><p class="text-muted small mt-2 mb-0">Duración: <?= (int) ($mediaSegment['duration_seconds'] ?? 0) ?> segundos.</p><?php if (($mediaSegment['status'] ?? '') === 'partial'): ?><div class="alert alert-warning mt-2 mb-0">Evidencia parcial.</div><?php endif; ?><?php $segmentCaptures = array_values(array_filter($screenCaptures, static fn(array $capture): bool => (int) ($capture['evidence_id'] ?? 0) === (int) ($mediaSegment['id'] ?? 0))); ?><?php if ($segmentCaptures): ?><h5 class="h6 fw-bold mt-3">Capturas de pantalla (<?= count($segmentCaptures) ?>)</h5><div class="row g-2 capture-gallery"><?php foreach ($segmentCaptures as $capture): $captureUrl = route_url('evaluation-surveys.attempt.media.screenshot-file', $attemptId) . '?capture_id=' . (int) $capture['id']; ?><div class="col-6"><a href="<?= e($captureUrl) ?>" data-screen-capture-view><img class="img-fluid rounded border" loading="lazy" src="<?= e($captureUrl) ?>" alt="Captura <?= (int) $capture['capture_number'] ?>"></a></div><?php endforeach; ?></div><?php endif; ?></div><?php endif; ?><?php endforeach; ?><div class="import-drawer-actions"><button class="btn btn-outline-secondary" type="button" data-app-drawer-close>Cerrar</button></div></template><?php endif; ?>
                     </article>
+                    </details>
                 <?php endforeach; ?>
             </div>
         </div>

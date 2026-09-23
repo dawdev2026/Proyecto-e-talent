@@ -30,13 +30,69 @@ final class EvaluationSurveyFormModel
         $scopeSql = $this->companyScopeSql('f');
         return $this->db->fetchAll('SELECT f.*,
             (SELECT COUNT(*) FROM evaluation_survey_questions q WHERE q.form_id=f.id AND q.is_active=1) questions_count,
-            (SELECT COUNT(*) FROM evaluation_survey_attempts a WHERE a.form_id=f.id) attempts_count,
-            (SELECT COUNT(DISTINCT a.user_id) FROM evaluation_survey_attempts a WHERE a.form_id=f.id AND a.status IN ("completed","expired")) respondents_count,
-            (SELECT COUNT(*) FROM evaluation_survey_attempts a WHERE a.form_id=f.id AND a.status IN ("completed","expired")) completed_attempts
+            (SELECT COUNT(*) FROM evaluation_survey_attempts a WHERE a.form_id=f.id AND a.status <> "preparing") attempts_count,
+            (SELECT COUNT(DISTINCT a.user_id)
+             FROM evaluation_survey_attempts a
+             JOIN evaluation_survey_answers ans ON ans.attempt_id = a.id
+             WHERE a.form_id=f.id AND a.status <> "preparing" AND ans.answer_value IS NOT NULL AND TRIM(ans.answer_value) <> "") respondents_count,
+            (SELECT COUNT(*) FROM evaluation_survey_attempts a WHERE a.form_id=f.id AND a.status = "completed") completed_attempts
             FROM evaluation_survey_forms f WHERE f.form_type=?' . $scopeSql . ' ORDER BY f.updated_at DESC,f.sort_order ASC,f.id DESC', array_merge([$type], $this->companyScopeParams()));
     }
 
     public function findForm(int $id): ?array { return $this->db->fetch('SELECT f.* FROM evaluation_survey_forms f WHERE f.id=?' . $this->companyScopeSql('f') . ' LIMIT 1', array_merge([$id], $this->companyScopeParams())); }
+
+    public function findFormForCompany(int $id, int $companyId): ?array
+    {
+        if ($id <= 0 || $companyId <= 0) return null;
+        return $this->db->fetch(
+            'SELECT f.* FROM evaluation_survey_forms f
+             WHERE f.id = ? AND (f.company_id IS NULL OR f.company_id = ?) LIMIT 1',
+            [$id, $companyId]
+        );
+    }
+
+    public function createFromMoodle(array $payload, ?int $userId): int
+    {
+        $questions = array_values((array) ($payload['questions'] ?? []));
+        if (!$questions) throw new InvalidArgumentException('La importación no contiene preguntas.');
+        $title = trim((string) ($payload['title'] ?? 'Evaluación importada desde Moodle'));
+        $maxScore = max(1, (float) ($payload['max_score'] ?? 100));
+        $passingScore = ($payload['passing_score'] ?? null) === null || $payload['passing_score'] === '' ? null : max(0, min($maxScore, (float) $payload['passing_score']));
+        $displayLimit = array_key_exists('question_display_limit', $payload)
+            ? max(0, min(count($questions), (int) $payload['question_display_limit']))
+            : min(7, count($questions));
+        $companyId = array_key_exists('company_id', $payload)
+            ? max(0, (int) $payload['company_id'])
+            : $this->currentCompanyId();
+        return (int) $this->db->transaction(function (Database $db) use ($payload, $questions, $title, $maxScore, $passingScore, $displayLimit, $companyId, $userId): int {
+            $formId = $db->insert('INSERT INTO evaluation_survey_forms (company_id,form_type,title,description,instructions,status,duration_minutes,question_order_mode,question_display_limit,max_attempts,max_score,passing_score,show_result_to_user,result_display_mode,show_correction_to_user,is_required,sort_order,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)', [
+                $companyId ?: null, 'assessment', mb_substr($title, 0, 180), $payload['description'] ?? null, $payload['instructions'] ?? null, 'draft', 0, 'random', $displayLimit, 1, $maxScore, $passingScore, 1, 'best_only', 0, 1, 100, $userId,
+            ]);
+            foreach ($questions as $index => $question) {
+                $questionText = trim((string) ($question['question_text'] ?? ''));
+                if ($questionText === '') continue;
+                $type = isset(self::QUESTION_TYPES[(string) ($question['question_type'] ?? '')]) ? (string) $question['question_type'] : 'text';
+                $questionId = $db->insert('INSERT INTO evaluation_survey_questions (form_id,question_text,question_type,is_required,points,sort_order,is_active,source_pages,evidence,needs_review) VALUES (?,?,?,?,?,?,?,?,?,?)', [$formId, $questionText, $type, !empty($question['is_required']) ? 1 : 0, max(0, (float) ($question['points'] ?? 1)), ((int) $index + 1) * 10, 1, null, (string) ($question['evidence'] ?? 'Importado desde Moodle.'), !empty($question['needs_review']) || $type === 'text' ? 1 : 0]);
+                foreach ((array) ($question['options'] ?? []) as $optionIndex => $option) {
+                    if (!is_array($option) || trim((string) ($option['label'] ?? '')) === '') continue;
+                    $db->execute('INSERT INTO evaluation_survey_question_options (question_id,option_label,option_value,score_value,sort_order,is_active) VALUES (?,?,?,?,?,1)', [$questionId, trim((string) $option['label']), (string) ($option['value'] ?? $option['label']), $type === 'text' ? null : (float) ($option['score'] ?? 0), ((int) $optionIndex + 1) * 10]);
+                }
+                foreach ((array) ($question['media'] ?? []) as $mediaIndex => $media) {
+                    $source = trim((string) ($media['source_path'] ?? ''));
+                    if ($source === '' || !is_file($source)) continue;
+                    $hash = hash_file('sha256', $source);
+                    $root = BASE_PATH . '/storage/evaluation-question-media';
+                    $relativeDir = 'form_' . $formId;
+                    if (!is_dir($root . '/' . $relativeDir)) mkdir($root . '/' . $relativeDir, 0770, true);
+                    $extension = strtolower(pathinfo((string) ($media['original_name'] ?? ''), PATHINFO_EXTENSION)) ?: 'bin';
+                    $relative = $relativeDir . '/question_' . $questionId . '_' . $hash . '.' . $extension;
+                    if (!rename($source, $root . '/' . $relative)) continue;
+                    $db->execute('INSERT IGNORE INTO evaluation_survey_question_media (question_id,media_type,original_name,storage_key,mime_type,file_size,sha256,sort_order) VALUES (?,?,?,?,?,?,?,?)', [$questionId, (string) ($media['media_type'] ?? 'audio'), mb_substr((string) ($media['original_name'] ?? 'media.' . $extension), 0, 255), $relative, (string) ($media['mime_type'] ?? 'application/octet-stream'), filesize($root . '/' . $relative), $hash, ((int) $mediaIndex + 1) * 10]);
+                }
+            }
+            return (int) $formId;
+        });
+    }
 
     public function saveForm(int $formId, array $data, ?int $userId): int
     {
@@ -87,14 +143,42 @@ final class EvaluationSurveyFormModel
         ) as $option) {
             $optionsByQuestion[(int) $option['question_id']][] = $option;
         }
+        $mediaByQuestion = [];
+        if ($this->db->fetch('SHOW TABLES LIKE "evaluation_survey_question_media"')) foreach ($this->db->fetchAll('SELECT * FROM evaluation_survey_question_media WHERE question_id IN (' . $placeholders . ') ORDER BY question_id,sort_order,id', $questionIds) as $media) $mediaByQuestion[(int) $media['question_id']][] = $media;
         foreach ($rows as &$row) {
             $row['options'] = $optionsByQuestion[(int) $row['id']] ?? [];
+            $row['media'] = $mediaByQuestion[(int) $row['id']] ?? [];
+            if ((string) ($row['question_type'] ?? '') === 'true_false' && !$row['options']) {
+                $row['options'] = $this->defaultTrueFalseOptions((int) $row['id']);
+            }
         }
         unset($row);
         return $rows;
     }
 
-    public function findQuestion(int $id): ?array { $q = $this->db->fetch('SELECT q.*,f.form_type,f.title form_title FROM evaluation_survey_questions q JOIN evaluation_survey_forms f ON f.id=q.form_id WHERE q.id=?', [$id]); if ($q) $q['options'] = $this->db->fetchAll('SELECT * FROM evaluation_survey_question_options WHERE question_id=? AND is_active=1 ORDER BY sort_order,id', [$id]); return $q; }
+    public function findQuestion(int $id, ?int $formId = null): ?array
+    {
+        $formScope = $this->companyScopeSql('f');
+        $formCondition = $formId && $formId > 0 ? ' AND q.form_id = ?' : '';
+        $params = [$id];
+        if ($formId && $formId > 0) $params[] = $formId;
+        $params = array_merge($params, $this->companyScopeParams());
+        $question = $this->db->fetch(
+            'SELECT q.*, f.form_type, f.title AS form_title
+             FROM evaluation_survey_questions q
+             JOIN evaluation_survey_forms f ON f.id = q.form_id
+             WHERE q.id = ?' . $formCondition . $formScope . ' LIMIT 1',
+            $params
+        );
+        if ($question) {
+            $question['options'] = $this->db->fetchAll('SELECT * FROM evaluation_survey_question_options WHERE question_id = ? AND is_active = 1 ORDER BY sort_order, id', [$id]);
+            $question['media'] = $this->db->fetchAll('SELECT * FROM evaluation_survey_question_media WHERE question_id = ? ORDER BY sort_order, id', [$id]);
+            if ((string) ($question['question_type'] ?? '') === 'true_false' && !$question['options']) {
+                $question['options'] = $this->defaultTrueFalseOptions((int) $question['id']);
+            }
+        }
+        return $question;
+    }
 
     public function saveQuestion(int $formId, int $questionId, array $data): int
     {
@@ -105,14 +189,42 @@ final class EvaluationSurveyFormModel
         $evidence = mb_substr(trim((string) ($data['evidence'] ?? '')), 0, 500) ?: null;
         $needsReview = array_key_exists('needs_review', $data) ? (!empty($data['needs_review']) ? 1 : 0) : 1;
         $params = [$formId, $text, $type, isset($data['is_required']) ? 1 : 0, $points, max(0, (int) ($data['sort_order'] ?? 100)), isset($data['is_active']) ? 1 : 0, $sourcePages, $evidence, $needsReview];
-        if ($questionId > 0) { $this->db->execute('UPDATE evaluation_survey_questions SET form_id=?,question_text=?,question_type=?,is_required=?,points=?,sort_order=?,is_active=?,source_pages=?,evidence=?,needs_review=? WHERE id=?', array_merge($params, [$questionId])); $saved = $questionId; } else $saved = $this->db->insert('INSERT INTO evaluation_survey_questions (form_id,question_text,question_type,is_required,points,sort_order,is_active,source_pages,evidence,needs_review) VALUES (?,?,?,?,?,?,?,?,?,?)', $params);
+        if ($questionId > 0) {
+            if (!$this->findQuestion($questionId, $formId)) throw new InvalidArgumentException('La pregunta no pertenece al formulario seleccionado.');
+            $this->db->execute('UPDATE evaluation_survey_questions SET question_text=?,question_type=?,is_required=?,points=?,sort_order=?,is_active=?,source_pages=?,evidence=?,needs_review=? WHERE id=? AND form_id=?' . $this->companyScopeSqlForForm(), array_merge(array_slice($params, 1), [$questionId, $formId], $this->companyScopeFormParams($formId)));
+            $saved = $questionId;
+        } else {
+            $saved = $this->db->insert('INSERT INTO evaluation_survey_questions (form_id,question_text,question_type,is_required,points,sort_order,is_active,source_pages,evidence,needs_review) VALUES (?,?,?,?,?,?,?,?,?,?)', $params);
+        }
         $this->db->execute('DELETE FROM evaluation_survey_question_options WHERE question_id=?', [$saved]);
         $labels = is_array($data['option_label'] ?? null) ? $data['option_label'] : []; $values = is_array($data['option_value'] ?? null) ? $data['option_value'] : []; $single = (string) ($data['option_correct_single'] ?? ''); $multiple = array_map('strval', is_array($data['option_correct'] ?? null) ? $data['option_correct'] : []); $true = (string) ($data['true_false_correct'] ?? 'true');
+        if ($type === 'true_false') {
+            $labels = [0 => 'Verdadero', 1 => 'Falso'];
+            $values = [0 => 'true', 1 => 'false'];
+        }
         foreach ($labels as $index => $label) { $label = trim((string) $label); if ($label === '') continue; $value = trim((string) ($values[$index] ?? $label)); $score = 0; if ($form['form_type'] === 'assessment' && !in_array($type, self::NON_SCORED, true)) { if ($type === 'single_choice' && (string) $index === $single) $score = $points; if ($type === 'multiple_choice' && in_array((string) $index, $multiple, true)) $score = $points; if ($type === 'true_false' && strtolower($value) === strtolower($true)) $score = $points; } $this->db->execute('INSERT INTO evaluation_survey_question_options (question_id,option_label,option_value,score_value,sort_order,is_active) VALUES (?,?,?,?,?,1)', [$saved, $label, $value, $score, ((int) $index + 1) * 10]); }
         return $saved;
     }
 
-    public function deleteQuestion(int $id): bool { return $this->db->execute('DELETE FROM evaluation_survey_questions WHERE id=?', [$id]) > 0; }
+    private function defaultTrueFalseOptions(int $questionId): array
+    {
+        return [
+            ['question_id' => $questionId, 'option_label' => 'Verdadero', 'option_value' => 'true', 'score_value' => 0, 'sort_order' => 10, 'is_active' => 1],
+            ['question_id' => $questionId, 'option_label' => 'Falso', 'option_value' => 'false', 'score_value' => 0, 'sort_order' => 20, 'is_active' => 1],
+        ];
+    }
+
+    public function deleteQuestion(int $id, ?int $formId = null): bool
+    {
+        $question = $this->findQuestion($id, $formId);
+        if (!$question) return false;
+        $formId = (int) $question['form_id'];
+        $scopeSql = $this->companyScopeSqlForForm();
+        return $this->db->execute(
+            'DELETE FROM evaluation_survey_questions WHERE id = ? AND form_id = ?' . $scopeSql,
+            array_merge([$id, $formId], $this->companyScopeFormParams($formId))
+        ) > 0;
+    }
     public function reorderQuestions(int $formId, array $ids): void
     {
         $ids = array_values(array_filter(array_map('intval', $ids), static fn(int $id): bool => $id > 0));
@@ -132,14 +244,29 @@ final class EvaluationSurveyFormModel
 
     private function currentCompanyId(): int
     {
+        if (is_company_admin_user()) {
+            return max(0, (int) (current_user()['company_id'] ?? 0));
+        }
         if (!has_permission('manage_company_users') || has_permission('manage_users')) {
             return 0;
         }
         return max(0, (int) (current_user()['company_id'] ?? 0));
     }
 
+    private function companyScopeSqlForForm(): string
+    {
+        if (is_company_admin_user() && $this->currentCompanyId() <= 0) return ' AND 1 = 0';
+        return $this->currentCompanyId() > 0 ? ' AND form_id IN (SELECT f.id FROM evaluation_survey_forms f WHERE f.id = ? AND (f.company_id IS NULL OR f.company_id = ?))' : '';
+    }
+
+    private function companyScopeFormParams(int $formId): array
+    {
+        return $this->currentCompanyId() > 0 ? array_merge([$formId], $this->companyScopeParams()) : [];
+    }
+
     private function companyScopeSql(string $alias = ''): string
     {
+        if (is_company_admin_user() && $this->currentCompanyId() <= 0) return ' AND 1 = 0';
         return $this->currentCompanyId() > 0 ? ' AND ' . ($alias !== '' ? $alias . '.' : '') . 'company_id = ?' : '';
     }
 

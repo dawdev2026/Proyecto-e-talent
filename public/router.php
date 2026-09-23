@@ -137,6 +137,7 @@ function protected_file_mime_type(string $file): string
         'ttf' => 'font/ttf',
         'eot' => 'application/vnd.ms-fontobject',
         'pdf' => 'application/pdf',
+        'wasm' => 'application/wasm',
     ];
 
     return $mimeTypes[$extension] ?? 'application/octet-stream';
@@ -229,6 +230,76 @@ try {
         return;
     }
 
+    if ($segments === ['reconocimiento-facial', 'enrolar']) {
+        (new FacialRecognitionController())->enroll();
+        return;
+    }
+
+    if ($segments === ['reconocimiento-facial', 'enrolados']) {
+        (new FacialRecognitionController())->enrolledUsers();
+        return;
+    }
+
+    if ($segments === ['administrador-cliente', 'reportes', 'incidencias-tests']) {
+        (new ClientAdminController())->testIncidents();
+        return;
+    }
+
+    if ($segments === ['administrador-cliente', 'inicio']) {
+        (new ClientAdminController())->dashboard();
+        return;
+    }
+
+    if ($segments === ['administrador-cliente', 'reportes', 'incidencias-evaluaciones']) {
+        (new EvaluationSurveyController())->dashboardIntegrityReport();
+        return;
+    }
+
+    if ($segments === ['administrador-cliente', 'avance', 'evaluaciones']) {
+        (new ClientAdminController())->evaluationProgress();
+        return;
+    }
+
+    if ($segments === ['administrador-cliente', 'avance', 'tests']) {
+        (new ClientAdminController())->testProgress();
+        return;
+    }
+
+    if ($segments === ['administrador-cliente', 'avance', 'consultar-usuario']) {
+        (new ClientAdminController())->userLookup();
+        return;
+    }
+
+    if ($segments === ['administrador-cliente', 'avance', 'revision-componentes']) {
+        (new ClientAdminController())->componentReviews();
+        return;
+    }
+
+    if ($segments === ['administrador-cliente', 'procesos', 'verificacion-usuarios']) {
+        (new ClientAdminController())->userVerifications();
+        return;
+    }
+
+    if ($segments === ['componentes', 'revision']) {
+        (new ComponentValidationController())->review();
+        return;
+    }
+
+    if ($segments === ['reconocimiento-facial', 'desafio']) {
+        (new FacialRecognitionController())->startChallenge();
+        return;
+    }
+
+    if ($segments === ['reconocimiento-facial', 'validar-identidad']) {
+        (new FacialRecognitionController())->validateIdentity();
+        return;
+    }
+
+    if ($segments === ['reconocimiento-facial', 'ingreso-evaluacion']) {
+        (new FacialRecognitionController())->assessmentEntry();
+        return;
+    }
+
     if ($segments === ['login']) {
         (new AuthController())->login();
         return;
@@ -251,6 +322,11 @@ try {
 
     if ($segments === ['my-tests']) {
         (new TestController())->mine();
+        return;
+    }
+
+    if ($segments === ['my-tests', 'realizadas']) {
+        (new TestController())->mineCompleted();
         return;
     }
 
@@ -661,6 +737,11 @@ try {
         return;
     }
 
+    if ($segments === ['evaluaciones-encuestas', 'formularios', 'moodle-import']) {
+        (new EvaluationSurveyController())->moodleImport();
+        return;
+    }
+
     if ($segments === ['evaluaciones-encuestas', 'ai-settings']) {
         (new EvaluationSurveyController())->aiSettings();
         return;
@@ -687,6 +768,12 @@ try {
         $_GET['sid'] = $segments[2];
         if (($segments[3] ?? '') === 'edit') { (new EvaluationSurveyController())->questionForm(); return; }
         if (($segments[3] ?? '') === 'delete') { (new EvaluationSurveyController())->deleteQuestion(); return; }
+    }
+
+    if (($segments[0] ?? '') === 'evaluaciones-encuestas' && ($segments[1] ?? '') === 'preguntas-media' && count($segments) === 3) {
+        $_GET['sid'] = $segments[2];
+        (new EvaluationSurveyController())->questionMedia();
+        return;
     }
 
     if (($segments[0] ?? '') === 'evaluaciones-encuestas' && ($segments[1] ?? '') === 'intentos' && count($segments) === 4 && ($segments[3] ?? '') === 'result') {

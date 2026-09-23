@@ -44,6 +44,7 @@ final class PlatformSettingsController extends Controller
             'companyBrandingMode' => $companyId > 0,
             'company' => $companyId > 0 ? $this->companies->find($companyId) : null,
             'settingsTab' => (string) ($_GET['tab'] ?? ''),
+            'facialSettings' => (new FacialRecognitionService())->settings(),
         ]);
     }
 
@@ -76,6 +77,11 @@ final class PlatformSettingsController extends Controller
 
         if ($section === 'operational') {
             $this->saveOperational();
+            return;
+        }
+
+        if ($section === 'facial_recognition') {
+            $this->saveFacialRecognition();
             return;
         }
 
@@ -113,6 +119,23 @@ final class PlatformSettingsController extends Controller
             'test_evidence_chunk_size_mb' => (string) $chunkSizeMb,
         ]);
         flash('success', 'Politica audiovisual guardada correctamente.');
+    }
+
+    private function saveFacialRecognition(): void
+    {
+        require_permission('manage_platform_settings');
+        $integrations = load_config('integrations');
+        $current = is_array($integrations['facial_recognition'] ?? null) ? $integrations['facial_recognition'] : [];
+        $integrations['facial_recognition'] = [
+            'enabled' => isset($_POST['facial_enabled']),
+            'provider' => 'facex',
+            'model_version' => 'facex-af7ca993-edgeface-d23f7b3-aligned5-v2',
+            'similarity_threshold' => max(0.50, min(0.99, (float) ($_POST['facial_similarity_threshold'] ?? 0.78))),
+            'liveness_threshold' => max(0.50, min(0.99, (float) ($_POST['facial_liveness_threshold'] ?? 0.60))),
+            'challenge_ttl_seconds' => max(60, min(900, (int) ($_POST['facial_challenge_ttl_seconds'] ?? 180))),
+        ];
+        write_secure_config('integrations', $integrations);
+        flash('success', 'Configuración de reconocimiento facial guardada de forma segura.');
     }
 
     private function saveDatabase(): void
@@ -275,6 +298,13 @@ final class PlatformSettingsController extends Controller
             'topbar_menu_background_color' => $this->color($_POST['topbar_menu_background_color'] ?? $settings['topbar_menu_background_color']),
             'topbar_menu_button_color' => $this->color($_POST['topbar_menu_button_color'] ?? $settings['topbar_menu_button_color']),
             'topbar_logo_position' => 'start',
+            'sidebar_background_color' => $this->color($_POST['sidebar_background_color'] ?? $settings['sidebar_background_color']),
+            'sidebar_text_color' => $this->color($_POST['sidebar_text_color'] ?? $settings['sidebar_text_color']),
+            'sidebar_icon_color' => $this->color($_POST['sidebar_icon_color'] ?? $settings['sidebar_icon_color']),
+            'sidebar_active_background_color' => $this->color($_POST['sidebar_active_background_color'] ?? $settings['sidebar_active_background_color']),
+            'sidebar_active_text_color' => $this->color($_POST['sidebar_active_text_color'] ?? $settings['sidebar_active_text_color']),
+            'sidebar_border_color' => $this->color($_POST['sidebar_border_color'] ?? $settings['sidebar_border_color']),
+            'sidebar_width' => (string) $this->number($_POST['sidebar_width'] ?? $settings['sidebar_width'], 220, 360),
             'layout_background_color' => $this->color($_POST['layout_background_color'] ?? $settings['layout_background_color']),
             'card_header_background_color' => $this->color($_POST['card_header_background_color'] ?? $settings['card_header_background_color']),
             'card_content_background_color' => $this->color($_POST['card_content_background_color'] ?? $settings['card_content_background_color']),

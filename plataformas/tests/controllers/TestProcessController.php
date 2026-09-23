@@ -178,9 +178,11 @@ final class TestProcessController extends Controller
             'users_total' => 0,
             'evaluated' => 0,
             'in_progress' => 0,
+            'expired' => 0,
             'pending' => 0,
             'sessions_total' => 0,
             'sessions_finished' => 0,
+            'sessions_answered' => 0,
             'activity_events_total' => 0,
             'activity_attention_total' => 0,
             'activity_risk_total' => 0,
@@ -232,7 +234,7 @@ final class TestProcessController extends Controller
             }
             $this->collectUniqueProcessProgress($uniqueUserProgress, $users, $sessions, $activeInstruments, $selectedInstrumentIds);
 
-            foreach (['sessions_total', 'sessions_finished', 'activity_events_total', 'activity_attention_total', 'activity_risk_total'] as $key) {
+            foreach (['sessions_total', 'sessions_finished', 'sessions_answered', 'activity_events_total', 'activity_attention_total', 'activity_risk_total'] as $key) {
                 $overall[$key] += (int) ($stats[$key] ?? 0);
             }
             $overall['ranking_ranked'] += (int) ($rankingSummary['ranked'] ?? 0);
@@ -247,7 +249,7 @@ final class TestProcessController extends Controller
             }
 
             $processRows[] = array_merge($process, $stats, [
-                'progress_percent' => (int) ($stats['users_total'] > 0 ? round(((int) $stats['evaluated'] / (int) $stats['users_total']) * 100) : 0),
+                'progress_percent' => (int) ($stats['sessions_total'] > 0 ? round(((int) $stats['sessions_answered'] / (int) $stats['sessions_total']) * 100) : 0),
                 'ranking_summary' => $rankingSummary,
                 'can_view_process' => $this->processes->can(current_user() ?: [], $processId, 'view_process'),
                 'can_view_ranking' => $this->processes->can(current_user() ?: [], $processId, 'view_process_ranking'),
@@ -568,6 +570,7 @@ final class TestProcessController extends Controller
             'title' => ($id ? 'Editar proceso' : 'Nuevo proceso') . ' | e-talent',
             'currentPage' => 'test-processes',
             'process' => $process,
+            'supportsProcessActivityPolicies' => $this->processes->supportsProcessActivityPolicies(),
             'statuses' => TestProcessModel::STATUSES,
             'instruments' => $this->processes->activeInstruments(),
             'selectedInstrumentIds' => $id ? $this->processes->selectedInstrumentIds($id) : [],
@@ -1537,15 +1540,16 @@ final class TestProcessController extends Controller
 
         $formId = max(0, (int) ($_POST['form_id'] ?? 0));
         $userId = max(0, (int) ($_POST['user_id'] ?? 0));
-        $durationMinutes = max(0, (int) ($_POST['duration_minutes'] ?? 0));
+        $durationMinutes = (int) ($_POST['duration_minutes'] ?? 0);
         $success = (int) ($process['allow_expired_reopen'] ?? 0) === 1
-            && $durationMinutes > 0
+            && $durationMinutes >= 1
+            && $durationMinutes <= 120
             && $this->processes->reopenEvaluationAssignment($id, $formId, $userId, $durationMinutes, current_user() ?: []);
 
         if ($success) {
-            flash('success', sprintf('Evaluación reabierta. El usuario tendrá %d minutos nuevos y conservará sus respuestas.', max(1, min(1440, $durationMinutes))));
+            flash('success', sprintf('Evaluación reabierta. El usuario tendrá %d minutos nuevos y conservará sus respuestas.', $durationMinutes));
         } else {
-            flash('warning', 'No se pudo reabrir la evaluación. Verifica que esté completada, en curso o expirada, que el proceso esté activo y que permita reaperturas.');
+            flash('warning', 'No se pudo reabrir la evaluación. El tiempo debe estar entre 1 y 120 minutos y la actividad debe estar completada, en curso o expirada.');
         }
 
         redirect(route_url('test-process.show', $id));
@@ -1565,13 +1569,13 @@ final class TestProcessController extends Controller
 
         $sessionId = (int) ($_POST['session_id'] ?? 0);
         $durationMinutes = (int) ($_POST['duration_minutes'] ?? 0);
-        if ($sessionId <= 0 || $durationMinutes <= 0) {
-            flash('warning', 'Indica un tiempo valido para reabrir la evaluacion.');
+        if ($sessionId <= 0 || $durationMinutes < 1 || $durationMinutes > 120) {
+            flash('warning', 'Indica un tiempo entre 1 y 120 minutos para reabrir la evaluacion.');
             redirect(route_url('test-process.show', $id));
         }
 
         if ($this->processes->reopenSession($id, $sessionId, $durationMinutes, current_user() ?: [])) {
-            flash('success', sprintf('Evaluacion reabierta. El usuario tendra %d minutos nuevos para responder y conservara sus respuestas.', max(1, min(1440, $durationMinutes))));
+            flash('success', sprintf('Evaluacion reabierta. El usuario tendra %d minutos nuevos para responder y conservara sus respuestas.', $durationMinutes));
         } else {
             flash('warning', 'No se pudo reabrir la evaluacion solicitada. Verifica que este completada, en curso o expirada y que el proceso lo permita.');
         }
@@ -1593,13 +1597,13 @@ final class TestProcessController extends Controller
 
         $sessionId = (int) ($_POST['session_id'] ?? 0);
         $durationMinutes = (int) ($_POST['duration_minutes'] ?? 0);
-        if ($sessionId <= 0 || $durationMinutes <= 0) {
-            flash('warning', 'Indica un tiempo valido para reabrir la evaluacion.');
+        if ($sessionId <= 0 || $durationMinutes < 1 || $durationMinutes > 120) {
+            flash('warning', 'Indica un tiempo entre 1 y 120 minutos para reabrir la evaluacion.');
             redirect(route_url('test-process.show', $id));
         }
 
         if ($this->processes->reopenSession($id, $sessionId, $durationMinutes, current_user() ?: [])) {
-            flash('success', sprintf('Evaluacion reabierta. El usuario tendra %d minutos nuevos para responder y conservara sus respuestas.', max(1, min(1440, $durationMinutes))));
+            flash('success', sprintf('Evaluacion reabierta. El usuario tendra %d minutos nuevos para responder y conservara sus respuestas.', $durationMinutes));
         } else {
             flash('warning', 'No se pudo reabrir la evaluacion solicitada. Verifica que este completada, en curso o expirada y que el proceso lo permita.');
         }
@@ -1619,37 +1623,51 @@ final class TestProcessController extends Controller
             redirect(route_url('test-process.show', $id));
         }
 
-        $instrumentId = (int) ($_POST['instrument_id'] ?? 0);
+        $target = trim((string) ($_POST['reopen_target'] ?? ''));
+        if ($target === '' && (int) ($_POST['instrument_id'] ?? 0) > 0) {
+            $target = 'test:' . (int) $_POST['instrument_id'];
+        }
+        [$targetType, $targetId] = array_pad(explode(':', $target, 2), 2, '');
+        $targetType = strtolower(trim($targetType));
+        $targetId = (int) $targetId;
         $durationMinutes = (int) ($_POST['duration_minutes'] ?? 0);
-        if ($instrumentId <= 0 || $durationMinutes <= 0) {
-            flash('warning', 'Selecciona un test del proceso e indica un tiempo valido para reabrir.');
+        if (!in_array($targetType, ['test', 'evaluation'], true) || $targetId <= 0 || $durationMinutes < 1 || $durationMinutes > 120) {
+            flash('warning', 'Selecciona un test o evaluacion del proceso e indica un tiempo entre 1 y 120 minutos para reabrir.');
             redirect(route_url('test-process.show', $id));
         }
 
-        $selectedInstrumentIds = $this->processes->selectedInstrumentIds($id);
-        if (!in_array($instrumentId, $selectedInstrumentIds, true)) {
-            flash('warning', 'El test seleccionado no pertenece a este proceso.');
-            redirect(route_url('test-process.show', $id));
+        if ($targetType === 'test') {
+            $selectedInstrumentIds = $this->processes->selectedInstrumentIds($id);
+            if (!in_array($targetId, $selectedInstrumentIds, true)) {
+                flash('warning', 'El test seleccionado no pertenece a este proceso.');
+                redirect(route_url('test-process.show', $id));
+            }
+            $result = $this->processes->reopenExpiredSessionsForInstrument($id, $targetId, $durationMinutes, current_user() ?: []);
+        } else {
+            $selectedEvaluationFormIds = $this->processes->selectedEvaluationFormIds($id);
+            if (!in_array($targetId, $selectedEvaluationFormIds, true)) {
+                flash('warning', 'La evaluacion seleccionada no pertenece a este proceso.');
+                redirect(route_url('test-process.show', $id));
+            }
+            $result = $this->processes->reopenExpiredEvaluationAssignments($id, $targetId, $durationMinutes, current_user() ?: []);
         }
-
-        $result = $this->processes->reopenExpiredSessionsForInstrument($id, $instrumentId, $durationMinutes, current_user() ?: []);
         if (empty($result['allowed'])) {
             flash('warning', 'La reapertura de evaluaciones expiradas no esta habilitada en la configuracion del proceso.');
             redirect(route_url('test-process.show', $id));
         }
 
-        if (empty($result['instrument_found'])) {
-            flash('warning', 'El test seleccionado no pertenece a este proceso.');
+        if (empty($result['target_found'])) {
+            flash('warning', $targetType === 'evaluation' ? 'La evaluacion seleccionada no pertenece a este proceso.' : 'El test seleccionado no pertenece a este proceso.');
             redirect(route_url('test-process.show', $id));
         }
 
         $reopened = (int) ($result['reopened'] ?? 0);
         $eligible = (int) ($result['eligible'] ?? 0);
         if ($reopened <= 0) {
-            flash('info', 'No hay evaluaciones expiradas para reabrir en el test seleccionado.');
+            flash('info', 'No hay actividades expiradas para reabrir en la seleccion realizada.');
         } else {
             flash('success', sprintf(
-                'Se reabrieron %d evaluaciones expiradas del test seleccionado para este proceso. Elegibles encontradas: %d.',
+                'Se reabrieron %d actividades expiradas seleccionadas para este proceso. Elegibles encontradas: %d.',
                 $reopened,
                 $eligible
             ));
@@ -1716,7 +1734,11 @@ final class TestProcessController extends Controller
 
     private function requireAnyProcessAccess(): void
     {
-        if ($this->hasGlobalProcessManagement() || has_permission('view_test_process_progress') || has_permission('view_test_process_dashboard') || has_permission('view_test_process_results')) {
+        if ($this->hasGlobalProcessManagement()
+            || has_permission('manage_company_processes')
+            || has_permission('view_test_process_progress')
+            || has_permission('view_test_process_dashboard')
+            || has_permission('view_test_process_results')) {
             return;
         }
 
@@ -1985,7 +2007,7 @@ final class TestProcessController extends Controller
 
     private function hasGlobalProcessManagement(): bool
     {
-        return has_permission('manage_tests') || has_permission('manage_test_processes');
+        return !is_company_admin_user() && (has_permission('manage_tests') || has_permission('manage_test_processes'));
     }
 
     private function hasProcessManagement(): bool
@@ -1995,12 +2017,14 @@ final class TestProcessController extends Controller
 
     private function isCompanyScopedProcessActor(array $user): bool
     {
+        if ((string) ($user['role'] ?? '') === 'company_admin') {
+            return true;
+        }
         if ($this->hasGlobalProcessManagement()) {
             return false;
         }
 
-        return (string) ($user['role'] ?? '') === 'company_admin'
-            || has_permission('manage_company_processes');
+        return has_permission('manage_company_processes');
     }
 
     private function visibleProcessFields(int $processId): array
@@ -2099,7 +2123,7 @@ final class TestProcessController extends Controller
                 $instrumentCode = (string) ($session['instrument_code'] ?? '');
                 if (
                     $sessionId > 0
-                    && in_array((string) ($session['status'] ?? ''), ['completed', 'expired'], true)
+                    && (string) ($session['status'] ?? '') === 'completed'
                     && in_array($instrumentCode, ['ipip_16pf', 'cag_wonderlic', 'cag', 'ticl_barratt'], true)
                     && !array_key_exists($sessionId, $summaryCache)
                 ) {
@@ -2314,8 +2338,12 @@ final class TestProcessController extends Controller
 
     private function rankingInstrumentStatusPayload(string $status): array
     {
-        if (in_array($status, ['completed', 'expired'], true)) {
-            return ['label' => 'Realizado', 'class' => 'text-bg-success', 'priority' => 4];
+        if ($status === 'completed') {
+            return ['label' => 'Completada', 'class' => 'text-bg-success', 'priority' => 4];
+        }
+
+        if ($status === 'expired') {
+            return ['label' => 'Expirada', 'class' => 'text-bg-secondary', 'priority' => 2];
         }
 
         if ($status === 'in_progress') {
@@ -2331,31 +2359,20 @@ final class TestProcessController extends Controller
 
     private function rankingSessionSummary(int $sessionId, array $session, array &$summaryCache): array
     {
-        if ($sessionId <= 0 || !in_array((string) ($session['status'] ?? ''), ['completed', 'expired'], true)) {
+        if ($sessionId <= 0 || (string) ($session['status'] ?? '') !== 'completed') {
             return [];
         }
 
-        $summary = $summaryCache[$sessionId] ?? [];
-        if (!$summary && (string) ($session['status'] ?? '') === 'expired') {
-            $summary = $this->sessions->complete($sessionId, [], 'expired');
-            $summaryCache[$sessionId] = $summary;
-        }
-
-        return $summary;
+        return $summaryCache[$sessionId] ?? [];
     }
 
     private function rankingSessionSummaryLazy(int $sessionId, array $session): array
     {
-        if ($sessionId <= 0 || !in_array((string) ($session['status'] ?? ''), ['completed', 'expired'], true)) {
+        if ($sessionId <= 0 || (string) ($session['status'] ?? '') !== 'completed') {
             return [];
         }
 
-        $summary = $this->sessions->summaryForSession($sessionId);
-        if (!$summary && (string) ($session['status'] ?? '') === 'expired') {
-            $summary = $this->sessions->complete($sessionId, [], 'expired');
-        }
-
-        return $summary;
+        return $this->sessions->summaryForSession($sessionId);
     }
 
     private function processProgressStats(array $processUsers, array $sessions, array $instruments, array $selectedInstrumentIds): array
@@ -2378,10 +2395,13 @@ final class TestProcessController extends Controller
         ];
         foreach ($sessions as $session) {
             $instrumentId = (int) ($session['instrument_id'] ?? 0);
-            if (!isset($selectedInstrumentSet[$instrumentId]) || (string) ($session['status'] ?? '') === 'cancelled') {
+            if (!isset($selectedInstrumentSet[$instrumentId])) {
                 continue;
             }
             $sessionsByUserInstrument[(int) ($session['user_id'] ?? 0)][$instrumentId] = $session;
+            if ((string) ($session['status'] ?? '') === 'cancelled') {
+                continue;
+            }
             $activityTotals['activity_events_total'] += (int) ($session['activity_events_total'] ?? 0);
             $activityTotals['activity_attention_total'] += (int) ($session['activity_attention_total'] ?? 0);
             $activityTotals['activity_risk_total'] += (int) ($session['activity_risk_total'] ?? 0);
@@ -2391,9 +2411,11 @@ final class TestProcessController extends Controller
             'users_total' => 0,
             'evaluated' => 0,
             'in_progress' => 0,
+            'expired' => 0,
             'pending' => 0,
             'sessions_total' => 0,
             'sessions_finished' => 0,
+            'sessions_answered' => 0,
             'activity_events_total' => $activityTotals['activity_events_total'],
             'activity_attention_total' => $activityTotals['activity_attention_total'],
             'activity_risk_total' => $activityTotals['activity_risk_total'],
@@ -2405,28 +2427,41 @@ final class TestProcessController extends Controller
             }
 
             $stats['users_total']++;
-            $stats['sessions_total'] += $requiredCount;
-
             $finished = 0;
-            $hasProgress = false;
+            $hasOpen = false;
+            $hasExpired = false;
+            $activeRequired = 0;
+            $answered = 0;
             foreach ($requiredInstrumentIds as $instrumentId) {
                 $session = $sessionsByUserInstrument[(int) ($user['user_id'] ?? 0)][$instrumentId] ?? null;
                 $status = (string) ($session['status'] ?? 'missing');
-                if (in_array($status, ['completed', 'expired'], true)) {
+                if ($status === 'cancelled') {
+                    continue;
+                }
+                $activeRequired++;
+                if ((int) ($session['answers_count'] ?? 0) > 0) {
+                    $answered++;
+                }
+                if ($status === 'completed') {
                     $finished++;
-                    $hasProgress = true;
                     continue;
                 }
                 if ($status === 'in_progress') {
-                    $hasProgress = true;
+                    $hasOpen = true;
+                } elseif ($status === 'expired') {
+                    $hasExpired = true;
                 }
             }
 
+            $stats['sessions_total'] += $activeRequired;
             $stats['sessions_finished'] += $finished;
-            if ($requiredCount > 0 && $finished >= $requiredCount) {
+            $stats['sessions_answered'] += $answered;
+            if ($activeRequired > 0 && $finished >= $activeRequired) {
                 $stats['evaluated']++;
-            } elseif ($hasProgress) {
+            } elseif ($hasOpen) {
                 $stats['in_progress']++;
+            } elseif ($hasExpired) {
+                $stats['expired']++;
             } else {
                 $stats['pending']++;
             }
@@ -2440,6 +2475,7 @@ final class TestProcessController extends Controller
         $usersTotal = max(0, (int) ($overall['users_total'] ?? 0));
         $evaluated = max(0, (int) ($overall['evaluated'] ?? 0));
         $inProgress = max(0, (int) ($overall['in_progress'] ?? 0));
+        $expired = max(0, (int) ($overall['expired'] ?? 0));
         $pending = max(0, (int) ($overall['pending'] ?? 0));
         $chartRows = array_slice($processRows, 0, 8);
 
@@ -2447,12 +2483,14 @@ final class TestProcessController extends Controller
             'processLabels' => array_map(static fn(array $row): string => (string) ($row['name'] ?? 'Proceso'), $chartRows),
             'evaluated' => array_map(static fn(array $row): int => (int) ($row['evaluated'] ?? 0), $chartRows),
             'inProgress' => array_map(static fn(array $row): int => (int) ($row['in_progress'] ?? 0), $chartRows),
+            'expired' => array_map(static fn(array $row): int => (int) ($row['expired'] ?? 0), $chartRows),
             'pending' => array_map(static fn(array $row): int => (int) ($row['pending'] ?? 0), $chartRows),
             'trendLabels' => array_map(static fn(array $point): string => (string) ($point['label'] ?? ''), $trend),
             'trendCounts' => array_map(static fn(array $point): int => (int) ($point['count'] ?? 0), $trend),
             'distribution' => [
                 'evaluated' => $usersTotal > 0 ? $evaluated : 0,
                 'inProgress' => $usersTotal > 0 ? $inProgress : 0,
+                'expired' => $usersTotal > 0 ? $expired : 0,
                 'pending' => $usersTotal > 0 ? $pending : 0,
             ],
         ];
@@ -2522,7 +2560,7 @@ final class TestProcessController extends Controller
         $sessionsByUserInstrument = [];
         foreach ($sessions as $session) {
             $instrumentId = (int) ($session['instrument_id'] ?? 0);
-            if (!isset($selectedInstrumentSet[$instrumentId]) || (string) ($session['status'] ?? '') === 'cancelled') {
+            if (!isset($selectedInstrumentSet[$instrumentId])) {
                 continue;
             }
 
@@ -2543,22 +2581,27 @@ final class TestProcessController extends Controller
                 $uniqueUserProgress[$userId] = [
                     'required' => 0,
                     'finished' => 0,
-                    'has_progress' => false,
+                    'has_open' => false,
+                    'has_expired' => false,
                 ];
             }
 
-            $uniqueUserProgress[$userId]['required'] += count($requiredInstrumentIds);
             foreach ($requiredInstrumentIds as $instrumentId) {
                 $session = $sessionsByUserInstrument[$userId][$instrumentId] ?? null;
                 $status = (string) ($session['status'] ?? 'missing');
-                if (in_array($status, ['completed', 'expired'], true)) {
+                if ($status === 'cancelled') {
+                    continue;
+                }
+                $uniqueUserProgress[$userId]['required']++;
+                if ($status === 'completed') {
                     $uniqueUserProgress[$userId]['finished']++;
-                    $uniqueUserProgress[$userId]['has_progress'] = true;
                     continue;
                 }
 
                 if ($status === 'in_progress') {
-                    $uniqueUserProgress[$userId]['has_progress'] = true;
+                    $uniqueUserProgress[$userId]['has_open'] = true;
+                } elseif ($status === 'expired') {
+                    $uniqueUserProgress[$userId]['has_expired'] = true;
                 }
             }
         }
@@ -2570,18 +2613,22 @@ final class TestProcessController extends Controller
             'users_total' => count($uniqueUserProgress),
             'evaluated' => 0,
             'in_progress' => 0,
+            'expired' => 0,
             'pending' => 0,
         ];
 
         foreach ($uniqueUserProgress as $progress) {
             $required = (int) ($progress['required'] ?? 0);
             $finished = (int) ($progress['finished'] ?? 0);
-            $hasProgress = !empty($progress['has_progress']);
+            $hasOpen = !empty($progress['has_open']);
+            $hasExpired = !empty($progress['has_expired']);
 
             if ($required > 0 && $finished >= $required) {
                 $stats['evaluated']++;
-            } elseif ($hasProgress) {
+            } elseif ($hasOpen) {
                 $stats['in_progress']++;
+            } elseif ($hasExpired) {
+                $stats['expired']++;
             } else {
                 $stats['pending']++;
             }
@@ -2616,7 +2663,7 @@ final class TestProcessController extends Controller
             if (!isset($selectedInstrumentSet[(int) ($session['instrument_id'] ?? 0)])) {
                 continue;
             }
-            if (!in_array((string) ($session['status'] ?? ''), ['completed', 'expired'], true)) {
+            if ((string) ($session['status'] ?? '') !== 'completed') {
                 continue;
             }
 

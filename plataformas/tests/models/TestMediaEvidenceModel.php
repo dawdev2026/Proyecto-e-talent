@@ -17,7 +17,9 @@ final class TestMediaEvidenceModel
     public function session(int $sessionId, int $userId): ?array
     {
         return $this->db->fetch('
-            SELECT ts.id, ts.instrument_id, ts.user_id, ts.status, i.control_mode AS control_mode,
+            SELECT ts.id, ts.instrument_id, ts.user_id, ts.status,
+                   COALESCE(ts.control_mode, i.control_mode) AS control_mode,
+                   i.control_mode AS instrument_control_mode,
                    ts.audio_visual_policy, ts.audio_visual_upload_failure_policy, i.name AS instrument_name
             FROM test_sessions ts
             JOIN test_instruments i ON i.id = ts.instrument_id
@@ -238,6 +240,9 @@ final class TestMediaEvidenceModel
         if (!$session || !$evidence || (int) $evidence['id'] !== $evidenceId) {
             return ['ok' => false, 'reason' => 'evidence_not_found'];
         }
+        if ((string) ($evidence['status'] ?? '') === 'failed') {
+            return ['ok' => false, 'reason' => 'evidence_failed'];
+        }
 
         $chunks = $this->db->fetchAll('SELECT chunk_number, storage_key FROM test_media_chunks WHERE evidence_id = ? ORDER BY chunk_number ASC', [$evidenceId]);
         if (!$chunks) {
@@ -252,6 +257,13 @@ final class TestMediaEvidenceModel
                 return ['ok' => false, 'reason' => 'missing_chunk'];
             }
             $expectedChunk++;
+        }
+        $finalCapture = $this->db->fetch(
+            'SELECT storage_key FROM test_screen_captures WHERE session_id=? AND evidence_id=? AND event_type=? ORDER BY capture_number DESC LIMIT 1',
+            [$sessionId, $evidenceId, 'assessment_finished']
+        );
+        if (!$finalCapture || !is_file($this->absolutePath((string) ($finalCapture['storage_key'] ?? '')))) {
+            return ['ok' => false, 'reason' => 'final_screen_capture_missing'];
         }
         $mimeType = strtolower((string) ($evidence['mime_type'] ?? 'video/webm'));
         $extension = strpos($mimeType, 'video/mp4') === 0 ? 'mp4' : 'webm';

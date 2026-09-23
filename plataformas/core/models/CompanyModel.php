@@ -68,23 +68,6 @@ final class CompanyModel
                 $data['url_prefix'],
                 (int) $data['is_active'],
             ]);
-            $profile = $this->db->fetch("SELECT id FROM role_profiles WHERE role_key = 'company_admin' AND is_active = 1 LIMIT 1");
-            if (!$profile) {
-                throw new RuntimeException('No existe el perfil de administrador de empresa. Ejecuta la migracion multiempresa.');
-            }
-
-            $this->db->insert('
-                INSERT INTO users (first_names, last_names, age, name, email, password_hash, role, profile_id, company_id, is_active)
-                VALUES (?, ?, 0, ?, ?, ?, \'company_admin\', ?, ?, 1)
-            ', [
-                $data['admin_first_names'],
-                $data['admin_last_names'],
-                trim($data['admin_first_names'] . ' ' . $data['admin_last_names']),
-                strtolower($data['admin_email']),
-                password_hash($data['admin_password'], PASSWORD_BCRYPT),
-                (int) $profile['id'],
-                $companyId,
-            ]);
 
             $this->copyBaseUserFields($companyId);
 
@@ -105,29 +88,6 @@ final class CompanyModel
             (int) $data['is_active'],
             $id,
         ]);
-    }
-
-    public function provisionAdmin(int $companyId, array $data): int
-    {
-        return (int) $this->db->transaction(function () use ($companyId, $data): int {
-            $profile = $this->db->fetch("SELECT id FROM role_profiles WHERE role_key = 'company_admin' AND is_active = 1 LIMIT 1");
-            if (!$profile) {
-                throw new RuntimeException('No existe el perfil de administrador de empresa. Ejecuta la migracion multiempresa.');
-            }
-
-            return $this->db->insert('
-                INSERT INTO users (first_names, last_names, age, name, email, password_hash, role, profile_id, company_id, is_active)
-                VALUES (?, ?, 0, ?, ?, ?, \'company_admin\', ?, ?, 1)
-            ', [
-                $data['admin_first_names'],
-                $data['admin_last_names'],
-                trim($data['admin_first_names'] . ' ' . $data['admin_last_names']),
-                strtolower($data['admin_email']),
-                password_hash($data['admin_password'], PASSWORD_BCRYPT),
-                (int) $profile['id'],
-                $companyId,
-            ]);
-        });
     }
 
     private function copyBaseUserFields(int $companyId): void

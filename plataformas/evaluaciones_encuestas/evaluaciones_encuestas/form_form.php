@@ -1,5 +1,6 @@
 <?php
 $isSurvey = ($form['form_type'] ?? 'assessment') === 'survey';
+$isCompanyAdmin = (bool) ($isCompanyAdmin ?? false);
 $lockedFormType = $lockedFormType ?? ($form['form_type'] ?? 'assessment');
 $backRoute = $isSurvey ? 'evaluation-surveys.surveys' : 'evaluation-surveys.assessments';
 $helpIcon = static function (string $message): string {
@@ -64,7 +65,7 @@ $nonScoredQuestionTypes = ['text', 'likert', 'nps', 'rating', 'matrix'];
         <div class="col-12 col-md-4">
             <label class="form-label d-inline-flex align-items-center gap-1" for="status">
                 Estado
-                <?= $helpIcon('Solo los formularios activos pueden ser respondidos por usuarios.') ?>
+                <?= status_help_button('Estados del formulario', "• Borrador: está en configuración.\n• Activo: habilitado para asignaciones, sujeto al proceso.\n• Inactivo: no admite nuevas asignaciones, pero conserva los intentos y el historial existentes.") ?>
             </label>
             <select id="status" class="form-select" name="status" required>
                 <?php foreach ($statuses as $key => $label): ?>
@@ -72,7 +73,7 @@ $nonScoredQuestionTypes = ['text', 'likert', 'nps', 'rating', 'matrix'];
                 <?php endforeach; ?>
             </select>
         </div>
-        <?php if (!$isSurvey): ?>
+        <?php if (!$isSurvey && !$isCompanyAdmin): ?>
             <div class="col-12"><div class="evaluation-form-section-heading evaluation-form-section-heading-control"><span class="evaluation-form-section-number">3</span><div><h2>Control de la rendición</h2><p>Selecciona el nivel de supervisión. Las reglas audiovisuales aparecerán solo cuando correspondan.</p></div></div></div>
             <div class="col-12 col-md-4">
                 <label class="form-label d-inline-flex align-items-center gap-1" for="control_mode">
@@ -129,7 +130,7 @@ $nonScoredQuestionTypes = ['text', 'likert', 'nps', 'rating', 'matrix'];
                 </div>
             </div>
         <?php endif; ?>
-        <div class="col-12"><div class="evaluation-form-section-heading"><span class="evaluation-form-section-number">4</span><div><h2>Tiempo y presentación</h2><p>Configura el temporizador y la forma en que se mostrarán las preguntas.</p></div></div></div>
+        <div class="col-12"><div class="evaluation-form-section-heading"><span class="evaluation-form-section-number"><?= $isCompanyAdmin ? '3' : '4' ?></span><div><h2>Tiempo y presentación</h2><p>Configura el temporizador y la forma en que se mostrarán las preguntas.</p></div></div></div>
         <div class="col-12 col-md-4">
             <label class="form-label d-inline-flex align-items-center gap-1" for="duration_minutes">
                 Temporizador
@@ -178,9 +179,9 @@ $nonScoredQuestionTypes = ['text', 'likert', 'nps', 'rating', 'matrix'];
                 <input id="question_display_limit" class="form-control" type="number" min="0" name="question_display_limit" value="<?= max(0, (int) ($form['question_display_limit'] ?? 0)) ?>">
             </div>
         <?php endif; ?>
-        <div class="col-12"><div class="evaluation-form-section-heading"><span class="evaluation-form-section-number">5</span><div><h2>Resultados y disponibilidad</h2><p>Define qué información podrá consultar la persona y cómo queda disponible el formulario.</p></div></div></div>
+        <div class="col-12"><div class="evaluation-form-section-heading"><span class="evaluation-form-section-number"><?= $isCompanyAdmin ? '4' : '5' ?></span><div><h2>Resultados y disponibilidad</h2><p>Define qué información podrá consultar la persona y cómo queda disponible el formulario.</p></div></div></div>
         <div class="col-12 d-flex flex-wrap gap-4 evaluation-form-switches">
-            <?php if (!$isSurvey): ?>
+            <?php if (!$isSurvey && !$isCompanyAdmin): ?>
                 <div class="form-check form-switch">
                     <input id="show_result_to_user" class="form-check-input" type="checkbox" name="show_result_to_user" <?= (int) ($form['show_result_to_user'] ?? 1) === 1 ? 'checked' : '' ?> data-result-visibility-toggle>
                     <label class="form-check-label d-inline-flex align-items-center gap-1" for="show_result_to_user">
@@ -204,7 +205,7 @@ $nonScoredQuestionTypes = ['text', 'likert', 'nps', 'rating', 'matrix'];
                 </label>
             </div>
         </div>
-        <?php if (!$isSurvey): ?>
+        <?php if (!$isSurvey && !$isCompanyAdmin): ?>
             <div class="col-12" data-result-display-options>
                 <label class="form-label d-inline-flex align-items-center gap-1" for="result_display_mode">
                     Como mostrar resultados

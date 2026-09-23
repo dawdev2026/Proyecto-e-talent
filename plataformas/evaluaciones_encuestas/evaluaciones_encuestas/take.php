@@ -14,6 +14,9 @@ $controlModes = EvaluationSurveyFormModel::CONTROL_MODES;
 $controlMode = (string) ($controlMode ?? $attempt['control_mode'] ?? $form['control_mode'] ?? 'off');
 $controlMode = isset($controlModes[$controlMode]) ? $controlMode : 'off';
 $audioVisualMode = $controlMode === 'supervised_audio_visual';
+$assessmentNeedsActivation = !$previewMode && (string) ($attempt['status'] ?? '') === 'preparing';
+$assessmentEntryFlow = !empty($assessmentEntryFlow);
+$assessmentIdentityVerified = !empty($assessmentIdentityVerified);
 $evaluationMessages = array_merge(TestSettingsModel::DEFAULTS, $evaluationMessages ?? []);
 $activityUrl = (string) ($activityUrl ?? '');
 $mediaInitUrl = (string) ($mediaInitUrl ?? '');
@@ -29,13 +32,28 @@ $processAvailability = is_array($processAvailability ?? null) ? $processAvailabi
 $processRemainingSeconds = array_key_exists('remaining_seconds', $processAvailability) && $processAvailability['remaining_seconds'] !== null
     ? max(0, (int) $processAvailability['remaining_seconds'])
     : null;
+$assessmentRequirements = ProcessPrerequisiteService::requirements(array_merge($form, $attempt));
+$assessmentIdentityRequired = !empty($assessmentRequirements['facial_required']);
+$assessmentComponentsRequired = !empty($assessmentRequirements['component_required']) || $audioVisualMode;
+$assessmentIdentityVerified = !$assessmentIdentityRequired || !$assessmentEntryFlow || $assessmentIdentityVerified;
+$assessmentFinalLabel = $isSurvey ? 'Encuesta' : 'Evaluación';
+$assessmentFlowSteps = [];
+if ($assessmentIdentityRequired) $assessmentFlowSteps[] = ['id' => 'identity', 'label' => 'Reconocimiento facial'];
+if ($assessmentComponentsRequired) $assessmentFlowSteps[] = ['id' => 'components', 'label' => 'Validación de componentes'];
+$assessmentFlowSteps[] = ['id' => 'instructions', 'label' => 'Instrucciones y registro'];
+$assessmentFlowSteps[] = ['id' => 'assessment', 'label' => $assessmentFinalLabel];
+$assessmentCurrentStage = $assessmentIdentityRequired && !$assessmentIdentityVerified
+    ? 'identity'
+    : ($assessmentComponentsRequired ? 'components' : 'instructions');
+$assessmentStep = 1;
+foreach ($assessmentFlowSteps as $flowIndex => $flowStep) if ($flowStep['id'] === $assessmentCurrentStage) $assessmentStep = $flowIndex + 1;
 ?>
 <?php if ($qrMode): ?>
     <section class="landing-my-courses-main">
         <div class="landing-my-courses-hero"><div><p class="dashboard-kicker mb-2"><?= $isSurvey ? 'Encuesta' : 'Evaluación' ?></p><h1><?= e($form['title']) ?></h1><p>Responde este formulario.</p></div></div>
     </section>
 <?php elseif (!$isDrawer): ?>
-    <section class="page-header<?= $audioVisualMode || $controlMode === 'supervised' ? ' evaluation-supervised-page-header' : '' ?>" data-page-back-url="<?= e($returnUrl) ?>">
+        <section class="page-header<?= $audioVisualMode || $controlMode === 'supervised' ? ' evaluation-supervised-page-header' : '' ?><?= $assessmentNeedsActivation ? ' d-none' : '' ?>" data-page-back-url="<?= e($returnUrl) ?>">
         <div>
             <p class="dashboard-kicker mb-2"><?= $previewMode ? 'Vista previa' : ($form['form_type'] === 'survey' ? 'Encuesta' : 'Evaluación') ?></p>
             <h1 class="fw-bold mb-0"><?= e($form['title']) ?></h1>
@@ -55,36 +73,58 @@ $processRemainingSeconds = array_key_exists('remaining_seconds', $processAvailab
             <p class="mb-0">Puedes revisar como se vera el formulario. Esta pantalla no guarda respuestas, intentos ni notas.</p>
         </div>
     <?php endif; ?>
-    <form method="post" action="<?= e($formAction) ?>" class="needs-validation evaluation-take-form" novalidate data-evaluation-control-form data-draft-url="<?= e($draftAction) ?>" data-draft-action-name="evaluation_survey_action" data-draft-action-value="draft" data-evaluation-control-mode="<?= e($controlMode) ?>" data-evaluation-remaining-seconds="<?= $displaySeconds > 0 ? $displaySeconds : '' ?>" data-process-remaining-seconds="<?= $processRemainingSeconds !== null ? $processRemainingSeconds : '' ?>" data-process-expired-message="El proceso ha finalizado. Se guardarán tus respuestas y la evidencia audiovisual antes de cerrar." data-evaluation-preview="<?= $previewMode ? '1' : '0' ?>" data-incomplete-confirm-title="<?= e($evaluationMessages['incomplete_confirm_title']) ?>" data-incomplete-confirm-message="<?= e($evaluationMessages['incomplete_confirm_message']) ?>" data-incomplete-confirm-button="<?= e($evaluationMessages['incomplete_confirm_button']) ?>" data-incomplete-cancel-button="<?= e($evaluationMessages['incomplete_cancel_button']) ?>" data-expired-message="<?= e($evaluationMessages['expired_message']) ?>" data-evaluation-activity-url="<?= e($activityUrl) ?>" data-audio-visual-mode="<?= $audioVisualMode ? '1' : '0' ?>" data-media-init-url="<?= e($mediaInitUrl) ?>" data-media-chunk-url="<?= e($mediaChunkUrl) ?>" data-media-finalize-url="<?= e($mediaFinalizeUrl) ?>" data-media-risk-url="<?= e($mediaRiskUrl) ?>" data-media-failure-url="<?= e($mediaFailureUrl) ?>" data-media-screenshot-url="<?= e($audioVisualMode ? route_url('evaluation-surveys.attempt.media.screenshot', (int) $attempt['id']) : '') ?>" data-audio-visual-upload-failure-policy="<?= e((string) ($form['audio_visual_upload_failure_policy'] ?? 'continue')) ?>" data-audio-visual-interruption-policy="<?= e((string) ($form['audio_visual_interruption_policy'] ?? 'pause')) ?>" data-audio-visual-voice-policy="<?= e((string) ($form['audio_visual_voice_policy'] ?? 'warn')) ?>" data-audio-visual-permission-policy="<?= e((string) ($form['audio_visual_permission_policy'] ?? 'pause')) ?>" data-audio-visual-quality-profile="<?= e((string) ($form['audio_visual_quality_profile'] ?? 'economical')) ?>">
+        <form method="post" action="<?= e($formAction) ?>" class="needs-validation evaluation-take-form<?= $assessmentNeedsActivation ? ' is-assessment-preparing' : '' ?>" novalidate data-evaluation-control-form <?= $assessmentEntryFlow && $assessmentIdentityRequired ? 'data-face-capture-form data-face-purpose="assessment_entry" data-face-liveness-threshold="' . e((string) ($assessmentFaceSettings['liveness_threshold'] ?? 0.60)) . '"' : '' ?> data-assessment-needs-activation="<?= $assessmentNeedsActivation ? '1' : '0' ?>" data-my-tests-url="<?= e(route_url('my-tests')) ?>" data-assessment-entry-url="<?= e(route_url('facial-recognition.assessment-entry')) ?>" data-assessment-identity-verified="<?= $assessmentIdentityVerified ? '1' : '0' ?>" data-assessment-components-required="<?= $assessmentComponentsRequired ? '1' : '0' ?>" data-draft-url="<?= e($draftAction) ?>" data-draft-action-name="evaluation_survey_action" data-draft-action-value="draft" data-evaluation-control-mode="<?= e($controlMode) ?>" data-evaluation-remaining-seconds="<?= $displaySeconds > 0 ? $displaySeconds : '' ?>" data-process-remaining-seconds="<?= $processRemainingSeconds !== null ? $processRemainingSeconds : '' ?>" data-process-expired-message="El proceso ha finalizado. Se guardarán tus respuestas y la evidencia audiovisual antes de cerrar." data-evaluation-preview="<?= $previewMode ? '1' : '0' ?>" data-incomplete-confirm-title="<?= e($evaluationMessages['incomplete_confirm_title']) ?>" data-incomplete-confirm-message="<?= e($evaluationMessages['incomplete_confirm_message']) ?>" data-incomplete-confirm-button="<?= e($evaluationMessages['incomplete_confirm_button']) ?>" data-incomplete-cancel-button="<?= e($evaluationMessages['incomplete_cancel_button']) ?>" data-expired-message="<?= e($evaluationMessages['expired_message']) ?>" data-evaluation-activity-url="<?= e($activityUrl) ?>" data-audio-visual-mode="<?= $audioVisualMode ? '1' : '0' ?>" data-media-init-url="<?= e($mediaInitUrl) ?>" data-media-chunk-url="<?= e($mediaChunkUrl) ?>" data-media-finalize-url="<?= e($mediaFinalizeUrl) ?>" data-media-risk-url="<?= e($mediaRiskUrl) ?>" data-media-failure-url="<?= e($mediaFailureUrl) ?>" data-media-screenshot-url="<?= e($audioVisualMode ? route_url('evaluation-surveys.attempt.media.screenshot', (int) $attempt['id']) : '') ?>" data-audio-visual-upload-failure-policy="<?= e((string) ($form['audio_visual_upload_failure_policy'] ?? 'continue')) ?>" data-audio-visual-interruption-policy="<?= e((string) ($form['audio_visual_interruption_policy'] ?? 'pause')) ?>" data-audio-visual-voice-policy="<?= e((string) ($form['audio_visual_voice_policy'] ?? 'warn')) ?>" data-audio-visual-permission-policy="<?= e((string) ($form['audio_visual_permission_policy'] ?? 'pause')) ?>" data-audio-visual-quality-profile="<?= e((string) ($form['audio_visual_quality_profile'] ?? 'economical')) ?>">
         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-        <?php if (!$previewMode && (!$isSurvey || $audioVisualMode) && in_array($controlMode, ['supervised', 'supervised_audio_visual'], true)): ?>
-            <div class="evaluation-supervised-gate" data-evaluation-supervised-gate role="dialog" aria-modal="true" aria-labelledby="evaluation-supervised-title">
+        <?php if ($assessmentEntryFlow): ?>
+            <header class="assessment-preparation-heading"><p class="dashboard-kicker mb-2">Preparación de actividad</p><h1 class="h2 fw-bold mb-2" id="assessmentPreparationTitle">Antes de comenzar <?= $isSurvey ? 'la encuesta' : 'la evaluación' ?></h1><p class="text-muted mb-0">Completa los pasos habilitados para este proceso. El tiempo comenzará cuando confirmes las instrucciones.</p></header>
+            <?php include PLATAFORMAS_PATH . '/core/views/partials/assessment_stepper.php'; ?>
+            <input type="hidden" name="user_id" value="<?= (int) ($assessmentUserId ?? 0) ?>">
+            <input type="hidden" name="return_to" value="<?= e($assessmentReturnTo ?? '') ?>">
+            <?php if ($assessmentIdentityRequired): ?><input type="hidden" name="face_challenge" value=""><input type="hidden" name="face_start_key" value=""><input type="hidden" name="face_embedding" value=""><input type="hidden" name="face_liveness" value="0"><?php endif; ?>
+        <?php endif; ?>
+        <?php if ($assessmentNeedsActivation): ?>
+            <section class="evaluation-supervised-gate assessment-preparation-page" data-evaluation-supervised-gate aria-labelledby="assessmentPreparationTitle">
                 <div class="evaluation-supervised-gate-panel">
+                    <?php if ($assessmentEntryFlow && $assessmentIdentityRequired && !$assessmentIdentityVerified): ?><?php include PLATAFORMAS_PATH . '/core/views/partials/assessment_face_stage.php'; ?><?php endif; ?>
+                    <?php if ($assessmentComponentsRequired): ?>
+                    <section class="assessment-flow-stage <?= $assessmentCurrentStage !== 'components' ? 'd-none' : '' ?>" data-assessment-stage="components" aria-labelledby="evaluation-supervised-title" <?= $assessmentCurrentStage !== 'components' ? 'hidden inert' : '' ?>>
                     <div class="evaluation-supervised-gate-icon" aria-hidden="true"><i class="bi bi-shield-check"></i></div>
-                    <h2 id="evaluation-supervised-title" class="h4 fw-bold mb-2">Rendición supervisada</h2>
+                    <h2 id="evaluation-supervised-title" class="h4 fw-bold mb-2 assessment-stage-title">Validación de componentes</h2>
                     <?php if ($audioVisualMode): ?>
-                        <p class="text-muted mb-3">Para iniciar, debes aceptar el consentimiento y autorizar cámara, micrófono y captura de pantalla. La evidencia se guardará de forma restringida para revisión autorizada.</p>
-                        <div class="alert alert-warning small text-start mb-3">Una vez iniciada la evaluación, no podrás volver atrás, recargar ni salir. Si abandonas, el intento quedará cerrado y no podrás realizarlo nuevamente.</div>
-                        <div class="audio-visual-consent-box text-start mb-3" role="group" aria-labelledby="evaluationAudioVisualConsentTitle">
-                            <div id="evaluationAudioVisualConsentTitle" class="audio-visual-consent-title"><i class="bi bi-hand-index-thumb me-1" aria-hidden="true"></i>Paso 1: acepta para continuar</div>
-                            <label class="form-check"><input class="form-check-input" type="checkbox" data-audio-visual-consent> <span class="form-check-label">Acepto la captura de cámara, micrófono y pantalla o contenido visible durante esta evaluación y el uso de la evidencia para revisión autorizada.</span></label>
-                        </div>
+                        <p class="text-muted mb-3">Para iniciar, acepta el consentimiento y autoriza cámara, micrófono y captura de pantalla. La evidencia se guardará de forma restringida para revisión autorizada.</p>
+                        <div class="alert alert-warning small text-start mb-3">La sesión comenzará al confirmar el último paso. Una vez iniciada, el intento quedará sujeto a las reglas de tiempo y salida del proceso.</div>
+                    <?php else: ?>
+                        <p class="text-muted mb-3">Confirma los componentes requeridos para esta actividad. El tiempo y el intento aún no comienzan.</p>
+                    <?php endif; ?>
+                    <?php if ($assessmentComponentsRequired): ?><div class="audio-visual-consent-box text-start mb-3" role="group" aria-labelledby="evaluationAudioVisualConsentTitle">
+                            <div id="evaluationAudioVisualConsentTitle" class="audio-visual-consent-title"><i class="bi bi-hand-index-thumb me-1" aria-hidden="true"></i>Paso 2: acepta para validar los componentes</div>
+                            <label class="form-check"><input class="form-check-input" type="checkbox" data-audio-visual-consent> <span class="form-check-label">Acepto validar cámara, micrófono y pantalla. <?= $audioVisualMode ? 'Durante esta evaluación se capturará audio, video y pantalla para revisión autorizada.' : 'La comprobación no grabará ni guardará evidencia.' ?></span></label>
+                        </div><?php endif; ?>
                         <div class="row g-2 text-start mb-3" data-audio-visual-checks>
                             <div class="col-12 col-md-4"><div class="border rounded p-2 small" data-audio-visual-check="camera"><i class="bi bi-hourglass-split me-1" data-audio-visual-check-icon aria-hidden="true"></i><span data-audio-visual-check-label>Cámara: pendiente</span><span class="d-block text-muted" data-audio-visual-check-message></span></div></div>
                             <div class="col-12 col-md-4"><div class="border rounded p-2 small" data-audio-visual-check="microphone"><i class="bi bi-hourglass-split me-1" data-audio-visual-check-icon aria-hidden="true"></i><span data-audio-visual-check-label>Micrófono: pendiente</span><span class="d-block text-muted" data-audio-visual-check-message></span></div></div>
                             <div class="col-12 col-md-4"><div class="border rounded p-2 small" data-audio-visual-check="screen"><i class="bi bi-hourglass-split me-1" data-audio-visual-check-icon aria-hidden="true"></i><span data-audio-visual-check-label>Captura: pendiente</span><span class="d-block text-muted" data-audio-visual-check-message></span></div></div>
                         </div>
                         <video class="w-100 rounded border d-none mb-2" muted playsinline autoplay data-audio-visual-preview aria-label="Vista previa de cámara"></video>
-                        <div class="alert alert-secondary small text-start" data-inline-alert data-audio-visual-status>La cámara, el micrófono y la captura aún no están activos.</div>
-                    <?php else: ?>
-                        <p class="text-muted mb-3">Para iniciar, debes autorizar pantalla completa. La plataforma registrará eventos de control, como cambios de pestaña o salida de pantalla completa.</p>
-                        <div class="alert alert-warning small text-start mb-3">Una vez iniciada la evaluación, no podrás volver atrás, recargar ni salir. Si abandonas, el intento quedará cerrado y no podrás realizarlo nuevamente.</div>
-                    <?php endif; ?>
-                    <button class="btn btn-primary" type="button" data-evaluation-supervised-start><i class="bi bi-arrows-fullscreen me-1"></i> Iniciar evaluación</button>
+                        <div class="alert alert-secondary small text-start" data-inline-alert data-audio-visual-status role="status" aria-live="polite">La cámara, el micrófono y la captura aún no están activos.</div>
+                        <button class="btn btn-outline-primary d-none mb-2" type="button" data-audio-visual-preflight-retry><i class="bi bi-arrow-repeat me-1"></i>Reintentar autorización de componentes</button>
+                    <?php if (!$audioVisualMode && in_array($controlMode, ['supervised', 'supervised_audio_visual'], true)): ?><p class="small text-muted text-start">También se solicitará pantalla completa, según el control configurado para esta evaluación.</p><?php endif; ?>
+                    <button class="btn btn-primary mt-2" type="button" data-evaluation-supervised-start <?= $assessmentComponentsRequired ? 'disabled' : '' ?>><i class="bi bi-arrows-fullscreen me-1"></i> <?= $assessmentComponentsRequired ? 'Validar componentes y continuar' : 'Continuar a instrucciones' ?></button>
                     <button class="btn btn-outline-secondary d-none" type="button" data-evaluation-supervised-continue>Continuar con advertencia</button>
                     <p class="small text-muted mt-3 mb-0" data-evaluation-supervised-status aria-live="polite"></p>
+                    </section>
+                    <?php endif; ?>
+                    <section class="assessment-flow-stage <?= $assessmentCurrentStage !== 'instructions' ? 'd-none' : '' ?>" data-assessment-stage="instructions" aria-labelledby="assessmentInstructionsTitle" <?= $assessmentCurrentStage !== 'instructions' ? 'hidden inert' : '' ?>>
+                        <h2 id="assessmentInstructionsTitle" class="h4 fw-bold assessment-stage-title">Instrucciones y condiciones</h2>
+                        <div class="evaluation-take-intro text-start"><h3 class="h6 fw-bold">Indicaciones de la actividad</h3><div class="evaluation-rich-text"><?= evaluation_rich_text_html($formInstructions) ?></div></div>
+                        <h3 class="h6 fw-bold mt-3">Registro de actividades</h3>
+                        <p class="text-start"><?= e(in_array($controlMode, ['supervised', 'supervised_audio_visual'], true) ? $evaluationMessages['activity_tracking_notice'] : $evaluationMessages['activity_tracking_disabled_notice']) ?></p>
+                        <?php if ($audioVisualMode): ?><p class="text-start">Además se grabarán audio y video y se generarán capturas de pantalla para revisión autorizada.</p><?php endif; ?>
+                        <button class="btn btn-primary mt-2" type="button" data-assessment-begin><i class="bi bi-play-circle me-1"></i> Entendido, comenzar</button>
+                        <p class="small text-danger mt-2 mb-0" data-assessment-begin-status role="status" aria-live="polite"></p>
+                    </section>
                 </div>
-            </div>
+            </section>
         <?php endif; ?>
         <?php if (!$previewMode && $audioVisualMode): ?>
             <div class="evaluation-supervised-gate d-none" data-audio-visual-reconnect-panel role="dialog" aria-modal="true" aria-labelledby="evaluationAudioVisualReconnectTitle">
@@ -94,16 +134,15 @@ $processRemainingSeconds = array_key_exists('remaining_seconds', $processAvailab
                     <p class="text-muted mb-3">La captura audiovisual se interrumpió. La evaluación permanece pausada hasta recuperar cámara, micrófono y captura.</p>
                     <div class="alert alert-danger text-start small" data-inline-alert data-audio-visual-reconnect-indicator><i class="bi bi-exclamation-circle-fill me-1" data-audio-visual-reconnect-icon aria-hidden="true"></i><span data-audio-visual-reconnect-component>Componente audiovisual no disponible</span></div>
                     <button class="btn btn-primary" type="button" data-audio-visual-reconnect>Reintentar conexión audiovisual</button>
+                    <a class="btn btn-outline-secondary d-none" data-evaluation-exit-before-start href="<?= e($returnUrl) ?>">Salir a Mis evaluaciones</a>
                     <p class="small text-muted mt-3 mb-0" data-audio-visual-reconnect-status>La incidencia quedará registrada.</p>
                 </div>
             </div>
         <?php endif; ?>
-        <?php if ($formInstructions !== ''): ?>
-            <div class="evaluation-take-intro">
-                <h2 class="h5 fw-bold mb-2">Indicaciones</h2>
-                <div class="mb-0 evaluation-rich-text"><?= evaluation_rich_text_html($formInstructions) ?></div>
-            </div>
+        <?php if ($previewMode): ?>
+            <?php if ($formInstructions !== ''): ?><div class="evaluation-take-intro"><h2 class="h5 fw-bold mb-2">Indicaciones</h2><div class="mb-0 evaluation-rich-text"><?= evaluation_rich_text_html($formInstructions) ?></div></div><?php endif; ?>
         <?php endif; ?>
+        <?php if (!$previewMode): ?><div data-evaluation-instrument-content <?= $assessmentNeedsActivation ? 'aria-hidden="true" inert' : '' ?>><?php endif; ?>
         <div class="d-flex flex-column flex-md-row justify-content-between gap-3 mb-4">
             <div class="d-flex flex-wrap gap-2">
                 <?php if (!$isSurvey): ?>
@@ -138,6 +177,17 @@ $processRemainingSeconds = array_key_exists('remaining_seconds', $processAvailab
                             <?= evaluation_rich_text_html((string) $question['question_text']) ?>
                         </span>
                     </legend>
+
+                    <?php foreach (($question['media'] ?? []) as $media): ?>
+                        <?php if (($media['media_type'] ?? '') === 'audio'): ?>
+                            <div class="mb-3">
+                                <audio controls preload="metadata" class="w-100" aria-label="Audio de la pregunta">
+                                    <source src="<?= e(route_url('evaluation-surveys.question.media', (int) $media['id'])) ?>" type="<?= e((string) ($media['mime_type'] ?? 'audio/mpeg')) ?>">
+                                    Tu navegador no puede reproducir este audio.
+                                </audio>
+                            </div>
+                        <?php endif; ?>
+                    <?php endforeach; ?>
 
                     <?php if (in_array($question['question_type'], ['single_choice', 'true_false'], true)): ?>
                         <div class="test-choice-grid">
@@ -248,6 +298,7 @@ $processRemainingSeconds = array_key_exists('remaining_seconds', $processAvailab
             <?php endforeach; ?>
         </div>
 
+        <div class="alert alert-warning d-none mt-4 mb-0" data-evaluation-submit-status role="alert" aria-live="assertive"></div>
         <div class="d-flex flex-wrap justify-content-end gap-2 mt-4">
             <?php if ($isDrawer): ?>
                 <button class="btn btn-sm btn-outline-secondary" type="button" data-app-drawer-close>Cancelar</button>
@@ -258,5 +309,6 @@ $processRemainingSeconds = array_key_exists('remaining_seconds', $processAvailab
                 <i class="bi bi-save me-1"></i> Guardar y finalizar
             </button>
         </div>
+        <?php if (!$previewMode): ?></div><?php endif; ?>
     </form>
 </section>

@@ -2,6 +2,7 @@
 $summary = is_array($summary ?? null) ? $summary : [];
 $rows = is_array($rows ?? null) ? $rows : [];
 $isCompanyScope = !empty($isCompanyScope);
+$dashboardHeading = $isCompanyScope ? 'Dashboard de avance Evaluaciones' : 'Dashboard de evaluaciones';
 $number = static fn($value): string => number_format((float) $value, 1, ',', '.');
 $statusLabels = [
     'active' => 'Activo',
@@ -11,13 +12,13 @@ $statusLabels = [
 ?>
 <section class="page-header">
     <div>
-        <p class="dashboard-kicker mb-1">Encuestas y Evaluaciones</p>
-        <h1 class="fw-bold mb-1">Dashboard de evaluaciones</h1>
+        <p class="dashboard-kicker mb-1"><?= $isCompanyScope ? 'Avance' : 'Encuestas y Evaluaciones' ?></p>
+        <h1 class="fw-bold mb-1"><?= e($dashboardHeading) ?></h1>
         <p class="text-muted mb-0">Resultados de evaluaciones calificadas con nota de aprobación.</p>
     </div>
     <div class="d-flex flex-wrap gap-2">
         <a class="btn btn-success" href="<?= e(route_url('evaluation-surveys.dashboard.summary.xlsx')) ?>"><i class="bi bi-file-earmark-excel me-1"></i>Resumen Excel</a>
-        <a class="btn btn-outline-warning" href="<?= e(route_url('evaluation-surveys.dashboard.integrity')) ?>"><i class="bi bi-shield-exclamation me-1"></i>Reporte de incidencias</a>
+        <?php if (!$isCompanyScope): ?><a class="btn btn-outline-warning" href="<?= e(route_url('evaluation-surveys.dashboard.integrity')) ?>"><i class="bi bi-shield-exclamation me-1"></i>Reporte de incidencias</a><?php endif; ?>
         <a class="btn btn-outline-primary" href="<?= e(route_url('evaluation-surveys.assessments')) ?>"><i class="bi bi-clipboard2-check me-1"></i>Evaluaciones</a>
         <a class="btn btn-outline-secondary" href="<?= e(route_url('dashboard')) ?>"><i class="bi bi-house me-1"></i>Inicio</a>
     </div>
@@ -26,8 +27,10 @@ $statusLabels = [
 <section class="row g-3 mb-4" aria-label="Resumen de resultados">
     <?php foreach ([
         ['Evaluaciones', 'forms', 'bi-collection', 'primary'],
-        ['Personas que contestaron', 'answered_people', 'bi-people', 'info'],
-        ['Finalizadas', 'finished', 'bi-check2-circle', 'success'],
+        ['Asignaciones con respuestas', 'answered_people', 'bi-people', 'info'],
+        ['Asignaciones iniciadas', 'in_progress', 'bi-play-circle', 'warning'],
+        ['Entregas completadas', 'finished', 'bi-check2-circle', 'success'],
+        ['Asignaciones expiradas', 'expired', 'bi-hourglass-bottom', 'secondary'],
         ['Aprobadas', 'approved', 'bi-patch-check', 'success'],
         ['Reprobadas', 'failed', 'bi-x-circle', 'danger'],
     ] as [$label, $key, $icon, $color]): ?>
@@ -51,11 +54,13 @@ $statusLabels = [
     </div>
 </section>
 
+<?= status_help_button('Estados y contadores de evaluaciones', "• Estado: Borrador = en configuración; Activa = habilitada para asignación según el proceso; Inactiva = no disponible para nuevas asignaciones, con historial conservado.\n• Iniciadas: intentos abiertos, aunque todavía no tengan respuestas.\n• Contestaron: al menos una respuesta no vacía guardada; no implica que se haya enviado el intento.\n• Completadas: entrega explícita, incluso sin respuestas. Expiradas se contabilizan aparte y no cuentan como completadas ni calificadas.\n• Aprobadas/Reprobadas: dependen de la nota y del umbral configurado; no se deducen solo del estado de entrega.") ?>
+
 <section class="card content-panel mb-4">
     <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
         <div>
             <h2 class="h5 fw-bold mb-1">Resumen por evaluación</h2>
-            <p class="text-muted mb-0">Cada fila representa una evaluación asignada a un proceso; las métricas corresponden a personas. El acceso está limitado a <?= $isCompanyScope ? 'la empresa del Administrador Cliente' : 'las evaluaciones visibles del Administrador General' ?>.</p>
+            <p class="text-muted mb-0">Cada fila representa una evaluación asignada a un proceso; la tabla cuenta personas en ese grupo. Los totales superiores suman asignaciones por evaluación y pueden incluir a una misma persona en más de una evaluación. El acceso está limitado a <?= $isCompanyScope ? 'la empresa del Administrador Cliente' : 'las evaluaciones visibles del Administrador General' ?>.</p>
         </div>
         <div class="text-end"><span class="text-muted small d-block">Nota promedio</span><strong><?= $number($summary['average_score'] ?? 0) ?></strong></div>
     </div>
@@ -64,7 +69,7 @@ $statusLabels = [
     <?php else: ?>
         <div class="table-responsive">
             <table class="table table-hover align-middle app-table app-data-table" data-export-title="Dashboard de evaluaciones">
-                <thead><tr><th>Evaluación</th><th>Proceso</th><th>Estado</th><th>Nota máxima</th><th>Aprobación</th><th>Asignadas</th><th>Contestaron</th><th>Finalizadas</th><th>Aprobadas</th><th>Reprobadas</th><th>Buenas</th><th>Malas</th><th>Omitidas</th><th>Nota promedio</th><th class="text-end no-sort no-export">Acciones</th></tr></thead>
+                <thead><tr><th>Evaluación</th><th>Proceso</th><th>Estado</th><th>Nota máxima</th><th>Aprobación</th><th>Asignadas</th><th>Iniciadas</th><th>Contestaron</th><th>Entregas completadas</th><th>Expiradas</th><th>Aprobadas</th><th>Reprobadas</th><th>Buenas</th><th>Malas</th><th>Omitidas</th><th>Nota promedio</th><th class="text-end no-sort no-export">Acciones</th></tr></thead>
                 <tbody>
                 <?php foreach ($rows as $row): ?>
                     <?php $finished = max(0, (int) ($row['finished_people'] ?? 0)); $approved = (int) ($row['approved_people'] ?? 0); $failed = (int) ($row['failed_people'] ?? 0); ?>
@@ -76,8 +81,10 @@ $statusLabels = [
                         <td><?= $number($row['max_score'] ?? 0) ?></td>
                         <td><?= $row['passing_score'] === null ? '—' : $number($row['passing_score']) . ' (' . $number($row['passing_percentage'] ?? 0) . '%)' ?></td>
                         <td><?= (int) ($row['assigned_people'] ?? 0) ?></td>
+                        <td><?= (int) ($row['in_progress_people'] ?? 0) ?></td>
                         <td><?= (int) ($row['answered_people'] ?? 0) ?></td>
                         <td><?= $finished ?></td>
+                        <td><?= (int) ($row['expired_people'] ?? 0) ?></td>
                         <td><span class="badge text-bg-success"><?= $approved ?></span></td>
                         <td><span class="badge text-bg-danger"><?= $failed ?></span></td>
                         <td><?= (int) ($row['correct_answers'] ?? 0) ?></td>
@@ -99,6 +106,5 @@ $statusLabels = [
 </section>
 
 <section class="card content-panel">
-    <h2 class="h5 fw-bold mb-2">Criterio de cálculo</h2>
-    <p class="text-muted mb-0">APROBADO cuando la nota obtenida es mayor o igual a la nota de aprobación configurada; REPROBADO cuando es menor. Las evaluaciones sin nota de aprobación quedan visibles, pero no se cuentan como aprobadas ni reprobadas.</p>
+    <h2 class="h5 fw-bold mb-2">Criterio de cálculo <?= status_help_button('Criterios de estados y resultados', "• Iniciadas: intentos abiertos; abrir sin responder no cuenta como avance respondido.\n• Contestaron: existe al menos una respuesta no vacía.\n• Entregas completadas: solo envíos explícitos, incluso sin respuestas.\n• Expiradas: se informan aparte y no cuentan como completadas ni calificadas.\n• Aprobado: la nota es mayor o igual al umbral configurado. Reprobado: la nota es inferior.") ?></h2>
 </section>

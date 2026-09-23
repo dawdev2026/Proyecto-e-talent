@@ -109,8 +109,8 @@ $macro = is_array($macro ?? null) ? $macro : [];
                         <span class="dashboard-summary-metric-icon" aria-hidden="true"><i class="bi bi-circle"></i></span>
                         <div>
                             <strong><?= (int) ($processOverview['completed_not_started_people'] ?? 0) ?></strong>
-                            <span>Personas sin iniciar</span>
-                            <small>No registran avance todavía.</small>
+                            <span>Personas sin respuestas</span>
+                            <small>Aún no tienen respuestas guardadas ni tests completados.</small>
                         </div>
                     </div>
                 </div>
@@ -156,7 +156,7 @@ $macro = is_array($macro ?? null) ? $macro : [];
                     <span>Evaluaciones respondidas</span>
                     <strong><?= (int) ($macro['evaluations_answered'] ?? 0) ?></strong>
                     <small>de <?= (int) ($macro['evaluations_total'] ?? 0) ?></small>
-                    <p class="dashboard-progress-metric-help">Instrumentos que fueron respondidos y cerrados.</p>
+                    <p class="dashboard-progress-metric-help">Tests con al menos una respuesta no vacía guardada. Abrir un test no cuenta como avance.</p>
                 </div>
             </div>
             <div class="dashboard-progress-metric">
@@ -165,7 +165,7 @@ $macro = is_array($macro ?? null) ? $macro : [];
                     <span>Avance global</span>
                     <strong><?= (int) ($macroProgress ?? 0) ?>%</strong>
                     <small>del total</small>
-                    <p class="dashboard-progress-metric-help">Relación entre evaluaciones respondidas y asignadas.</p>
+                    <p class="dashboard-progress-metric-help">Relación entre tests con respuestas guardadas y asignaciones no canceladas.</p>
                 </div>
             </div>
         </div>

@@ -63,6 +63,7 @@ if (!function_exists('test_activity_label')) {
             'drag_blocked' => 'Arrastre bloqueado',
             'print_blocked' => 'Impresion bloqueada',
             'audio_visual_recording_started' => 'Control audiovisual iniciado',
+            'audio_visual_consent_accepted' => 'Consentimiento audiovisual aceptado',
             'audio_visual_recording_interrupted' => 'Grabacion audiovisual interrumpida',
             'audio_visual_recording_recovered' => 'Grabacion audiovisual recuperada',
             'audio_visual_upload_started' => 'Carga audiovisual iniciada',

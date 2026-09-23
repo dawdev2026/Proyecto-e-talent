@@ -202,9 +202,16 @@ final class UserFieldModel
     {
         $column = static fn(string $name): string => $alias !== '' ? $alias . '.' . $name : $name;
         $user = current_user();
-        if (!$user || has_permission('manage_user_fields')) {
+        if (!$user) {
             return '1 = 1';
         }
+
+        if ((string) ($user['role'] ?? '') === 'company_admin') {
+            if ((int) ($user['company_id'] ?? 0) <= 0) return '1 = 0';
+            return $column('company_id') . ' = ?';
+        }
+
+        if (has_permission('manage_user_fields')) return '1 = 1';
 
         if ((int) ($user['company_id'] ?? 0) > 0) {
             return $column('company_id') . ' = ?';
@@ -216,7 +223,7 @@ final class UserFieldModel
     private function companyScopeParams(): array
     {
         $user = current_user();
-        if ($user && !has_permission('manage_user_fields') && (int) ($user['company_id'] ?? 0) > 0) {
+        if ($user && ((string) ($user['role'] ?? '') === 'company_admin' || !has_permission('manage_user_fields')) && (int) ($user['company_id'] ?? 0) > 0) {
             return [(int) $user['company_id']];
         }
 

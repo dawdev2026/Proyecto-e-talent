@@ -74,6 +74,10 @@ function profile_home_route(?array $user = null): string
         return 'dashboard';
     }
 
+    if ((string) ($user['role'] ?? '') === 'company_admin') {
+        return 'client-admin.dashboard';
+    }
+
     $route = (string) ($user['profile_home_route'] ?? 'dashboard');
     if ((string) ($user['profile_key'] ?? '') === 'usuario' && $route === 'dashboard') {
         $route = 'my-tests';
@@ -96,25 +100,43 @@ function current_permissions(): array
         return [];
     }
 
+    if ((string) ($user['role'] ?? '') === 'company_admin' && (int) ($user['company_id'] ?? 0) <= 0) {
+        return [];
+    }
+
     $permissions = json_decode($user['profile_permissions'] ?? '[]', true);
     if (is_array($permissions) && $permissions) {
         if ((string) ($user['role'] ?? '') === 'company_admin') {
-            $permissions = array_values(array_diff($permissions, [
-                'manage_company_interviews',
-                'conduct_selection_interviews',
-                'view_interview_reports',
-            ]));
+            $companyPermissions = [
+                'manage_company_users',
+                'manage_company_user_fields',
+                'manage_company_processes',
+                'manage_evaluation_surveys',
+                'manage_company_branding',
+                'view_company_results',
+                'view_evaluation_dashboard',
+                'view_company_client_portal',
+            ];
+            $permissions = array_values(array_unique(array_intersect($permissions, $companyPermissions)));
+            $permissions[] = 'view_company_client_portal';
         }
         if ((string) ($user['role'] ?? '') === 'company_admin' && !in_array('manage_company_branding', $permissions, true)) {
             $permissions[] = 'manage_company_branding';
+        }
+        if ((string) ($user['role'] ?? '') === 'company_admin' && !in_array('manage_evaluation_surveys', $permissions, true)) {
+            $permissions[] = 'manage_evaluation_surveys';
+        }
+        if ((string) ($user['role'] ?? '') === 'admin') {
+            $permissions[] = 'manage_facial_recognition';
+            $permissions[] = 'validate_facial_identity';
         }
         return $permissions;
     }
 
     $fallback = [
-        'admin' => ['manage_profiles', 'manage_platform_settings', 'manage_user_fields', 'manage_users', 'manage_companies'],
+        'admin' => ['manage_profiles', 'manage_platform_settings', 'manage_user_fields', 'manage_users', 'manage_companies', 'manage_facial_recognition', 'validate_facial_identity'],
         'agente' => ['manage_users', 'manage_companies'],
-        'company_admin' => ['manage_company_users', 'manage_company_processes', 'view_company_results', 'manage_company_branding', 'view_evaluation_dashboard'],
+        'company_admin' => ['manage_company_users', 'manage_company_processes', 'manage_evaluation_surveys', 'view_company_results', 'manage_company_branding', 'view_evaluation_dashboard', 'view_company_client_portal'],
         'usuario' => [],
     ];
 
@@ -124,6 +146,12 @@ function current_permissions(): array
 function has_permission(string $permission): bool
 {
     return in_array($permission, current_permissions(), true);
+}
+
+function is_company_admin_user(?array $user = null): bool
+{
+    $user = $user ?: current_user();
+    return (string) ($user['role'] ?? '') === 'company_admin';
 }
 
 function is_general_admin(?array $user = null): bool

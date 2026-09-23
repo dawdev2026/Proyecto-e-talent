@@ -31,9 +31,6 @@
                     <th>Edad</th>
                     <th>Perfil</th>
                     <th>Empresa</th>
-                    <?php foreach ($listFields as $field): ?>
-                        <th><?= e($field['label']) ?></th>
-                    <?php endforeach; ?>
                     <th>Estado</th>
                     <th class="text-end no-sort no-export">Acciones</th>
                 </tr>
