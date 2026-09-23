@@ -10,7 +10,7 @@ $sessionStatusLabels = [
 <section class="page-header">
     <div>
         <p class="text-uppercase text-primary fw-bold small mb-1">Evaluaciones</p>
-        <h1 class="fw-bold mb-1">Instrumentos</h1>
+        <h1 class="fw-bold mb-1">Instrumentos <?= status_help_button('Estados del instrumento', "• Borrador: está en configuración y no debe ofrecerse para nuevas asignaciones.\n• Activo: puede seleccionarse para asignaciones, sujeto a la configuración del proceso.\n• Inactivo: no está disponible para nuevas asignaciones; su historial se conserva.") ?></h1>
         <p class="text-muted mb-0">Administra el catalogo base de pruebas antes de cargar items y baremos autorizados.</p>
     </div>
     <div class="d-flex flex-wrap gap-2">
@@ -23,9 +23,9 @@ $sessionStatusLabels = [
     </div>
 </section>
 
-<section class="content-panel">
+<section class="card content-panel">
     <div class="table-responsive">
-        <table class="table align-middle app-table app-data-table" data-export-title="Evaluaciones">
+        <table class="table table-hover align-middle app-table app-data-table" data-export-title="Evaluaciones">
             <thead>
                 <tr>
                     <th>Instrumento</th>
@@ -71,7 +71,7 @@ $sessionStatusLabels = [
     </div>
 </section>
 
-<section class="content-panel mt-4">
+<section class="card content-panel mt-4">
     <?php $hasCancelableSessions = (bool) array_filter($sessions, static fn(array $session): bool => in_array($session['status'], ['assigned', 'in_progress'], true)); ?>
     <?php $hasFinishedSessions = (bool) ($hasFinishedSessions ?? false); ?>
     <?php
@@ -107,14 +107,18 @@ $sessionStatusLabels = [
             $sessionUsers[$userId]['sessions'][$instrumentId] = $session;
         }
 
-        if (in_array($session['status'], ['completed', 'expired'], true)) {
-            $sessionUsers[$userId]['finished_count']++;
+    }
+    foreach ($sessionUsers as &$sessionUser) {
+        foreach ($sessionUser['sessions'] as $session) {
+            if ((string) ($session['status'] ?? '') !== 'completed') continue;
+            $sessionUser['finished_count']++;
             $finishedAt = (string) ($session['completed_at'] ?? $session['updated_at'] ?? $session['created_at'] ?? '');
-            if ($finishedAt !== '' && ($sessionUsers[$userId]['latest_finished_at'] === '' || strtotime($finishedAt) > strtotime($sessionUsers[$userId]['latest_finished_at']))) {
-                $sessionUsers[$userId]['latest_finished_at'] = $finishedAt;
+            if ($finishedAt !== '' && ($sessionUser['latest_finished_at'] === '' || strtotime($finishedAt) > strtotime($sessionUser['latest_finished_at']))) {
+                $sessionUser['latest_finished_at'] = $finishedAt;
             }
         }
     }
+    unset($sessionUser);
     uasort($sessionInstruments, static fn(array $a, array $b): int => strcmp($a['name'], $b['name']));
     uasort($sessionUsers, static fn(array $a, array $b): int => strcmp($a['name'], $b['name']));
     ?>
@@ -141,14 +145,14 @@ $sessionStatusLabels = [
         </div>
     </div>
     <div class="table-responsive">
-        <table class="table align-middle app-table app-data-table assignment-matrix-table" data-export-title="Asignaciones">
+        <table class="table table-hover align-middle app-table app-data-table assignment-matrix-table" data-export-title="Asignaciones">
             <thead>
                 <tr>
                     <th>Usuario</th>
                     <?php foreach ($sessionInstruments as $instrument): ?>
                         <th><?= e($instrument['name']) ?></th>
                     <?php endforeach; ?>
-                    <th>Terminadas</th>
+                    <th>Completadas</th>
                     <th class="text-end no-sort no-export">Acciones</th>
                 </tr>
             </thead>

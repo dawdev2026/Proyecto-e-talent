@@ -20,7 +20,7 @@ $dimensions = is_array($rankingConfig['dimensions'] ?? null) ? $rankingConfig['d
 $knockouts = is_array($rankingConfig['knockouts'] ?? null) ? $rankingConfig['knockouts'] : [];
 ?>
 
-<section class="content-panel mb-4">
+<section class="card content-panel mb-4">
     <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
         <div>
             <h2 class="h5 fw-bold mb-1">Configuracion de criterios</h2>

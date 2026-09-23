@@ -1,0 +1,43 @@
+name: Promote development to QA
+
+on:
+  push:
+    branches: [development]
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+
+jobs:
+  create-qa-promotion:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create or update promotion PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          repo="${GITHUB_REPOSITORY}"
+          ahead_by="$(gh api "repos/$repo/compare/qa...development" --jq '.ahead_by')"
+          if [ "$ahead_by" -eq 0 ]; then
+            echo 'development and qa are already synchronized.'
+            exit 0
+          fi
+          pr_url="$(gh pr list --repo "$repo" --base qa --head development --state open --json url --jq '.[0].url')"
+          if [ -z "$pr_url" ]; then
+            pr_url="$(gh pr create --repo "$repo" --base qa --head development \
+              --title "Promote development to QA" \
+              --body "Promotion automática. Las validaciones QA se ejecutan manualmente después de actualizar el servidor QA.")"
+          fi
+          gh pr edit "$pr_url" --repo "$repo" --add-label "promotion" || true
+          head_sha="$(gh pr view "$pr_url" --repo "$repo" --json headRefOid --jq '.headRefOid')"
+          for attempt in $(seq 1 30); do
+            check_state="$(gh api "repos/$repo/commits/$head_sha/check-runs" --paginate --jq '[.check_runs[] | select(.name != "create-qa-promotion" and .name != "Promote development to QA / create-qa-promotion")] | if length == 0 then "pending" elif any(.status != "completed") then "pending" elif any(.conclusion != "success" and .conclusion != "skipped") then "failure" else "success" end')"
+            case "$check_state" in
+              success) break ;;
+              failure) echo 'A required check failed.' >&2; exit 1 ;;
+              *) [ "$attempt" -lt 30 ] || { echo 'Timed out waiting for required checks.' >&2; exit 1; }; sleep 10 ;;
+            esac
+          done
+          gh pr merge "$pr_url" --repo "$repo" --squash

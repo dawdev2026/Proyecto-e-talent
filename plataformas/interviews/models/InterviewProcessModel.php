@@ -63,8 +63,18 @@ final class InterviewProcessModel
         ", array_merge([$processId], $this->companyScopeParams()));
     }
 
-    public function findAppointment(int $id): ?array
+    public function findAppointment(int $id, bool $includeParticipant = false): ?array
     {
+        $scopeSql = $this->companyScopeSql('p');
+        $scopeParams = $this->companyScopeParams();
+        if ($includeParticipant) {
+            $userId = (int) (current_user()['id'] ?? 0);
+            if ($userId > 0) {
+                $scopeSql = '(' . $scopeSql . ' OR a.candidate_user_id = ? OR a.moderator_user_id = ?)';
+                $scopeParams = array_merge($scopeParams, [$userId, $userId]);
+            }
+        }
+
         return $this->db->fetch("
             SELECT a.*,
                    p.name AS process_name,
@@ -80,9 +90,9 @@ final class InterviewProcessModel
             LEFT JOIN {$this->coreSchema}.users candidate ON candidate.id = a.candidate_user_id
             LEFT JOIN {$this->coreSchema}.users moderator ON moderator.id = a.moderator_user_id
             LEFT JOIN {$this->testsSchema}.test_processes tp ON tp.id = a.test_process_id
-            WHERE a.id = ? AND " . $this->companyScopeSql('p') . "
+            WHERE a.id = ? AND {$scopeSql}
             LIMIT 1
-        ", array_merge([$id], $this->companyScopeParams()));
+        ", array_merge([$id], $scopeParams));
     }
 
     public function moderators(): array
@@ -155,9 +165,11 @@ final class InterviewProcessModel
 
     public function agendaForUser(int $userId, bool $canSeeAll): array
     {
+        $dayStart = date('Y-m-d 00:00:00');
+        $dayEnd = date('Y-m-d 00:00:00', strtotime('+1 day'));
         $where = $canSeeAll ? 'AND ' . $this->companyScopeSql('p') : 'AND (a.moderator_user_id = ? OR a.candidate_user_id = ?)';
-        $params = $canSeeAll ? $this->companyScopeParams() : [$userId, $userId];
-        return $this->db->fetchAll("\n            SELECT a.id, a.scheduled_start_at, a.scheduled_end_at, a.meeting_status,\n                   p.name AS process_name, candidate.name AS candidate_name,\n                   moderator.name AS moderator_name\n            FROM interview_appointments a\n            JOIN interview_processes p ON p.id = a.process_id\n            LEFT JOIN {$this->coreSchema}.users candidate ON candidate.id = a.candidate_user_id\n            LEFT JOIN {$this->coreSchema}.users moderator ON moderator.id = a.moderator_user_id\n            WHERE DATE(a.scheduled_start_at) = CURDATE()\n              AND a.meeting_status <> 'cancelled'\n              AND p.status <> 'cancelled'\n              {$where}\n            ORDER BY a.scheduled_start_at ASC, a.id ASC\n        ", $params);
+        $params = array_merge([$dayStart, $dayEnd], $canSeeAll ? $this->companyScopeParams() : [$userId, $userId]);
+        return $this->db->fetchAll("\n            SELECT a.id, a.scheduled_start_at, a.scheduled_end_at, a.meeting_status,\n                   p.name AS process_name, candidate.name AS candidate_name,\n                   moderator.name AS moderator_name\n            FROM interview_appointments a\n            JOIN interview_processes p ON p.id = a.process_id\n            LEFT JOIN {$this->coreSchema}.users candidate ON candidate.id = a.candidate_user_id\n            LEFT JOIN {$this->coreSchema}.users moderator ON moderator.id = a.moderator_user_id\n            WHERE a.scheduled_start_at >= ? AND a.scheduled_start_at < ?\n              AND a.meeting_status <> 'cancelled'\n              AND p.status <> 'cancelled'\n              {$where}\n            ORDER BY a.scheduled_start_at ASC, a.id ASC\n        ", $params);
     }
 
     public function appointmentsForCandidate(int $candidateId): array
@@ -619,6 +631,7 @@ final class InterviewProcessModel
         $testProcessId = (int) ($data['test_process_id'] ?? 0);
         $candidateSlots = [];
 
+        $latestSessionIds = $this->latestSessionIds($candidateIds, $testProcessId);
         foreach ($candidateIds as $index => $candidateId) {
             $slotStart = $start->modify('+' . (($duration + $break) * $index) . ' minutes');
             $slotEnd = $slotStart->modify('+' . $duration . ' minutes');
@@ -647,7 +660,7 @@ final class InterviewProcessModel
             $startAt = $slotStart->format('Y-m-d H:i:s');
             $endAt = $slotEnd->format('Y-m-d H:i:s');
             $appointment = $existingByCandidate[$candidateId] ?? null;
-            $testSessionId = $this->latestSessionId($candidateId, $testProcessId);
+            $testSessionId = $latestSessionIds[$candidateId] ?? null;
 
             if ($appointment && (int) $appointment['manual_override'] === 1) {
                 $associationChanged = (int) ($appointment['test_process_id'] ?? 0) !== $testProcessId
@@ -704,21 +717,28 @@ final class InterviewProcessModel
         }
     }
 
-    private function latestSessionId(int $candidateId, int $testProcessId): ?int
+    /** @return array<int, int> */
+    private function latestSessionIds(array $candidateIds, int $testProcessId): array
     {
-        if ($testProcessId <= 0) {
-            return null;
+        if ($testProcessId <= 0 || !$candidateIds) {
+            return [];
         }
-
-        $row = $this->db->fetch("
-            SELECT id
+        $candidateIds = array_values(array_unique(array_map('intval', $candidateIds)));
+        $placeholders = implode(',', array_fill(0, count($candidateIds), '?'));
+        $rows = $this->db->fetchAll("
+            SELECT user_id, id
             FROM {$this->testsSchema}.test_sessions
-            WHERE user_id = ? AND process_id = ?
-            ORDER BY status = 'completed' DESC, completed_at DESC, created_at DESC, id DESC
-            LIMIT 1
-        ", [$candidateId, $testProcessId]);
-
-        return $row ? (int) $row['id'] : null;
+            WHERE process_id = ? AND user_id IN ({$placeholders})
+            ORDER BY user_id, status = 'completed' DESC, completed_at DESC, created_at DESC, id DESC
+        ", array_merge([$testProcessId], $candidateIds));
+        $latest = [];
+        foreach ($rows as $row) {
+            $userId = (int) $row['user_id'];
+            if (!isset($latest[$userId])) {
+                $latest[$userId] = (int) $row['id'];
+            }
+        }
+        return $latest;
     }
 
     private function assertProcessSlotsAvailable(array $slots): void
@@ -749,12 +769,15 @@ final class InterviewProcessModel
     private function slotConflicts(array $slot): array
     {
         $ignoreSql = '';
+        $dayStart = date('Y-m-d 00:00:00', strtotime((string) $slot['start_at']));
+        $dayEnd = date('Y-m-d 00:00:00', strtotime((string) $slot['start_at'] . ' +1 day'));
         $params = [
             (int) $slot['moderator_id'],
             (string) $slot['start_at'],
             (string) $slot['end_at'],
             (int) $slot['candidate_id'],
-            substr((string) $slot['start_at'], 0, 10),
+            $dayStart,
+            $dayEnd,
         ];
         if (!empty($slot['ignore_id'])) {
             $ignoreSql = 'AND a.id <> ?';
@@ -773,7 +796,7 @@ final class InterviewProcessModel
               AND p.status <> 'cancelled'
               AND (
                   (a.moderator_user_id = ? AND a.scheduled_start_at < ? AND a.scheduled_end_at > ?)
-                  OR (a.candidate_user_id = ? AND DATE(a.scheduled_start_at) = ?)
+                  OR (a.candidate_user_id = ? AND a.scheduled_start_at >= ? AND a.scheduled_start_at < ?)
               )
               {$ignoreSql}
             ORDER BY a.scheduled_start_at ASC, a.id ASC

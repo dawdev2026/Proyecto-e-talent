@@ -16,7 +16,7 @@ final class InterviewFinalReportPdfService
         $this->text = $this->hexToRgb((string) ($design['portal_text_color'] ?? ''), [46, 46, 46]);
         $this->muted = $this->mix($this->text, [255, 255, 255], 0.58);
         $this->surface = $this->hexToRgb((string) ($design['card_content_background_color'] ?? ''), [255, 255, 255]);
-        $this->brandName = trim((string) ($design['topbar_name'] ?? 'Metricatest')) ?: 'Metricatest';
+        $this->brandName = trim((string) ($design['topbar_name'] ?? 'e-talent')) ?: 'e-talent';
     }
 
     public function render(array $appointment, string $html): string

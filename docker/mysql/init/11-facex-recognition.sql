@@ -1,0 +1,4 @@
+-- Intencionalmente sin ALTERs: el esquema canónico de
+-- database/e_talent_core.sql ya contiene el modelo FaceX actual.
+-- Los cambios sobre bases existentes se gestionan con database/migrations/ y
+-- scripts/db-migrate.php; no se deben repetir durante el init de un volumen.

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 132" role="img" aria-labelledby="title desc">
+  <title id="title">e-talent</title>
+  <desc id="desc">Logotipo e-talent con símbolo de criterio y progreso</desc>
+  <g transform="translate(8 8)">
+    <rect width="116" height="116" rx="34" fill="#243B7A"/>
+    <path d="M31 83V50l27-16 27 16v33L58 99 31 83Z" fill="none" stroke="#F8FAFC" stroke-width="7" stroke-linejoin="round"/>
+    <path d="M40 76V58l18-10 18 10v18L58 86 40 76Z" fill="#20B8B0" opacity=".95"/>
+    <path d="M42 68h32M58 51v35" stroke="#F8FAFC" stroke-width="5" stroke-linecap="round" opacity=".9"/>
+    <circle cx="58" cy="34" r="7" fill="#E8DCC8"/>
+  </g>
+  <text x="148" y="87" fill="#243B7A" font-family="Inter, Arial, sans-serif" font-size="64" font-weight="750" letter-spacing="-2">e<tspan fill="#20B8B0">·</tspan>talent</text>
+</svg>

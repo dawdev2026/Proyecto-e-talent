@@ -33,7 +33,7 @@ final class TestProcessController extends Controller
         $visibleProcesses = $selectedDateGroup !== ''
             ? array_values(array_filter($processes, fn(array $process): bool => $this->processDateGroupKey($process) === $selectedDateGroup))
             : $processes;
-        $hasDashboardPermission = has_permission('view_test_process_dashboard');
+        $hasDashboardPermission = has_permission('view_test_process_dashboard') && !$this->isCompanyAdminOrSupervisor();
         $canViewDashboard = false;
         foreach ($processes as $process) {
             $processId = (int) ($process['id'] ?? 0);
@@ -54,7 +54,7 @@ final class TestProcessController extends Controller
         unset($process);
 
         $this->render('tests/processes/index', [
-            'title' => 'Procesos | Metricatest',
+            'title' => 'Procesos | e-talent',
             'currentPage' => 'test-processes',
             'processes' => $visibleProcesses,
             'statuses' => TestProcessModel::STATUSES,
@@ -72,11 +72,18 @@ final class TestProcessController extends Controller
         $this->requireAnyProcessDashboardAccess();
         session_write_close();
 
+        $dashboardFilters = $this->dashboardFilterOptions();
+
         $this->render('tests/processes/dashboard', [
-            'title' => 'Dashboard Avance | Metricatest',
+            'title' => 'Dashboard Avance | e-talent',
             'currentPage' => 'test-process.dashboard',
             'dashboardAsyncShell' => true,
             'dashboardDataUrl' => route_url('test-process.dashboard') . '-data',
+            'dashboardIsGlobalAdmin' => $dashboardFilters['is_global_admin'],
+            'dashboardCompanies' => $dashboardFilters['companies'],
+            'dashboardAvailableProcesses' => $dashboardFilters['processes'],
+            'dashboardCompanyId' => $dashboardFilters['company_id'],
+            'dashboardSelectedProcessIds' => $dashboardFilters['process_ids'],
         ]);
     }
 
@@ -117,7 +124,7 @@ final class TestProcessController extends Controller
 
         $data = $this->dashboardViewData();
         $this->render('tests/processes/dashboard_warnings', array_merge($data, [
-            'title' => 'Advertencias de ranking | Metricatest',
+            'title' => 'Advertencias de ranking | e-talent',
             'currentPage' => 'test-process.dashboard',
             'warningRows' => $data['rankingWarningRows'] ?? [],
             'dashboardQueryString' => (string) ($_SERVER['QUERY_STRING'] ?? ''),
@@ -126,13 +133,15 @@ final class TestProcessController extends Controller
 
     private function dashboardViewData(): array
     {
-        $processFilter = max(0, (int) ($_GET['process_id'] ?? 0));
+        $canConfigureRanking = has_permission('manage_ranking_presets');
+        $dashboardFilters = $this->dashboardFilterOptions();
+        $processFilter = $canConfigureRanking ? max(0, (int) ($_GET['process_id'] ?? 0)) : 0;
         $dashboardFields = array_values(array_filter(
             $this->processes->userFields(),
             static fn(array $field): bool => (string) ($field['field_key'] ?? '') !== 'edad'
         ));
-        $fieldFilters = is_array($_GET['fields'] ?? null) ? $_GET['fields'] : [];
-        $processes = $this->processes->allForUser(current_user() ?: []);
+        $fieldFilters = $canConfigureRanking && is_array($_GET['fields'] ?? null) ? $_GET['fields'] : [];
+        $processes = $dashboardFilters['processes'];
         $dashboardProcesses = [];
         $visibleProcesses = [];
         foreach ($processes as $process) {
@@ -141,6 +150,9 @@ final class TestProcessController extends Controller
                 continue;
             }
             $dashboardProcesses[] = $process;
+            if ($dashboardFilters['is_global_admin'] && !in_array($processId, $dashboardFilters['process_ids'], true)) {
+                continue;
+            }
             if ($processFilter > 0 && $processId !== $processFilter) {
                 continue;
             }
@@ -149,21 +161,28 @@ final class TestProcessController extends Controller
 
         $activeInstruments = $this->processes->activeInstruments();
         $officialRankingConfig = $this->progressRankingSummary->officialConfig();
-        $rankingPresets = $this->settings->rankingPresetOptions($officialRankingConfig);
-        $selectedRankingPreset = $this->rankingPresetFromRequest($officialRankingConfig);
         $storedRankingConfig = $this->progressRankingSummary->activeConfig($this->settings->rankingConfig());
-        $rankingConfig = $this->dashboardRankingConfig($storedRankingConfig);
-        if ($selectedRankingPreset) {
+        $rankingPresets = $canConfigureRanking ? $this->settings->rankingPresetOptions($officialRankingConfig) : [];
+        $selectedRankingPreset = $canConfigureRanking ? $this->rankingPresetFromRequest($officialRankingConfig) : null;
+        $rankingConfig = $canConfigureRanking
+            ? $this->dashboardRankingConfig($storedRankingConfig)
+            : $this->progressRankingSummary->activeConfig($this->settings->rankingConfigForCompany(
+                (int) (current_user()['company_id'] ?? 0),
+                $officialRankingConfig
+            ));
+        if ($canConfigureRanking && $selectedRankingPreset) {
             $rankingConfig = $this->progressRankingSummary->activeConfig($selectedRankingPreset['config']);
         }
-        $rankingScope = $this->dashboardRankingScope();
+        $rankingScope = $canConfigureRanking ? $this->dashboardRankingScope() : 'process';
         $overall = [
             'users_total' => 0,
             'evaluated' => 0,
             'in_progress' => 0,
+            'expired' => 0,
             'pending' => 0,
             'sessions_total' => 0,
             'sessions_finished' => 0,
+            'sessions_answered' => 0,
             'activity_events_total' => 0,
             'activity_attention_total' => 0,
             'activity_risk_total' => 0,
@@ -215,7 +234,7 @@ final class TestProcessController extends Controller
             }
             $this->collectUniqueProcessProgress($uniqueUserProgress, $users, $sessions, $activeInstruments, $selectedInstrumentIds);
 
-            foreach (['sessions_total', 'sessions_finished', 'activity_events_total', 'activity_attention_total', 'activity_risk_total'] as $key) {
+            foreach (['sessions_total', 'sessions_finished', 'sessions_answered', 'activity_events_total', 'activity_attention_total', 'activity_risk_total'] as $key) {
                 $overall[$key] += (int) ($stats[$key] ?? 0);
             }
             $overall['ranking_ranked'] += (int) ($rankingSummary['ranked'] ?? 0);
@@ -230,7 +249,7 @@ final class TestProcessController extends Controller
             }
 
             $processRows[] = array_merge($process, $stats, [
-                'progress_percent' => (int) ($stats['users_total'] > 0 ? round(((int) $stats['evaluated'] / (int) $stats['users_total']) * 100) : 0),
+                'progress_percent' => (int) ($stats['sessions_total'] > 0 ? round(((int) $stats['sessions_answered'] / (int) $stats['sessions_total']) * 100) : 0),
                 'ranking_summary' => $rankingSummary,
                 'can_view_process' => $this->processes->can(current_user() ?: [], $processId, 'view_process'),
                 'can_view_ranking' => $this->processes->can(current_user() ?: [], $processId, 'view_process_ranking'),
@@ -244,7 +263,7 @@ final class TestProcessController extends Controller
         });
 
         return [
-            'title' => 'Dashboard Avance | Metricatest',
+            'title' => 'Dashboard Avance | e-talent',
             'currentPage' => 'test-process.dashboard',
             'processes' => $dashboardProcesses,
             'processRows' => $processRows,
@@ -259,7 +278,9 @@ final class TestProcessController extends Controller
             'rankingIsPreviewConfig' => $this->dashboardRankingHasPreview(),
             'rankingPresets' => $rankingPresets,
             'rankingSelectedPresetId' => (int) ($selectedRankingPreset['id'] ?? -1),
-            'canManageRankingPresets' => has_permission('manage_ranking_presets'),
+            'canManageRankingPresets' => $canConfigureRanking,
+            'canConfigureRanking' => $canConfigureRanking,
+            'rankingCompanyAssignment' => $canConfigureRanking ? null : $this->settings->rankingCompanyAssignment((int) (current_user()['company_id'] ?? 0)),
             'rankingPresetsStorageReady' => $this->settings->hasRankingPresetsStorage(),
             'rankingScope' => $rankingScope,
             'canViewCompleteRanking' => $this->hasAnyProcessRankingAccess($dashboardProcesses),
@@ -267,9 +288,45 @@ final class TestProcessController extends Controller
             'dashboardFieldOptions' => $dashboardFieldOptions,
             'filters' => [
                 'process_id' => $processFilter,
+                'company_id' => $dashboardFilters['company_id'],
+                'process_ids' => $dashboardFilters['process_ids'],
                 'fields' => $fieldFilters,
             ],
             'chartData' => $this->processDashboardChartData($processRows, array_values($trend), $overall),
+        ];
+    }
+
+    private function dashboardFilterOptions(): array
+    {
+        $user = current_user() ?: [];
+        $isGlobalAdmin = $this->hasGlobalProcessManagement();
+        $companies = $isGlobalAdmin ? (new CompanyModel())->active() : [];
+        $companyId = $isGlobalAdmin
+            ? max(0, (int) ($_GET['company_id'] ?? 0))
+            : max(0, (int) ($user['company_id'] ?? 0));
+        $requestedProcessIds = $_GET['process_ids'] ?? [];
+        if (!is_array($requestedProcessIds)) {
+            $requestedProcessIds = [$requestedProcessIds];
+        }
+        $processIds = array_values(array_unique(array_filter(array_map('intval', $requestedProcessIds), static fn(int $id): bool => $id > 0)));
+        $processes = $this->processes->allForUser($user);
+        if ($isGlobalAdmin) {
+            if ($companyId > 0) {
+                $processes = array_values(array_filter($processes, static fn(array $process): bool => (int) ($process['company_id'] ?? 0) === $companyId));
+            } else {
+                $processIds = [];
+            }
+        }
+        if (!$isGlobalAdmin && !$processIds) {
+            $processIds = array_values(array_filter(array_map(static fn(array $process): int => (int) ($process['id'] ?? 0), $processes)));
+        }
+
+        return [
+            'is_global_admin' => $isGlobalAdmin,
+            'companies' => $companies,
+            'processes' => $processes,
+            'company_id' => $companyId,
+            'process_ids' => $processIds,
         ];
     }
 
@@ -287,20 +344,28 @@ final class TestProcessController extends Controller
             ]);
         }
 
-        $fieldFilters = is_array($_GET['fields'] ?? null) ? $_GET['fields'] : [];
+        $canConfigureRanking = has_permission('manage_ranking_presets');
+        $fieldFilters = $canConfigureRanking && is_array($_GET['fields'] ?? null) ? $_GET['fields'] : [];
         $officialRankingConfig = $this->progressRankingSummary->officialConfig();
-        $rankingPresets = $this->settings->rankingPresetOptions($officialRankingConfig);
-        $selectedRankingPreset = $this->rankingPresetFromRequest($officialRankingConfig);
         $storedRankingConfig = $this->progressRankingSummary->activeConfig($this->settings->rankingConfig());
-        $rankingConfig = $this->dashboardRankingConfig($storedRankingConfig);
-        if ($selectedRankingPreset) {
+        $rankingPresets = $canConfigureRanking ? $this->settings->rankingPresetOptions($officialRankingConfig) : [];
+        $selectedRankingPreset = $canConfigureRanking ? $this->rankingPresetFromRequest($officialRankingConfig) : null;
+        $rankingConfig = $canConfigureRanking
+            ? $this->dashboardRankingConfig($storedRankingConfig)
+            : $this->progressRankingSummary->activeConfig($this->settings->rankingConfigForCompany(
+                (int) (current_user()['company_id'] ?? 0),
+                $officialRankingConfig
+            ));
+        if ($canConfigureRanking && $selectedRankingPreset) {
             $rankingConfig = $this->progressRankingSummary->activeConfig($selectedRankingPreset['config']);
         }
 
         $ranking = $this->completeProcessRanking($rankingProcesses, $fieldFilters, $rankingConfig);
 
+        $rankingReportsByCompany = $this->rankingReportsByCompany($ranking['rows'] ?? [], $rankingProcesses);
+
         $this->render('tests/processes/ranking_all', [
-            'title' => 'Ranking Completo | Metricatest',
+            'title' => 'Ranking Completo | e-talent',
             'currentPage' => 'test-process.dashboard',
             'ranking' => $ranking,
             'processesTotal' => count($rankingProcesses),
@@ -310,11 +375,14 @@ final class TestProcessController extends Controller
             'rankingUsesOfficialConfig' => $this->progressRankingSummary->isOfficialConfig($rankingConfig),
             'rankingPresets' => $rankingPresets,
             'rankingSelectedPresetId' => (int) ($selectedRankingPreset['id'] ?? -1),
-            'canManageRankingPresets' => has_permission('manage_ranking_presets'),
+            'canManageRankingPresets' => $canConfigureRanking,
+            'canConfigureRanking' => $canConfigureRanking,
+            'rankingCompanyAssignment' => $canConfigureRanking ? null : $this->settings->rankingCompanyAssignment((int) (current_user()['company_id'] ?? 0)),
             'rankingPresetsStorageReady' => $this->settings->hasRankingPresetsStorage(),
             'rankingSummary' => $this->progressRankingSummary->dashboardSummary($ranking),
             'classificationCounts' => $this->progressRankingSummary->classificationCounts($ranking),
             'dashboardQueryString' => $this->rankingAllBackQueryString(),
+            'rankingReportsByCompany' => $rankingReportsByCompany,
         ]);
     }
 
@@ -365,6 +433,10 @@ final class TestProcessController extends Controller
 
     private function dashboardRankingHasPreview(): bool
     {
+        if (!has_permission('manage_ranking_presets')) {
+            return false;
+        }
+
         if (array_key_exists('ranking_preset_id', $_GET) && !is_array($_GET['ranking_config'] ?? null)) {
             return false;
         }
@@ -387,10 +459,20 @@ final class TestProcessController extends Controller
     public function reviewAssignment(): void
     {
         require_auth();
-        if (!$this->hasGlobalProcessManagement()) {
+        if (!$this->hasProcessManagement()) {
             platform_error(403, 'No tienes permisos para revisar o reasignar usuarios de procesos.', [
                 'pageTitle' => 'Acceso restringido',
                 'pageLead' => 'Esta herramienta requiere permisos de administracion de procesos.',
+            ]);
+        }
+
+        $currentUser = current_user() ?: [];
+        $companyId = (int) ($currentUser['company_id'] ?? 0);
+        $companyScoped = $this->isCompanyScopedProcessActor($currentUser);
+        if ($companyScoped && $companyId <= 0) {
+            platform_error(403, 'Tu perfil de Administrador Cliente no tiene una empresa asociada.', [
+                'pageTitle' => 'Configuracion incompleta',
+                'pageLead' => 'No es posible revisar o reasignar usuarios sin una empresa vinculada.',
             ]);
         }
 
@@ -408,8 +490,9 @@ final class TestProcessController extends Controller
                 $rut,
                 max(0, (int) ($_POST['source_process_id'] ?? 0)),
                 max(0, (int) ($_POST['target_process_id'] ?? 0)),
-                (int) (current_user()['id'] ?? 0),
-                (string) ($_POST['confirm_delete_answers'] ?? '') === '1'
+                (int) ($currentUser['id'] ?? 0),
+                (string) ($_POST['confirm_delete_answers'] ?? '') === '1',
+                $companyScoped ? $companyId : 0
             );
 
             if (!empty($result['ok'])) {
@@ -433,18 +516,20 @@ final class TestProcessController extends Controller
         $review = null;
         if ($rut !== '') {
             if (UserModel::isValidRut($rut)) {
-                $review = $this->processes->assignmentReviewByRut($rut);
+                $review = $this->processes->assignmentReviewByRut($rut, $companyScoped ? $companyId : 0);
             } else {
                 $error = 'Ingresa un RUT valido.';
             }
         }
 
         $this->render('tests/processes/review_assignment', [
-            'title' => 'Revisar asignacion | Metricatest',
+            'title' => 'Revisar asignacion | e-talent',
             'currentPage' => 'test-process.review-assignment',
             'rut' => $rut,
             'error' => $error,
             'review' => $review,
+            'companyScoped' => $companyScoped,
+            'companyName' => (string) ($currentUser['company_name'] ?? ''),
         ]);
     }
 
@@ -465,20 +550,10 @@ final class TestProcessController extends Controller
             try {
                 $processId = $this->processes->save($_POST, $id, (int) current_user()['id'], (int) (current_user()['company_id'] ?? 0));
                 $this->processes->syncInstruments($processId, is_array($_POST['instrument_ids'] ?? null) ? $_POST['instrument_ids'] : []);
-                $this->processes->syncFields(
-                    $processId,
-                    is_array($_POST['field_ids'] ?? null) ? $_POST['field_ids'] : [],
-                    is_array($_POST['required_field_ids'] ?? null) ? $_POST['required_field_ids'] : []
-                );
-                $this->processes->syncAssignableProfiles($processId, is_array($_POST['assignable_profile_ids'] ?? null) ? $_POST['assignable_profile_ids'] : []);
-                $adminAssignmentMode = (string) ($_POST['admin_assignment_mode'] ?? 'user');
-                if ($adminAssignmentMode === 'profile') {
-                    $this->processes->clearUserAdmins($processId);
-                    $this->processes->syncProfileAdmins($processId, is_array($_POST['profile_permissions'] ?? null) ? $_POST['profile_permissions'] : []);
-                } else {
-                    $this->processes->clearProfileAdmins($processId);
-                    $this->processes->syncUserAdmins($processId, is_array($_POST['user_permissions'] ?? null) ? $_POST['user_permissions'] : []);
-                }
+                $this->processes->syncEvaluationForms($processId, is_array($_POST['evaluation_form_ids'] ?? null) ? $_POST['evaluation_form_ids'] : []);
+                $this->processes->syncAssignableProfiles($processId, $this->processes->selectedAssignableProfileIds($processId));
+                $this->processes->syncUserAdmins($processId, is_array($_POST['user_permissions'] ?? null) ? $_POST['user_permissions'] : []);
+                $this->processes->clearProfileAdmins($processId);
                 flash('success', 'Proceso guardado correctamente.');
                 redirect(route_url('test-process.show', $processId));
             } catch (Throwable $exception) {
@@ -492,12 +567,15 @@ final class TestProcessController extends Controller
         $selectedUserAdmins = $id ? $this->processes->selectedUserAdmins($id) : [];
 
         $this->render('tests/processes/form', [
-            'title' => ($id ? 'Editar proceso' : 'Nuevo proceso') . ' | Metricatest',
+            'title' => ($id ? 'Editar proceso' : 'Nuevo proceso') . ' | e-talent',
             'currentPage' => 'test-processes',
             'process' => $process,
+            'supportsProcessActivityPolicies' => $this->processes->supportsProcessActivityPolicies(),
             'statuses' => TestProcessModel::STATUSES,
             'instruments' => $this->processes->activeInstruments(),
             'selectedInstrumentIds' => $id ? $this->processes->selectedInstrumentIds($id) : [],
+            'evaluationForms' => $this->processes->activeEvaluationForms(),
+            'selectedEvaluationFormIds' => $id ? $this->processes->selectedEvaluationFormIds($id) : [],
             'fields' => $this->processes->userFields(),
             'selectedFields' => $id ? $this->processes->selectedFields($id) : [],
             'profiles' => $this->processes->activeProfiles(),
@@ -528,23 +606,20 @@ final class TestProcessController extends Controller
 
             $result = $this->processes->assignUsers($id, $this->selectedUserIdsFromRequest(), (int) current_user()['id']);
             $message = sprintf(
-                'Usuarios agregados: %d nuevos, %d ya existentes/reactivados. Evaluaciones asignadas: %d nuevas, %d ya existentes.',
+                'Usuarios agregados: %d nuevos, %d ya existentes/reactivados. Evaluaciones asignadas: %d nuevas, %d ya existentes. Formularios asignados: %d nuevos, %d ya existentes.',
                 (int) $result['created'],
                 (int) $result['existing'],
                 (int) $result['sessions_created'],
-                (int) $result['sessions_existing']
+                (int) $result['sessions_existing'],
+                (int) ($result['evaluations_created'] ?? 0),
+                (int) ($result['evaluations_existing'] ?? 0)
             );
-            if ((int) ($result['blocked_existing_process'] ?? 0) > 0) {
-                $message .= sprintf(' No se agregaron %d usuario(s) porque ya estan asignados a otro proceso.', (int) $result['blocked_existing_process']);
-                flash('warning', $message);
-            } else {
-                flash('success', $message);
-            }
+            flash('success', $message);
             redirect(route_url('test-process.show', $id));
         }
 
         $this->render('tests/processes/show', [
-            'title' => 'Proceso | Metricatest',
+            'title' => 'Proceso | e-talent',
             'currentPage' => 'test-processes',
             'process' => $process,
             'summary' => $this->processes->summary($id),
@@ -552,11 +627,14 @@ final class TestProcessController extends Controller
             'sessions' => $this->processes->processSessions($id),
             'instruments' => $this->processes->activeInstruments(),
             'selectedInstrumentIds' => $this->processes->selectedInstrumentIds($id),
+            'evaluationForms' => $this->processes->selectedEvaluationForms($id),
+            'evaluationAssignments' => $this->processes->processEvaluationAssignments($id),
             'fields' => $this->visibleProcessFields($id),
             'availableUserFilters' => $this->processes->can(current_user() ?: [], $id, 'manage_process_users')
                 ? $this->processes->availableUserFilterOptions($id, $this->visibleProcessFields($id))
                 : ['companies' => [], 'fields' => []],
             'canManageUsers' => $this->processes->can(current_user() ?: [], $id, 'manage_process_users'),
+            'canManageSessionActions' => $this->processes->can(current_user() ?: [], $id, TestProcessModel::SUPERVISOR_SESSION_PERMISSION),
             'canEditProcessUserData' => $this->processes->can(current_user() ?: [], $id, 'manage_process_user_data'),
             'canManageAssignments' => $this->processes->can(current_user() ?: [], $id, 'manage_process_assignments'),
             'canManageSettings' => $this->processes->can(current_user() ?: [], $id, 'manage_process_settings'),
@@ -632,11 +710,17 @@ final class TestProcessController extends Controller
         }
 
         $officialRankingConfig = $this->progressRankingSummary->officialConfig();
-        $rankingPresets = $this->settings->rankingPresetOptions($officialRankingConfig);
-        $selectedRankingPreset = $this->rankingPresetFromRequest($officialRankingConfig);
-        $rankingConfig = $selectedRankingPreset
-            ? $this->progressRankingSummary->activeConfig($selectedRankingPreset['config'])
-            : $this->progressRankingSummary->activeConfig($this->settings->rankingConfig());
+        $canConfigureRanking = has_permission('manage_ranking_presets');
+        $rankingPresets = $canConfigureRanking ? $this->settings->rankingPresetOptions($officialRankingConfig) : [];
+        $selectedRankingPreset = $canConfigureRanking ? $this->rankingPresetFromRequest($officialRankingConfig) : null;
+        $rankingConfig = $canConfigureRanking
+            ? ($selectedRankingPreset
+                ? $this->progressRankingSummary->activeConfig($selectedRankingPreset['config'])
+                : $this->progressRankingSummary->activeConfig($this->settings->rankingConfig()))
+            : $this->progressRankingSummary->activeConfig($this->settings->rankingConfigForCompany(
+                (int) ($process['company_id'] ?? (current_user()['company_id'] ?? 0)),
+                $officialRankingConfig
+            ));
         $processUsers = $this->processes->processUsers($id);
         $sessions = $this->processes->processSessions($id);
         $instruments = $this->processes->activeInstruments();
@@ -652,8 +736,10 @@ final class TestProcessController extends Controller
             $rankingConfig
         );
 
+        $rankingReports = $this->rankingReportsForCompany((int) ($process['company_id'] ?? (current_user()['company_id'] ?? 0)));
+
         $this->render('tests/processes/ranking', [
-            'title' => 'Ranking Resumen | Metricatest',
+            'title' => 'Ranking Resumen | e-talent',
             'currentPage' => 'test-processes',
             'process' => $process,
             'ranking' => $ranking,
@@ -664,11 +750,74 @@ final class TestProcessController extends Controller
             'rankingUsesOfficialConfig' => $this->progressRankingSummary->isOfficialConfig($rankingConfig),
             'rankingPresets' => $rankingPresets,
             'rankingSelectedPresetId' => (int) ($selectedRankingPreset['id'] ?? -1),
-            'canManageRankingPresets' => has_permission('manage_ranking_presets'),
+            'canManageRankingPresets' => $canConfigureRanking,
+            'canConfigureRanking' => $canConfigureRanking,
+            'rankingCompanyAssignment' => $canConfigureRanking ? null : $this->settings->rankingCompanyAssignment((int) ($process['company_id'] ?? (current_user()['company_id'] ?? 0))),
             'rankingPresetsStorageReady' => $this->settings->hasRankingPresetsStorage(),
             'rankingSummary' => $this->progressRankingSummary->dashboardSummary($ranking),
             'classificationCounts' => $this->progressRankingSummary->classificationCounts($ranking),
+            'rankingReports' => $rankingReports,
         ]);
+    }
+
+    /**
+     * Devuelve los informes registrados que pueden ejecutarse desde un
+     * ranking de proceso. La funcionalidad se declara al registrar el
+     * informe y queda versionada; source.ranking se mantiene como respaldo
+     * de compatibilidad para informes antiguos.
+     */
+    private function rankingReportsForCompany(int $companyId): array
+    {
+        if ($companyId <= 0 || !class_exists('ReportDefinitionModel')) {
+            return [];
+        }
+
+        $reportModel = new ReportDefinitionModel();
+        $reports = $reportModel->publishedAssignmentsForCompanyAndFunctionality($companyId, 'ranking');
+        if (!$reports) {
+            return [];
+        }
+        $interpreter = new ReportMarkdownInterpreter();
+        $compatible = [];
+
+        foreach ($reports as $report) {
+            try {
+                $spec = $interpreter->parse((string) ($report['markdown_content'] ?? ''));
+                $metadata = $spec['metadata'] ?? [];
+                if ((string) ($metadata['entity'] ?? '') !== 'process_user') {
+                    continue;
+                }
+
+                $compatible[] = [
+                    'id' => (int) ($report['id'] ?? 0),
+                    'name' => (string) ($report['name'] ?? 'Informe'),
+                    'version' => (int) ($report['version'] ?? 1),
+                ];
+            } catch (Throwable $exception) {
+                error_log('Ranking report compatibility check failed: ' . $exception->getMessage());
+            }
+        }
+
+        return $compatible;
+    }
+
+    private function rankingReportsByCompany(array $rows, array $processes): array
+    {
+        $processesById = [];
+        foreach ($processes as $process) {
+            $processesById[(int) ($process['id'] ?? 0)] = $process;
+        }
+
+        $reportsByCompany = [];
+        foreach ($rows as $row) {
+            $processId = (int) ($row['_process_id'] ?? 0);
+            $companyId = (int) ($processesById[$processId]['company_id'] ?? 0);
+            if ($companyId > 0 && !array_key_exists($companyId, $reportsByCompany)) {
+                $reportsByCompany[$companyId] = $this->rankingReportsForCompany($companyId);
+            }
+        }
+
+        return $reportsByCompany;
     }
 
     public function exportResults(): void
@@ -727,6 +876,28 @@ final class TestProcessController extends Controller
         session_write_close();
         @set_time_limit(0);
 
+        $baseDir = dirname(__DIR__, 3) . DIRECTORY_SEPARATOR . 'tmp' . DIRECTORY_SEPARATOR . 'ranking_reports';
+        $downloadToken = trim((string) ($_GET['download'] ?? ''));
+        if ($downloadToken !== '') {
+            if (!preg_match('/^[0-9]{8}_[0-9]{6}_[a-f0-9]{8}$/', $downloadToken)) {
+                platform_error(404, 'El archivo temporal no es válido o ya fue eliminado.');
+            }
+            $tempDir = $baseDir . DIRECTORY_SEPARATOR . $downloadToken;
+            $manifestPath = $tempDir . DIRECTORY_SEPARATOR . 'manifest.json';
+            $manifest = is_file($manifestPath) ? json_decode((string) file_get_contents($manifestPath), true) : null;
+            $zipPath = is_array($manifest) ? $tempDir . DIRECTORY_SEPARATOR . basename((string) ($manifest['zip_filename'] ?? '')) : '';
+            if (!is_array($manifest) || (int) ($manifest['user_id'] ?? 0) !== (int) (current_user()['id'] ?? 0) || $zipPath === '' || !is_file($zipPath)) {
+                platform_error(404, 'El archivo temporal no está disponible.');
+            }
+
+            header('Content-Type: application/zip');
+            header('Content-Disposition: attachment; filename="' . basename($zipPath) . '"');
+            header('Content-Length: ' . filesize($zipPath));
+            header('Cache-Control: private, no-store, no-cache, must-revalidate, max-age=0');
+            readfile($zipPath);
+            return;
+        }
+
         if (!class_exists('ZipArchive')) {
             platform_error(500, 'El servidor no tiene habilitada la extension ZipArchive para crear el archivo ZIP.');
         }
@@ -741,12 +912,18 @@ final class TestProcessController extends Controller
             ]);
         }
 
-        $fieldFilters = is_array($_GET['fields'] ?? null) ? $_GET['fields'] : [];
+        $canConfigureRanking = has_permission('manage_ranking_presets');
+        $fieldFilters = $canConfigureRanking && is_array($_GET['fields'] ?? null) ? $_GET['fields'] : [];
         $officialRankingConfig = $this->progressRankingSummary->officialConfig();
-        $selectedRankingPreset = $this->rankingPresetFromRequest($officialRankingConfig);
         $storedRankingConfig = $this->progressRankingSummary->activeConfig($this->settings->rankingConfig());
-        $rankingConfig = $this->dashboardRankingConfig($storedRankingConfig);
-        if ($selectedRankingPreset) {
+        $selectedRankingPreset = $canConfigureRanking ? $this->rankingPresetFromRequest($officialRankingConfig) : null;
+        $rankingConfig = $canConfigureRanking
+            ? $this->dashboardRankingConfig($storedRankingConfig)
+            : $this->progressRankingSummary->activeConfig($this->settings->rankingConfigForCompany(
+                (int) (current_user()['company_id'] ?? 0),
+                $officialRankingConfig
+            ));
+        if ($canConfigureRanking && $selectedRankingPreset) {
             $rankingConfig = $this->progressRankingSummary->activeConfig($selectedRankingPreset['config']);
         }
 
@@ -819,12 +996,28 @@ final class TestProcessController extends Controller
         }
 
         $zipFilename = $timestamp . '.zip';
-        header('Content-Type: application/zip');
-        header('Content-Disposition: attachment; filename="' . $zipFilename . '"');
-        header('Content-Length: ' . filesize($zipPath));
-        header('Cache-Control: private, no-store, no-cache, must-revalidate, max-age=0');
-        readfile($zipPath);
-        $this->removeRankingReportsTempDir($tempDir);
+        $token = basename($tempDir);
+        $manifest = [
+            'user_id' => (int) (current_user()['id'] ?? 0),
+            'zip_filename' => $zipFilename,
+            'created_at' => date('c'),
+            'expires_at' => date('Y-m-d 00:00:00', strtotime('+1 day')),
+            'items' => $created,
+        ];
+        if (file_put_contents($tempDir . DIRECTORY_SEPARATOR . 'manifest.json', json_encode($manifest, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT)) === false) {
+            $this->removeRankingReportsTempDir($tempDir);
+            platform_error(500, 'No se pudo registrar el archivo temporal generado.');
+        }
+
+        $this->jsonResponse([
+            'ok' => true,
+            'message' => 'Proceso finalizado correctamente. Se generaron ' . $created . ' informes PDF.',
+            'detail' => 'El ZIP y sus PDFs temporales se eliminarán automáticamente a medianoche.',
+            'download_url' => route_url('test-process.ranking-all-reports-zip') . '?download=' . rawurlencode($token),
+            'download_filename' => $zipFilename,
+            'expires_at' => $manifest['expires_at'],
+            'items' => $created,
+        ]);
     }
 
     public function importResults(): void
@@ -1009,7 +1202,10 @@ final class TestProcessController extends Controller
         $sessions = $this->processes->processDashboardSessionsForUser($processId, $userId);
         $selectedInstrumentIds = $this->processes->selectedInstrumentIds($processId);
         $rankingConfig = $rankingConfig === null
-            ? $this->progressRankingSummary->activeConfig($this->settings->rankingConfig())
+            ? $this->progressRankingSummary->activeConfig($this->settings->rankingConfigForCompany(
+                (int) ($process['company_id'] ?? ($processUser['company_id'] ?? 0)),
+                $this->progressRankingSummary->officialConfig()
+            ))
             : $this->progressRankingSummary->activeConfig($rankingConfig);
         $summaryCache = [];
         $ranking = $this->processRankingForDashboard([$processUser], $sessions, $this->processes->activeInstruments(), $selectedInstrumentIds, $rankingConfig, $summaryCache, false);
@@ -1063,6 +1259,8 @@ final class TestProcessController extends Controller
     private function rankingReportSummariesByCode(array $sessions): array
     {
         $summaries = [];
+        $sessionIds = [];
+        $sessionCodes = [];
         foreach ($sessions as $session) {
             $sessionId = (int) ($session['id'] ?? 0);
             $code = (string) ($session['instrument_code'] ?? '');
@@ -1074,7 +1272,13 @@ final class TestProcessController extends Controller
                 continue;
             }
 
-            $summary = $this->sessions->summaryForSession($sessionId);
+            $sessionIds[] = $sessionId;
+            $sessionCodes[$sessionId] = $code;
+        }
+
+        $summaryRows = $this->sessions->summariesForSessions($sessionIds);
+        foreach ($sessionCodes as $sessionId => $code) {
+            $summary = $summaryRows[$sessionId] ?? [];
             if ($summary) {
                 $summaries[$code] = $summary;
             }
@@ -1203,6 +1407,9 @@ final class TestProcessController extends Controller
                 'chips' => ['Proceso', 'Usuario'],
             ]);
         }
+        if (trim((string) ($processUser['sex'] ?? '')) === '' || (string) ($processUser['sex'] ?? '') === 'no_ingresado') {
+            $processUser['sex'] = 'no_informado';
+        }
 
         $users = new UserModel();
         $fields = new UserFieldModel();
@@ -1217,7 +1424,7 @@ final class TestProcessController extends Controller
         $processToken = secure_url_token($processId, 'test_process');
         $userToken = secure_url_token($userId, 'user');
         $this->render('tests/processes/user_form', [
-            'title' => 'Editar datos usuario | Metricatest',
+            'title' => 'Editar datos usuario | e-talent',
             'process' => $process,
             'processUser' => $processUser,
             'fieldDefinitions' => $fieldDefinitions,
@@ -1230,7 +1437,7 @@ final class TestProcessController extends Controller
     {
         require_auth();
         $id = request_secure_id('test_process');
-        $this->requireProcess($id, 'manage_process_users');
+        $this->requireProcess($id, TestProcessModel::SUPERVISOR_SESSION_PERMISSION);
         verify_csrf();
 
         $userId = (int) ($_POST['user_id'] ?? 0);
@@ -1246,7 +1453,7 @@ final class TestProcessController extends Controller
     {
         require_auth();
         $id = request_secure_id('test_process');
-        $this->requireProcess($id, 'manage_process_users');
+        $this->requireProcess($id, TestProcessModel::SUPERVISOR_SESSION_PERMISSION);
         verify_csrf();
 
         $removed = $this->processes->removeAllUsers($id);
@@ -1258,7 +1465,7 @@ final class TestProcessController extends Controller
     {
         require_auth();
         $id = request_secure_id('test_process');
-        $this->requireProcess($id, 'manage_process_assignments');
+        $this->requireProcess($id, TestProcessModel::SUPERVISOR_SESSION_PERMISSION);
         verify_csrf();
 
         $sessionId = (int) ($_POST['session_id'] ?? 0);
@@ -1271,11 +1478,29 @@ final class TestProcessController extends Controller
         redirect(route_url('test-process.show', $id));
     }
 
+    public function cancelEvaluationAssignment(): void
+    {
+        require_auth();
+        $id = request_secure_id('test_process');
+        $this->requireProcess($id, TestProcessModel::SUPERVISOR_SESSION_PERMISSION);
+        verify_csrf();
+
+        $formId = max(0, (int) ($_POST['form_id'] ?? 0));
+        $userId = max(0, (int) ($_POST['user_id'] ?? 0));
+        if ($formId > 0 && $userId > 0 && $this->processes->cancelEvaluationAssignment($id, $formId, $userId)) {
+            flash('success', 'Asignación de evaluación cancelada.');
+        } else {
+            flash('warning', 'No se pudo cancelar la asignación solicitada.');
+        }
+
+        redirect(route_url('test-process.show', $id));
+    }
+
     public function resetSession(): void
     {
         require_auth();
         $id = request_secure_id('test_process');
-        $this->requireProcess($id, 'manage_process_assignments');
+        $this->requireProcess($id, TestProcessModel::SUPERVISOR_SESSION_PERMISSION);
         verify_csrf();
 
         $sessionId = (int) ($_POST['session_id'] ?? 0);
@@ -1288,11 +1513,53 @@ final class TestProcessController extends Controller
         redirect(route_url('test-process.show', $id));
     }
 
+    public function resetEvaluationAssignment(): void
+    {
+        require_auth();
+        $id = request_secure_id('test_process');
+        $this->requireProcess($id, TestProcessModel::SUPERVISOR_SESSION_PERMISSION);
+        verify_csrf();
+
+        $formId = max(0, (int) ($_POST['form_id'] ?? 0));
+        $userId = max(0, (int) ($_POST['user_id'] ?? 0));
+        if ($this->processes->resetEvaluationAssignment($id, $formId, $userId)) {
+            flash('success', 'Respuestas de la evaluación eliminadas. Quedó disponible para responder nuevamente.');
+        } else {
+            flash('warning', 'No se pudo reiniciar la evaluación solicitada.');
+        }
+
+        redirect(route_url('test-process.show', $id));
+    }
+
+    public function reopenExpiredEvaluationAssignment(): void
+    {
+        require_auth();
+        $id = request_secure_id('test_process');
+        $process = $this->requireProcess($id, TestProcessModel::SUPERVISOR_SESSION_PERMISSION);
+        verify_csrf();
+
+        $formId = max(0, (int) ($_POST['form_id'] ?? 0));
+        $userId = max(0, (int) ($_POST['user_id'] ?? 0));
+        $durationMinutes = (int) ($_POST['duration_minutes'] ?? 0);
+        $success = (int) ($process['allow_expired_reopen'] ?? 0) === 1
+            && $durationMinutes >= 1
+            && $durationMinutes <= 120
+            && $this->processes->reopenEvaluationAssignment($id, $formId, $userId, $durationMinutes, current_user() ?: []);
+
+        if ($success) {
+            flash('success', sprintf('Evaluación reabierta. El usuario tendrá %d minutos nuevos y conservará sus respuestas.', $durationMinutes));
+        } else {
+            flash('warning', 'No se pudo reabrir la evaluación. El tiempo debe estar entre 1 y 120 minutos y la actividad debe estar completada, en curso o expirada.');
+        }
+
+        redirect(route_url('test-process.show', $id));
+    }
+
     public function reopenSession(): void
     {
         require_auth();
         $id = request_secure_id('test_process');
-        $process = $this->requireProcess($id, 'manage_process_assignments');
+        $process = $this->requireProcess($id, TestProcessModel::SUPERVISOR_SESSION_PERMISSION);
         verify_csrf();
 
         if ((int) ($process['allow_expired_reopen'] ?? 0) !== 1) {
@@ -1302,15 +1569,43 @@ final class TestProcessController extends Controller
 
         $sessionId = (int) ($_POST['session_id'] ?? 0);
         $durationMinutes = (int) ($_POST['duration_minutes'] ?? 0);
-        if ($sessionId <= 0 || $durationMinutes <= 0) {
-            flash('warning', 'Indica un tiempo valido para reabrir la evaluacion.');
+        if ($sessionId <= 0 || $durationMinutes < 1 || $durationMinutes > 120) {
+            flash('warning', 'Indica un tiempo entre 1 y 120 minutos para reabrir la evaluacion.');
             redirect(route_url('test-process.show', $id));
         }
 
-        if ($this->processes->reopenExpiredSession($id, $sessionId, $durationMinutes, current_user() ?: [])) {
-            flash('success', sprintf('Evaluacion reabierta. El usuario tendra %d minutos para responder.', max(1, min(1440, $durationMinutes))));
+        if ($this->processes->reopenSession($id, $sessionId, $durationMinutes, current_user() ?: [])) {
+            flash('success', sprintf('Evaluacion reabierta. El usuario tendra %d minutos nuevos para responder y conservara sus respuestas.', $durationMinutes));
         } else {
-            flash('warning', 'No se pudo reabrir la evaluacion solicitada. Verifica que este expirada y que el proceso lo permita.');
+            flash('warning', 'No se pudo reabrir la evaluacion solicitada. Verifica que este completada, en curso o expirada y que el proceso lo permita.');
+        }
+
+        redirect(route_url('test-process.show', $id));
+    }
+
+    public function reopenSavedSession(): void
+    {
+        require_auth();
+        $id = request_secure_id('test_process');
+        $process = $this->requireProcess($id, TestProcessModel::SUPERVISOR_SESSION_PERMISSION);
+        verify_csrf();
+
+        if ((int) ($process['allow_expired_reopen'] ?? 0) !== 1) {
+            flash('warning', 'La reapertura de evaluaciones no esta habilitada en la configuracion del proceso.');
+            redirect(route_url('test-process.show', $id));
+        }
+
+        $sessionId = (int) ($_POST['session_id'] ?? 0);
+        $durationMinutes = (int) ($_POST['duration_minutes'] ?? 0);
+        if ($sessionId <= 0 || $durationMinutes < 1 || $durationMinutes > 120) {
+            flash('warning', 'Indica un tiempo entre 1 y 120 minutos para reabrir la evaluacion.');
+            redirect(route_url('test-process.show', $id));
+        }
+
+        if ($this->processes->reopenSession($id, $sessionId, $durationMinutes, current_user() ?: [])) {
+            flash('success', sprintf('Evaluacion reabierta. El usuario tendra %d minutos nuevos para responder y conservara sus respuestas.', $durationMinutes));
+        } else {
+            flash('warning', 'No se pudo reabrir la evaluacion solicitada. Verifica que este completada, en curso o expirada y que el proceso lo permita.');
         }
 
         redirect(route_url('test-process.show', $id));
@@ -1320,7 +1615,7 @@ final class TestProcessController extends Controller
     {
         require_auth();
         $id = request_secure_id('test_process');
-        $process = $this->requireProcess($id, 'manage_process_assignments');
+        $process = $this->requireProcess($id, TestProcessModel::SUPERVISOR_SESSION_PERMISSION);
         verify_csrf();
 
         if ((int) ($process['allow_expired_reopen'] ?? 0) !== 1) {
@@ -1328,37 +1623,51 @@ final class TestProcessController extends Controller
             redirect(route_url('test-process.show', $id));
         }
 
-        $instrumentId = (int) ($_POST['instrument_id'] ?? 0);
+        $target = trim((string) ($_POST['reopen_target'] ?? ''));
+        if ($target === '' && (int) ($_POST['instrument_id'] ?? 0) > 0) {
+            $target = 'test:' . (int) $_POST['instrument_id'];
+        }
+        [$targetType, $targetId] = array_pad(explode(':', $target, 2), 2, '');
+        $targetType = strtolower(trim($targetType));
+        $targetId = (int) $targetId;
         $durationMinutes = (int) ($_POST['duration_minutes'] ?? 0);
-        if ($instrumentId <= 0 || $durationMinutes <= 0) {
-            flash('warning', 'Selecciona un test del proceso e indica un tiempo valido para reabrir.');
+        if (!in_array($targetType, ['test', 'evaluation'], true) || $targetId <= 0 || $durationMinutes < 1 || $durationMinutes > 120) {
+            flash('warning', 'Selecciona un test o evaluacion del proceso e indica un tiempo entre 1 y 120 minutos para reabrir.');
             redirect(route_url('test-process.show', $id));
         }
 
-        $selectedInstrumentIds = $this->processes->selectedInstrumentIds($id);
-        if (!in_array($instrumentId, $selectedInstrumentIds, true)) {
-            flash('warning', 'El test seleccionado no pertenece a este proceso.');
-            redirect(route_url('test-process.show', $id));
+        if ($targetType === 'test') {
+            $selectedInstrumentIds = $this->processes->selectedInstrumentIds($id);
+            if (!in_array($targetId, $selectedInstrumentIds, true)) {
+                flash('warning', 'El test seleccionado no pertenece a este proceso.');
+                redirect(route_url('test-process.show', $id));
+            }
+            $result = $this->processes->reopenExpiredSessionsForInstrument($id, $targetId, $durationMinutes, current_user() ?: []);
+        } else {
+            $selectedEvaluationFormIds = $this->processes->selectedEvaluationFormIds($id);
+            if (!in_array($targetId, $selectedEvaluationFormIds, true)) {
+                flash('warning', 'La evaluacion seleccionada no pertenece a este proceso.');
+                redirect(route_url('test-process.show', $id));
+            }
+            $result = $this->processes->reopenExpiredEvaluationAssignments($id, $targetId, $durationMinutes, current_user() ?: []);
         }
-
-        $result = $this->processes->reopenExpiredSessionsForInstrument($id, $instrumentId, $durationMinutes, current_user() ?: []);
         if (empty($result['allowed'])) {
             flash('warning', 'La reapertura de evaluaciones expiradas no esta habilitada en la configuracion del proceso.');
             redirect(route_url('test-process.show', $id));
         }
 
-        if (empty($result['instrument_found'])) {
-            flash('warning', 'El test seleccionado no pertenece a este proceso.');
+        if (empty($result['target_found'])) {
+            flash('warning', $targetType === 'evaluation' ? 'La evaluacion seleccionada no pertenece a este proceso.' : 'El test seleccionado no pertenece a este proceso.');
             redirect(route_url('test-process.show', $id));
         }
 
         $reopened = (int) ($result['reopened'] ?? 0);
         $eligible = (int) ($result['eligible'] ?? 0);
         if ($reopened <= 0) {
-            flash('info', 'No hay evaluaciones expiradas para reabrir en el test seleccionado.');
+            flash('info', 'No hay actividades expiradas para reabrir en la seleccion realizada.');
         } else {
             flash('success', sprintf(
-                'Se reabrieron %d evaluaciones expiradas del test seleccionado para este proceso. Elegibles encontradas: %d.',
+                'Se reabrieron %d actividades expiradas seleccionadas para este proceso. Elegibles encontradas: %d.',
                 $reopened,
                 $eligible
             ));
@@ -1425,7 +1734,11 @@ final class TestProcessController extends Controller
 
     private function requireAnyProcessAccess(): void
     {
-        if ($this->hasGlobalProcessManagement() || has_permission('view_test_process_progress') || has_permission('view_test_process_dashboard') || has_permission('view_test_process_results')) {
+        if ($this->hasGlobalProcessManagement()
+            || has_permission('manage_company_processes')
+            || has_permission('view_test_process_progress')
+            || has_permission('view_test_process_dashboard')
+            || has_permission('view_test_process_results')) {
             return;
         }
 
@@ -1441,6 +1754,12 @@ final class TestProcessController extends Controller
 
     private function requireAnyProcessDashboardAccess(): void
     {
+        if ($this->isCompanyAdminOrSupervisor()) {
+            platform_error(403, 'No tienes permisos para acceder al Dashboard Avance.', [
+                'chips' => ['Procesos', 'Dashboard'],
+            ]);
+        }
+
         if (!has_permission('view_test_process_dashboard')) {
             platform_error(403, 'No tienes permisos para acceder al Dashboard Avance.', [
                 'chips' => ['Procesos', 'Dashboard'],
@@ -1463,6 +1782,13 @@ final class TestProcessController extends Controller
                 'Permiso requerido' => 'view_process_dashboard',
             ],
         ]);
+    }
+
+    private function isCompanyAdminOrSupervisor(): bool
+    {
+        $user = current_user() ?: [];
+        return in_array((string) ($user['role'] ?? ''), ['company_admin', 'supervisor_sede'], true)
+            || in_array((string) ($user['profile_key'] ?? ''), ['company_admin', 'supervisor_sede'], true);
     }
 
     private function hasAnyProcessRankingAccess(array $processes): bool
@@ -1575,8 +1901,8 @@ final class TestProcessController extends Controller
             $errors[] = 'Ya existe un usuario con ese correo.';
         }
 
-        if (!in_array($data['sex'] ?? '', ['masculino', 'femenino'], true)) {
-            $errors[] = 'Selecciona sexo masculino o femenino.';
+        if (!in_array($data['sex'] ?? '', UserModel::ALLOWED_SEXES, true)) {
+            $errors[] = 'Selecciona una opcion valida para sexo.';
         }
 
         $birthDate = (string) ($data['birth_date'] ?? '');
@@ -1681,7 +2007,7 @@ final class TestProcessController extends Controller
 
     private function hasGlobalProcessManagement(): bool
     {
-        return has_permission('manage_tests') || has_permission('manage_test_processes');
+        return !is_company_admin_user() && (has_permission('manage_tests') || has_permission('manage_test_processes'));
     }
 
     private function hasProcessManagement(): bool
@@ -1689,20 +2015,21 @@ final class TestProcessController extends Controller
         return $this->hasGlobalProcessManagement() || has_permission('manage_company_processes');
     }
 
-    private function visibleProcessFields(int $processId): array
+    private function isCompanyScopedProcessActor(array $user): bool
     {
-        $selected = $this->processes->selectedFields($processId);
-        $fields = [];
-        foreach ($this->processes->userFields() as $field) {
-            $fieldId = (int) ($field['id'] ?? 0);
-            if (!isset($selected[$fieldId]) || (int) ($selected[$fieldId]['show_in_process'] ?? 0) !== 1) {
-                continue;
-            }
-            $field['is_required'] = (int) ($selected[$fieldId]['is_required'] ?? 0);
-            $fields[] = $field;
+        if ((string) ($user['role'] ?? '') === 'company_admin') {
+            return true;
+        }
+        if ($this->hasGlobalProcessManagement()) {
+            return false;
         }
 
-        return $fields;
+        return has_permission('manage_company_processes');
+    }
+
+    private function visibleProcessFields(int $processId): array
+    {
+        return $this->processes->userFields();
     }
 
     private function processRankingSessions(array $processUsers, array $sessions, array $instruments, array $selectedInstrumentIds): array
@@ -1718,7 +2045,14 @@ final class TestProcessController extends Controller
 
         $sessionsByUserInstrument = [];
         foreach ($sessions as $session) {
-            $sessionsByUserInstrument[(int) ($session['user_id'] ?? 0)][(int) ($session['instrument_id'] ?? 0)] = $session;
+            $userId = (int) ($session['user_id'] ?? 0);
+            $instrumentId = (int) ($session['instrument_id'] ?? 0);
+            $instrumentCode = (string) ($session['instrument_code'] ?? '');
+            $current = $sessionsByUserInstrument[$userId][$instrumentId] ?? null;
+
+            if ($current === null || $instrumentCode !== 'ticl_barratt' || $this->isPreferredTiclRankingSession($session, $current)) {
+                $sessionsByUserInstrument[$userId][$instrumentId] = $session;
+            }
         }
 
         $rankingSessions = [];
@@ -1752,6 +2086,33 @@ final class TestProcessController extends Controller
         return $rankingSessions;
     }
 
+    private function isPreferredTiclRankingSession(array $candidate, array $current): bool
+    {
+        $candidateScore = $this->ticlRankingSessionPriority($candidate);
+        $currentScore = $this->ticlRankingSessionPriority($current);
+
+        foreach ($candidateScore as $index => $value) {
+            if ($value === $currentScore[$index]) {
+                continue;
+            }
+
+            return $value > $currentScore[$index];
+        }
+
+        return false;
+    }
+
+    private function ticlRankingSessionPriority(array $session): array
+    {
+        $status = (string) ($session['status'] ?? '');
+        $answersCount = max(0, (int) ($session['answers_count'] ?? 0));
+        $completed = $status === 'completed' ? 1 : 0;
+        $validCompleted = $completed === 1 && $answersCount >= 30 ? 1 : 0;
+        $timestamp = strtotime((string) ($session['completed_at'] ?? $session['updated_at'] ?? $session['created_at'] ?? '')) ?: 0;
+
+        return [$validCompleted, $completed, $answersCount, $timestamp, (int) ($session['id'] ?? 0)];
+    }
+
     private function processRankingForDashboard(array $processUsers, array $sessions, array $instruments, array $selectedInstrumentIds, array $rankingConfig, array &$summaryCache, bool $preloadSummaries = true): array
     {
         $rankingSessions = $this->processRankingSessions($processUsers, $sessions, $instruments, $selectedInstrumentIds);
@@ -1762,7 +2123,7 @@ final class TestProcessController extends Controller
                 $instrumentCode = (string) ($session['instrument_code'] ?? '');
                 if (
                     $sessionId > 0
-                    && in_array((string) ($session['status'] ?? ''), ['completed', 'expired'], true)
+                    && (string) ($session['status'] ?? '') === 'completed'
                     && in_array($instrumentCode, ['ipip_16pf', 'cag_wonderlic', 'cag', 'ticl_barratt'], true)
                     && !array_key_exists($sessionId, $summaryCache)
                 ) {
@@ -1800,11 +2161,26 @@ final class TestProcessController extends Controller
             }
 
             $processUsers = $this->filterProcessUsersByFields($this->processes->processUsers($processId), $fieldFilters);
+            $configHash = hash('sha256', json_encode($rankingConfig, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+            if (!$fieldFilters) {
+                $snapshot = $this->processes->rankingSnapshot($processId, $configHash);
+                if ($snapshot) {
+                    foreach ($snapshot['rows'] as $row) {
+                        $rows[] = ['Proceso' => trim((string) ($process['name'] ?? 'Proceso')), 'Codigo proceso' => trim((string) ($process['code'] ?? ''))] + $row;
+                    }
+                    foreach ($snapshot['warnings'] as $warning) {
+                        $warnings[] = ['Proceso' => trim((string) ($process['name'] ?? 'Proceso')), 'Codigo proceso' => trim((string) ($process['code'] ?? ''))] + $warning;
+                    }
+                    $usersTotal += (int) $snapshot['users_total'];
+                    $sessionsTotal += (int) $snapshot['sessions_total'];
+                    continue;
+                }
+            }
             $sessions = $this->processes->processDashboardSessions($processId);
             $selectedInstrumentIds = $this->processes->selectedInstrumentIds($processId);
-            $rankingSessions = $this->processRankingSessions($processUsers, $sessions, $instruments, $selectedInstrumentIds);
             $summaryCache = [];
-            $ranking = $this->processRankingForDashboard($processUsers, $sessions, $instruments, $selectedInstrumentIds, $rankingConfig, $summaryCache, false);
+            $ranking = $this->processRankingForDashboard($processUsers, $sessions, $instruments, $selectedInstrumentIds, $rankingConfig, $summaryCache, true);
+            $rankingSessions = $this->processRankingSessions($processUsers, $sessions, $instruments, $selectedInstrumentIds);
             $processLabel = trim((string) ($process['name'] ?? 'Proceso'));
             $processCode = trim((string) ($process['code'] ?? ''));
 
@@ -1821,6 +2197,15 @@ final class TestProcessController extends Controller
                     'name' => (string) ($warning['name'] ?? ''),
                     'warning' => (string) ($warning['warning'] ?? 'Datos insuficientes.'),
                 ];
+            }
+            if (!$fieldFilters) {
+                $this->processes->saveRankingSnapshot(
+                    $processId,
+                    $configHash,
+                    $ranking,
+                    count(array_filter($processUsers, static fn(array $user): bool => (string) ($user['status'] ?? '') !== 'cancelled')),
+                    count(array_filter($rankingSessions, static fn(array $session): bool => (int) ($session['id'] ?? 0) > 0))
+                );
             }
 
             $usersTotal += count(array_filter($processUsers, static fn(array $user): bool => (string) ($user['status'] ?? '') !== 'cancelled'));
@@ -1953,8 +2338,12 @@ final class TestProcessController extends Controller
 
     private function rankingInstrumentStatusPayload(string $status): array
     {
-        if (in_array($status, ['completed', 'expired'], true)) {
-            return ['label' => 'Realizado', 'class' => 'text-bg-success', 'priority' => 4];
+        if ($status === 'completed') {
+            return ['label' => 'Completada', 'class' => 'text-bg-success', 'priority' => 4];
+        }
+
+        if ($status === 'expired') {
+            return ['label' => 'Expirada', 'class' => 'text-bg-secondary', 'priority' => 2];
         }
 
         if ($status === 'in_progress') {
@@ -1970,31 +2359,20 @@ final class TestProcessController extends Controller
 
     private function rankingSessionSummary(int $sessionId, array $session, array &$summaryCache): array
     {
-        if ($sessionId <= 0 || !in_array((string) ($session['status'] ?? ''), ['completed', 'expired'], true)) {
+        if ($sessionId <= 0 || (string) ($session['status'] ?? '') !== 'completed') {
             return [];
         }
 
-        $summary = $summaryCache[$sessionId] ?? [];
-        if (!$summary && (string) ($session['status'] ?? '') === 'expired') {
-            $summary = $this->sessions->complete($sessionId, [], 'expired');
-            $summaryCache[$sessionId] = $summary;
-        }
-
-        return $summary;
+        return $summaryCache[$sessionId] ?? [];
     }
 
     private function rankingSessionSummaryLazy(int $sessionId, array $session): array
     {
-        if ($sessionId <= 0 || !in_array((string) ($session['status'] ?? ''), ['completed', 'expired'], true)) {
+        if ($sessionId <= 0 || (string) ($session['status'] ?? '') !== 'completed') {
             return [];
         }
 
-        $summary = $this->sessions->summaryForSession($sessionId);
-        if (!$summary && (string) ($session['status'] ?? '') === 'expired') {
-            $summary = $this->sessions->complete($sessionId, [], 'expired');
-        }
-
-        return $summary;
+        return $this->sessions->summaryForSession($sessionId);
     }
 
     private function processProgressStats(array $processUsers, array $sessions, array $instruments, array $selectedInstrumentIds): array
@@ -2017,10 +2395,13 @@ final class TestProcessController extends Controller
         ];
         foreach ($sessions as $session) {
             $instrumentId = (int) ($session['instrument_id'] ?? 0);
-            if (!isset($selectedInstrumentSet[$instrumentId]) || (string) ($session['status'] ?? '') === 'cancelled') {
+            if (!isset($selectedInstrumentSet[$instrumentId])) {
                 continue;
             }
             $sessionsByUserInstrument[(int) ($session['user_id'] ?? 0)][$instrumentId] = $session;
+            if ((string) ($session['status'] ?? '') === 'cancelled') {
+                continue;
+            }
             $activityTotals['activity_events_total'] += (int) ($session['activity_events_total'] ?? 0);
             $activityTotals['activity_attention_total'] += (int) ($session['activity_attention_total'] ?? 0);
             $activityTotals['activity_risk_total'] += (int) ($session['activity_risk_total'] ?? 0);
@@ -2030,9 +2411,11 @@ final class TestProcessController extends Controller
             'users_total' => 0,
             'evaluated' => 0,
             'in_progress' => 0,
+            'expired' => 0,
             'pending' => 0,
             'sessions_total' => 0,
             'sessions_finished' => 0,
+            'sessions_answered' => 0,
             'activity_events_total' => $activityTotals['activity_events_total'],
             'activity_attention_total' => $activityTotals['activity_attention_total'],
             'activity_risk_total' => $activityTotals['activity_risk_total'],
@@ -2044,28 +2427,41 @@ final class TestProcessController extends Controller
             }
 
             $stats['users_total']++;
-            $stats['sessions_total'] += $requiredCount;
-
             $finished = 0;
-            $hasProgress = false;
+            $hasOpen = false;
+            $hasExpired = false;
+            $activeRequired = 0;
+            $answered = 0;
             foreach ($requiredInstrumentIds as $instrumentId) {
                 $session = $sessionsByUserInstrument[(int) ($user['user_id'] ?? 0)][$instrumentId] ?? null;
                 $status = (string) ($session['status'] ?? 'missing');
-                if (in_array($status, ['completed', 'expired'], true)) {
+                if ($status === 'cancelled') {
+                    continue;
+                }
+                $activeRequired++;
+                if ((int) ($session['answers_count'] ?? 0) > 0) {
+                    $answered++;
+                }
+                if ($status === 'completed') {
                     $finished++;
-                    $hasProgress = true;
                     continue;
                 }
                 if ($status === 'in_progress') {
-                    $hasProgress = true;
+                    $hasOpen = true;
+                } elseif ($status === 'expired') {
+                    $hasExpired = true;
                 }
             }
 
+            $stats['sessions_total'] += $activeRequired;
             $stats['sessions_finished'] += $finished;
-            if ($requiredCount > 0 && $finished >= $requiredCount) {
+            $stats['sessions_answered'] += $answered;
+            if ($activeRequired > 0 && $finished >= $activeRequired) {
                 $stats['evaluated']++;
-            } elseif ($hasProgress) {
+            } elseif ($hasOpen) {
                 $stats['in_progress']++;
+            } elseif ($hasExpired) {
+                $stats['expired']++;
             } else {
                 $stats['pending']++;
             }
@@ -2079,6 +2475,7 @@ final class TestProcessController extends Controller
         $usersTotal = max(0, (int) ($overall['users_total'] ?? 0));
         $evaluated = max(0, (int) ($overall['evaluated'] ?? 0));
         $inProgress = max(0, (int) ($overall['in_progress'] ?? 0));
+        $expired = max(0, (int) ($overall['expired'] ?? 0));
         $pending = max(0, (int) ($overall['pending'] ?? 0));
         $chartRows = array_slice($processRows, 0, 8);
 
@@ -2086,12 +2483,14 @@ final class TestProcessController extends Controller
             'processLabels' => array_map(static fn(array $row): string => (string) ($row['name'] ?? 'Proceso'), $chartRows),
             'evaluated' => array_map(static fn(array $row): int => (int) ($row['evaluated'] ?? 0), $chartRows),
             'inProgress' => array_map(static fn(array $row): int => (int) ($row['in_progress'] ?? 0), $chartRows),
+            'expired' => array_map(static fn(array $row): int => (int) ($row['expired'] ?? 0), $chartRows),
             'pending' => array_map(static fn(array $row): int => (int) ($row['pending'] ?? 0), $chartRows),
             'trendLabels' => array_map(static fn(array $point): string => (string) ($point['label'] ?? ''), $trend),
             'trendCounts' => array_map(static fn(array $point): int => (int) ($point['count'] ?? 0), $trend),
             'distribution' => [
                 'evaluated' => $usersTotal > 0 ? $evaluated : 0,
                 'inProgress' => $usersTotal > 0 ? $inProgress : 0,
+                'expired' => $usersTotal > 0 ? $expired : 0,
                 'pending' => $usersTotal > 0 ? $pending : 0,
             ],
         ];
@@ -2161,7 +2560,7 @@ final class TestProcessController extends Controller
         $sessionsByUserInstrument = [];
         foreach ($sessions as $session) {
             $instrumentId = (int) ($session['instrument_id'] ?? 0);
-            if (!isset($selectedInstrumentSet[$instrumentId]) || (string) ($session['status'] ?? '') === 'cancelled') {
+            if (!isset($selectedInstrumentSet[$instrumentId])) {
                 continue;
             }
 
@@ -2182,22 +2581,27 @@ final class TestProcessController extends Controller
                 $uniqueUserProgress[$userId] = [
                     'required' => 0,
                     'finished' => 0,
-                    'has_progress' => false,
+                    'has_open' => false,
+                    'has_expired' => false,
                 ];
             }
 
-            $uniqueUserProgress[$userId]['required'] += count($requiredInstrumentIds);
             foreach ($requiredInstrumentIds as $instrumentId) {
                 $session = $sessionsByUserInstrument[$userId][$instrumentId] ?? null;
                 $status = (string) ($session['status'] ?? 'missing');
-                if (in_array($status, ['completed', 'expired'], true)) {
+                if ($status === 'cancelled') {
+                    continue;
+                }
+                $uniqueUserProgress[$userId]['required']++;
+                if ($status === 'completed') {
                     $uniqueUserProgress[$userId]['finished']++;
-                    $uniqueUserProgress[$userId]['has_progress'] = true;
                     continue;
                 }
 
                 if ($status === 'in_progress') {
-                    $uniqueUserProgress[$userId]['has_progress'] = true;
+                    $uniqueUserProgress[$userId]['has_open'] = true;
+                } elseif ($status === 'expired') {
+                    $uniqueUserProgress[$userId]['has_expired'] = true;
                 }
             }
         }
@@ -2209,18 +2613,22 @@ final class TestProcessController extends Controller
             'users_total' => count($uniqueUserProgress),
             'evaluated' => 0,
             'in_progress' => 0,
+            'expired' => 0,
             'pending' => 0,
         ];
 
         foreach ($uniqueUserProgress as $progress) {
             $required = (int) ($progress['required'] ?? 0);
             $finished = (int) ($progress['finished'] ?? 0);
-            $hasProgress = !empty($progress['has_progress']);
+            $hasOpen = !empty($progress['has_open']);
+            $hasExpired = !empty($progress['has_expired']);
 
             if ($required > 0 && $finished >= $required) {
                 $stats['evaluated']++;
-            } elseif ($hasProgress) {
+            } elseif ($hasOpen) {
                 $stats['in_progress']++;
+            } elseif ($hasExpired) {
+                $stats['expired']++;
             } else {
                 $stats['pending']++;
             }
@@ -2255,7 +2663,7 @@ final class TestProcessController extends Controller
             if (!isset($selectedInstrumentSet[(int) ($session['instrument_id'] ?? 0)])) {
                 continue;
             }
-            if (!in_array((string) ($session['status'] ?? ''), ['completed', 'expired'], true)) {
+            if ((string) ($session['status'] ?? '') !== 'completed') {
                 continue;
             }
 

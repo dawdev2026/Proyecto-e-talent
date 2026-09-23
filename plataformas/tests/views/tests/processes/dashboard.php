@@ -1,7 +1,7 @@
 <?php
 $processes = $processes ?? [];
 $processRows = $processRows ?? [];
-$overall = $overall ?? ['users_total' => 0, 'evaluated' => 0, 'in_progress' => 0, 'pending' => 0, 'sessions_total' => 0, 'sessions_finished' => 0];
+$overall = $overall ?? ['users_total' => 0, 'evaluated' => 0, 'in_progress' => 0, 'expired' => 0, 'pending' => 0, 'sessions_total' => 0, 'sessions_finished' => 0];
 $trend = $trend ?? [];
 $filters = $filters ?? ['process_id' => 0, 'fields' => []];
 $dashboardFields = $dashboardFields ?? [];
@@ -11,6 +11,11 @@ $dashboardAsyncShell = !empty($dashboardAsyncShell);
 $dashboardContentOnly = !empty($dashboardContentOnly);
 $dashboardSkipScripts = !empty($dashboardSkipScripts);
 $dashboardDataUrl = (string) ($dashboardDataUrl ?? '');
+$dashboardIsGlobalAdmin = (bool) ($dashboardIsGlobalAdmin ?? false);
+$dashboardCompanies = is_array($dashboardCompanies ?? null) ? $dashboardCompanies : [];
+$dashboardAvailableProcesses = is_array($dashboardAvailableProcesses ?? null) ? $dashboardAvailableProcesses : [];
+$dashboardCompanyId = (int) ($dashboardCompanyId ?? 0);
+$dashboardSelectedProcessIds = array_values(array_filter(array_map('intval', is_array($dashboardSelectedProcessIds ?? null) ? $dashboardSelectedProcessIds : [])));
 $duplicateAssignments = is_array($duplicateAssignments ?? null) ? $duplicateAssignments : ['total' => 0, 'examples' => []];
 $duplicateAssignmentsTotal = (int) ($duplicateAssignments['total'] ?? 0);
 $duplicateAssignmentExamples = is_array($duplicateAssignments['examples'] ?? null) ? $duplicateAssignments['examples'] : [];
@@ -18,6 +23,7 @@ $usersTotal = max(0, (int) ($overall['users_total'] ?? 0));
 $evaluated = max(0, (int) ($overall['evaluated'] ?? 0));
 $inProgress = max(0, (int) ($overall['in_progress'] ?? 0));
 $pending = max(0, (int) ($overall['pending'] ?? 0));
+$expired = max(0, (int) ($overall['expired'] ?? 0));
 $rankingRecommended = max(0, (int) ($overall['ranking_recommended'] ?? 0));
 $rankingObservation = max(0, (int) ($overall['ranking_observation'] ?? 0));
 $rankingNotRecommended = max(0, (int) ($overall['ranking_not_recommended'] ?? 0));
@@ -39,6 +45,8 @@ $rankingKnockoutRules = is_array($rankingConfig['knockouts'] ?? null) ? $ranking
 $rankingPresets = is_array($rankingPresets ?? null) ? $rankingPresets : [];
 $rankingSelectedPresetId = (int) ($rankingSelectedPresetId ?? -1);
 $canManageRankingPresets = (bool) ($canManageRankingPresets ?? false);
+$canConfigureRanking = (bool) ($canConfigureRanking ?? false);
+$rankingCompanyAssignment = is_array($rankingCompanyAssignment ?? null) ? $rankingCompanyAssignment : null;
 $rankingPresetsStorageReady = (bool) ($rankingPresetsStorageReady ?? false);
 $canViewCompleteRanking = (bool) ($canViewCompleteRanking ?? false);
 $rankingSelectedPresetName = '';
@@ -55,10 +63,9 @@ unset($rankingCompleteQuery['process_id']);
 $rankingCompleteQueryString = http_build_query($rankingCompleteQuery);
 $rankingCompleteUrl = route_url('test-process.ranking-all') . ($rankingCompleteQueryString !== '' ? '?' . $rankingCompleteQueryString : '');
 $rankingPresetRedirectTo = route_url('test-process.dashboard') . ($dashboardQueryString !== '' ? '?' . $dashboardQueryString : '');
-$progressPercent = $usersTotal > 0 ? (int) round(($evaluated / $usersTotal) * 100) : 0;
-$donutEvaluated = $usersTotal > 0 ? ($evaluated / $usersTotal) * 100 : 0;
-$donutInProgress = $usersTotal > 0 ? ($inProgress / $usersTotal) * 100 : 0;
-$donutPending = max(0, 100 - $donutEvaluated - $donutInProgress);
+$sessionsTotal = max(0, (int) ($overall['sessions_total'] ?? 0));
+$sessionsAnswered = max(0, (int) ($overall['sessions_answered'] ?? 0));
+$progressPercent = $sessionsTotal > 0 ? (int) round(($sessionsAnswered / $sessionsTotal) * 100) : 0;
 $trendMax = 1;
 foreach ($trend as $point) {
     $trendMax = max($trendMax, (int) ($point['count'] ?? 0));
@@ -71,44 +78,37 @@ if (!is_array($chartData)) {
         'evaluated' => array_map(static fn(array $row): int => (int) ($row['evaluated'] ?? 0), $chartRows),
         'inProgress' => array_map(static fn(array $row): int => (int) ($row['in_progress'] ?? 0), $chartRows),
         'pending' => array_map(static fn(array $row): int => (int) ($row['pending'] ?? 0), $chartRows),
+        'expired' => array_map(static fn(array $row): int => (int) ($row['expired'] ?? 0), $chartRows),
         'trendLabels' => array_map(static fn(array $point): string => (string) ($point['label'] ?? ''), $trend),
         'trendCounts' => array_map(static fn(array $point): int => (int) ($point['count'] ?? 0), $trend),
         'distribution' => [
             'evaluated' => $evaluated,
             'inProgress' => $inProgress,
             'pending' => $pending,
+            'expired' => $expired,
         ],
     ];
 }
 $dashboardMetricHelp = [
     'users_total' => 'Personas asignadas en los procesos visibles del dashboard. La regla esperada es que cada persona este activa en un solo proceso.',
-    'evaluated' => 'Personas que tienen todos los test del proceso finalizados en estado Completada o Expirada.',
-    'in_progress' => 'Personas con al menos un test en estado En curso, Completada o Expirada, pero que aun no tienen todos los test del proceso finalizados.',
-    'pending' => 'Personas sin avance en los test del proceso; no tienen evaluaciones En curso, Completadas ni Expiradas.',
+    'evaluated' => 'Personas que entregaron explícitamente todos los test requeridos. Las entregas pueden tener cero respuestas.',
+    'in_progress' => 'Personas con al menos un test abierto y no todas las actividades completadas. Abrir no equivale a responder.',
+    'expired' => 'Personas sin actividades abiertas que tienen al menos una actividad expirada y aún no completaron todas. Las expiradas se separan y no cuentan como completas.',
+    'pending' => 'Personas sin actividades abiertas ni expiradas que aún no han completado todas las actividades. Pueden haber completado alguna y tener otras sin iniciar.',
     'ranking' => 'Resultados generales calculados con la configuracion activa del ranking. R: Recomendado, RO: Recomendado con observacion, NR: No recomendado.',
-    'supervision' => implode('<br>', [
-        '<strong>Eventos:</strong> total de eventos registrados durante las evaluaciones supervisadas.',
-        '<strong>Atencion:</strong> eventos que requieren revision por posibles distracciones o perdida de foco.',
-        '<strong>Riesgo:</strong> eventos de mayor criticidad que pueden afectar la validez de la evaluacion.',
+    'supervision' => implode("\n", [
+        '• Eventos: total de eventos registrados durante las evaluaciones supervisadas.',
+        '• Atención: eventos que requieren revisión por posibles distracciones o pérdida de foco.',
+        '• Riesgo: eventos de mayor criticidad que pueden afectar la validez de la evaluación.',
     ]),
 ];
 
 if (!function_exists('process_dashboard_help_header')) {
-    function process_dashboard_help_header(string $label, string $help, bool $html = false): string
+    function process_dashboard_help_header(string $label, string $help): string
     {
-        $htmlAttr = $html ? ' data-bs-html="true"' : '';
-
         return '<span class="d-inline-flex align-items-center gap-1">'
             . e($label)
-            . '<button class="btn btn-sm btn-link p-0 text-muted" type="button" data-bs-toggle="popover" data-bs-trigger="focus" data-bs-placement="bottom" data-bs-title="'
-            . e($label)
-            . '" data-bs-content="'
-            . e($help)
-            . '"'
-            . $htmlAttr
-            . ' aria-label="Ver explicacion de '
-            . e($label)
-            . '"><i class="bi bi-info-circle"></i></button>'
+            . status_help_button($label, $help)
             . '</span>';
     }
 }
@@ -118,13 +118,7 @@ if (!function_exists('process_dashboard_help_label')) {
     {
         return '<span class="d-inline-flex align-items-center gap-1">'
             . e($label)
-            . '<button class="btn btn-sm btn-link p-0 text-muted" type="button" data-bs-toggle="popover" data-bs-trigger="focus" data-bs-placement="bottom" data-bs-title="'
-            . e($label)
-            . '" data-bs-content="'
-            . e($help)
-            . '" aria-label="Ver explicacion de '
-            . e($label)
-            . '"><i class="bi bi-info-circle"></i></button>'
+            . status_help_button($label, $help)
             . '</span>';
     }
 }
@@ -143,7 +137,7 @@ if (!function_exists('process_dashboard_help_label')) {
     </div>
 </section>
 
-<section class="content-panel mb-4" data-process-dashboard-loading>
+<section class="card content-panel mb-4" data-process-dashboard-loading>
     <div class="d-flex align-items-start gap-3">
         <div class="spinner-border text-primary flex-shrink-0" role="status" aria-hidden="true"></div>
         <div>
@@ -152,6 +146,70 @@ if (!function_exists('process_dashboard_help_label')) {
         </div>
     </div>
 </section>
+
+<section class="card content-panel process-dashboard-filters mb-4" data-dashboard-selection-panel>
+    <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-3">
+        <div>
+            <h2 class="h5 fw-bold mb-1">Selecciona qué quieres visualizar</h2>
+            <p class="text-muted mb-0">Primero elige una empresa y uno o más procesos para cargar el dashboard.</p>
+        </div>
+        <span class="badge text-bg-light border" data-dashboard-selection-summary>Sin selección</span>
+    </div>
+    <form class="row g-3 align-items-end" method="get" action="<?= e(route_url('test-process.dashboard')) ?>" data-dashboard-filter-form>
+        <?php if ($dashboardIsGlobalAdmin): ?>
+            <div class="col-12 col-lg-4">
+                <label class="form-label" for="dashboard_company_id">Empresa</label>
+                <select id="dashboard_company_id" class="form-select" name="company_id" required data-dashboard-company>
+                    <option value="0">Selecciona una empresa</option>
+                    <?php foreach ($dashboardCompanies as $company): ?>
+                        <?php $companyOptionId = (int) ($company['id'] ?? 0); ?>
+                        <option value="<?= $companyOptionId ?>" <?= $dashboardCompanyId === $companyOptionId ? 'selected' : '' ?>><?= e((string) ($company['name'] ?? 'Empresa')) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+        <?php else: ?>
+            <input type="hidden" name="company_id" value="<?= $dashboardCompanyId ?>">
+        <?php endif; ?>
+        <div class="col-12 col-lg-6">
+            <label class="form-label" for="dashboard_process_picker">Procesos</label>
+            <div class="input-group">
+                <button id="dashboard_process_picker" class="form-select text-start" type="button" data-dashboard-process-picker <?= $dashboardIsGlobalAdmin && $dashboardCompanyId <= 0 ? 'disabled' : '' ?>>Seleccionar procesos</button>
+                <span class="input-group-text" data-dashboard-process-count>0 seleccionados</span>
+            </div>
+            <div class="small text-muted mt-1">Puedes seleccionar varios procesos en la grilla.</div>
+        </div>
+        <div class="col-12 col-lg-2">
+            <button class="btn btn-primary w-100" type="submit" data-dashboard-apply>Aplicar</button>
+        </div>
+        <div data-dashboard-process-inputs>
+            <?php foreach ($dashboardSelectedProcessIds as $selectedProcessId): ?>
+                <input type="hidden" name="process_ids[]" value="<?= $selectedProcessId ?>">
+            <?php endforeach; ?>
+        </div>
+    </form>
+</section>
+
+<template id="dashboardProcessPickerTemplate">
+    <div class="mb-3">
+        <p class="text-muted mb-0">Marca los procesos que quieres incluir en el cálculo.</p>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-hover align-middle app-table app-data-table" data-export-excel="false" data-export-pdf="false" data-page-length="10" data-searching="true">
+            <thead><tr><th class="no-sort" style="width: 94px;"><span class="d-inline-flex align-items-center gap-2"><input class="form-check-input mt-0" type="checkbox" data-dashboard-process-select-all aria-label="Seleccionar todos los procesos"><span>Incluir</span></span></th><th>Proceso</th><th>Código</th><th>Estado</th></tr></thead>
+            <tbody>
+            <?php foreach ($dashboardAvailableProcesses as $process): ?>
+                <?php $pickerProcessId = (int) ($process['id'] ?? 0); ?>
+                <tr data-dashboard-process-row data-company-id="<?= (int) ($process['company_id'] ?? 0) ?>">
+                    <td><input class="form-check-input" type="checkbox" value="<?= $pickerProcessId ?>" data-dashboard-process-checkbox <?= in_array($pickerProcessId, $dashboardSelectedProcessIds, true) ? 'checked' : '' ?> aria-label="Incluir proceso <?= e((string) ($process['name'] ?? 'Proceso')) ?>"></td>
+                    <td class="fw-semibold"><?= e((string) ($process['name'] ?? 'Proceso')) ?></td>
+                    <td><?= e((string) ($process['code'] ?? '')) ?></td>
+                    <td><?= e((string) ($process['status'] ?? '')) ?></td>
+                </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
+    </div>
+</template>
 
 <section class="alert alert-danger d-none" role="alert" data-inline-alert data-process-dashboard-error>
     <div class="d-flex align-items-start justify-content-between gap-3">
@@ -173,18 +231,7 @@ if (!function_exists('process_dashboard_help_label')) {
         <h1 class="fw-bold mb-1">Dashboard de Avance</h1>
         <p class="text-muted mb-0">
             Seguimiento general y por proceso de evaluaciones.
-            <button
-                class="btn btn-link btn-sm p-0 ms-1"
-                type="button"
-                aria-label="Ayuda sobre metricas de avance"
-                data-bs-toggle="popover"
-                data-bs-trigger="focus"
-                data-bs-placement="bottom"
-                data-bs-title="Metricas de avance"
-                data-bs-content="Evaluadas: <?= e($dashboardMetricHelp['evaluated']) ?> En evaluacion: <?= e($dashboardMetricHelp['in_progress']) ?> Pendientes: <?= e($dashboardMetricHelp['pending']) ?>"
-            >
-                <i class="bi bi-info-circle" aria-hidden="true"></i>
-            </button>
+            <?= status_help_button('Estados y métricas de avance', "• Evaluadas: " . $dashboardMetricHelp['evaluated'] . "\n• En evaluación: " . $dashboardMetricHelp['in_progress'] . "\n• Con expiradas: " . $dashboardMetricHelp['expired'] . "\n• Pendientes: " . $dashboardMetricHelp['pending']) ?>
         </p>
     </div>
     <div class="d-flex flex-wrap gap-2">
@@ -194,7 +241,8 @@ if (!function_exists('process_dashboard_help_label')) {
 </section>
 <?php endif; ?>
 
-<section class="content-panel process-dashboard-filters mb-4">
+<?php if ($canConfigureRanking): ?>
+<section class="card content-panel process-dashboard-filters mb-4">
     <form method="get" action="<?= e(route_url('test-process.dashboard')) ?>" class="row g-3 align-items-end">
         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>" disabled data-ranking-preset-post-field>
         <input type="hidden" name="redirect_to" value="<?= e($rankingPresetRedirectTo) ?>" disabled data-ranking-preset-post-field>
@@ -426,6 +474,19 @@ if (!function_exists('process_dashboard_help_label')) {
         </div>
     </form>
 </section>
+<?php else: ?>
+<section class="card content-panel process-dashboard-filters mb-4">
+    <div class="d-flex flex-wrap align-items-start justify-content-between gap-3">
+        <div>
+            <h2 class="h5 fw-bold mb-1">Configuración del ranking</h2>
+            <p class="text-muted mb-0">La matriz de ranking es administrada globalmente y se aplica automáticamente a esta empresa.</p>
+        </div>
+        <span class="badge text-bg-light border">
+            <?= e((string) ($rankingCompanyAssignment['preset_name'] ?? 'Matriz oficial')) ?>
+        </span>
+    </div>
+</section>
+<?php endif; ?>
 
 <?php if ($duplicateAssignmentsTotal > 0): ?>
     <div class="alert alert-warning border d-flex align-items-start gap-2 mb-4" role="alert">
@@ -469,16 +530,21 @@ if (!function_exists('process_dashboard_help_label')) {
         <strong><?= $inProgress ?></strong>
     </div>
     <div class="process-dashboard-kpi is-muted">
+        <?= process_dashboard_help_label('Con expiradas', $dashboardMetricHelp['expired']) ?>
+        <strong><?= $expired ?></strong>
+    </div>
+    <div class="process-dashboard-kpi is-muted">
         <?= process_dashboard_help_label('Pendientes', $dashboardMetricHelp['pending']) ?>
         <strong><?= $pending ?></strong>
     </div>
     <div class="process-dashboard-kpi is-primary">
         <span>Avance general</span>
+        <span class="d-inline-flex align-items-center gap-1"><?= status_help_button('Avance general', 'Porcentaje de asignaciones activas con al menos una respuesta no vacía guardada: ' . $sessionsAnswered . ' de ' . $sessionsTotal . '. Abrir no cuenta como avance; las canceladas se excluyen.') ?></span>
         <strong><?= $progressPercent ?>%</strong>
     </div>
 </section>
 
-<section class="content-panel mb-4">
+<section class="card content-panel mb-4">
     <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-3">
         <div>
             <h2 class="h5 fw-bold mb-1">Resultados generales por procesos</h2>
@@ -536,11 +602,11 @@ if (!function_exists('process_dashboard_help_label')) {
 </section>
 
 <section class="process-dashboard-layout mb-4">
-    <div class="content-panel process-dashboard-main-chart">
+    <div class="card content-panel process-dashboard-main-chart">
         <div class="d-flex flex-wrap align-items-start justify-content-between gap-2 mb-3">
             <div>
                 <h2 class="h5 fw-bold mb-1">Avance por proceso</h2>
-                <p class="text-muted mb-0">Usuarios evaluados, en evaluacion y pendientes por proceso.</p>
+                <p class="text-muted mb-0">Resumen de tests psicolaborales por proceso. Las evaluaciones con nota se consultan en <a href="<?= e(route_url('evaluation-surveys.dashboard')) ?>">Dashboard de evaluaciones</a>. Responder y completar son métricas distintas.</p>
             </div>
         </div>
 
@@ -553,7 +619,7 @@ if (!function_exists('process_dashboard_help_label')) {
         <?php endif; ?>
     </div>
 
-    <aside class="content-panel process-dashboard-donut-panel">
+    <aside class="card content-panel process-dashboard-donut-panel">
         <h2 class="h5 fw-bold mb-1">Distribucion general</h2>
         <p class="text-muted mb-3">Estado de personas asignadas en procesos visibles.</p>
         <div class="process-dashboard-chart process-dashboard-chart-donut">
@@ -562,16 +628,17 @@ if (!function_exists('process_dashboard_help_label')) {
         <div class="process-dashboard-donut-list">
             <span><i class="is-success"></i> Evaluadas <strong><?= $evaluated ?></strong></span>
             <span><i class="is-warning"></i> En evaluacion <strong><?= $inProgress ?></strong></span>
+            <span><i class="is-expired"></i> Con expiradas <strong><?= $expired ?></strong></span>
             <span><i class="is-pending"></i> Pendientes <strong><?= $pending ?></strong></span>
         </div>
     </aside>
 </section>
 
-<section class="content-panel mb-4">
+<section class="card content-panel mb-4">
     <div class="d-flex flex-wrap align-items-start justify-content-between gap-2 mb-3">
         <div>
             <h2 class="h5 fw-bold mb-1">Evolucion de evaluaciones finalizadas</h2>
-            <p class="text-muted mb-0">Sesiones completadas o expiradas durante los ultimos 8 dias.</p>
+            <p class="text-muted mb-0">Entregas explícitamente completadas durante los últimos 8 días. Las expiraciones no se incluyen.</p>
         </div>
     </div>
     <div class="process-dashboard-chart process-dashboard-chart-md">
@@ -579,7 +646,7 @@ if (!function_exists('process_dashboard_help_label')) {
     </div>
 </section>
 
-<section class="content-panel">
+<section class="card content-panel">
     <div class="d-flex flex-wrap align-items-start justify-content-between gap-2 mb-3">
         <div>
             <h2 class="h5 fw-bold mb-1">Procesos con mayor pendiente</h2>
@@ -593,18 +660,19 @@ if (!function_exists('process_dashboard_help_label')) {
         </div>
     </div>
     <div class="table-responsive">
-        <table class="table align-middle app-table app-data-table" data-export-title="Dashboard Avance Procesos">
+        <table class="table table-hover align-middle app-table app-data-table" data-export-title="Dashboard Avance Procesos">
             <thead>
                 <tr>
                     <th>Proceso</th>
                     <th>Usuarios</th>
                     <th><?= process_dashboard_help_header('Evaluadas', $dashboardMetricHelp['evaluated']) ?></th>
                     <th><?= process_dashboard_help_header('En evaluacion', $dashboardMetricHelp['in_progress']) ?></th>
+                    <th><?= process_dashboard_help_header('Con expiradas', $dashboardMetricHelp['expired']) ?></th>
                     <th><?= process_dashboard_help_header('Pendientes', $dashboardMetricHelp['pending']) ?></th>
                     <th><?= process_dashboard_help_header('Resultados', $dashboardMetricHelp['ranking']) ?></th>
                     <th>Promedio</th>
                     <th>Knockouts</th>
-                    <th><?= process_dashboard_help_header('Supervision', $dashboardMetricHelp['supervision'], true) ?></th>
+                    <th><?= process_dashboard_help_header('Supervision', $dashboardMetricHelp['supervision']) ?></th>
                     <th>Avance</th>
                     <th class="no-sort no-export">Acciones</th>
                 </tr>
@@ -620,6 +688,7 @@ if (!function_exists('process_dashboard_help_label')) {
                         <td><?= (int) ($row['users_total'] ?? 0) ?></td>
                         <td><span class="badge text-bg-success"><?= (int) ($row['evaluated'] ?? 0) ?></span></td>
                         <td><span class="badge text-bg-warning"><?= (int) ($row['in_progress'] ?? 0) ?></span></td>
+                        <td><span class="badge text-bg-secondary"><?= (int) ($row['expired'] ?? 0) ?></span></td>
                         <td><span class="badge text-bg-light border"><?= (int) ($row['pending'] ?? 0) ?></span></td>
                         <td>
                             <?php $rankingSummary = is_array($row['ranking_summary'] ?? null) ? $row['ranking_summary'] : []; ?>
@@ -651,7 +720,7 @@ if (!function_exists('process_dashboard_help_label')) {
                         </td>
                         <td style="min-width: 170px;">
                             <div class="d-flex align-items-center gap-2">
-                                <div class="progress flex-grow-1" role="progressbar" aria-valuenow="<?= (int) ($row['progress_percent'] ?? 0) ?>" aria-valuemin="0" aria-valuemax="100" style="height: .6rem;">
+                                <div class="progress flex-grow-1" role="progressbar" aria-label="Avance del proceso" aria-valuenow="<?= (int) ($row['progress_percent'] ?? 0) ?>" aria-valuemin="0" aria-valuemax="100" style="height: .6rem;">
                                     <div class="progress-bar" style="width: <?= (int) ($row['progress_percent'] ?? 0) ?>%;"></div>
                                 </div>
                                 <span class="small text-muted"><?= (int) ($row['progress_percent'] ?? 0) ?>%</span>
@@ -677,12 +746,13 @@ if (!function_exists('process_dashboard_help_label')) {
 <?php endif; ?>
 
 <?php if (!$dashboardSkipScripts): ?>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script src="<?= e(url('assets/coreui/vendors/chart.js/js/chart.umd.js')) ?>"></script>
 <script>
 (function () {
     var embeddedDashboardData = <?= json_encode($chartData, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
     var dashboardDataUrl = <?= json_encode($dashboardDataUrl, JSON_UNESCAPED_SLASHES) ?>;
     var isAsyncShell = <?= $dashboardAsyncShell ? 'true' : 'false' ?>;
+    var isGlobalDashboardAdmin = <?= $dashboardIsGlobalAdmin ? 'true' : 'false' ?>;
 
     window.renderProcessDashboardCharts = function (dashboardData) {
     if (!window.Chart || !dashboardData) {
@@ -819,6 +889,7 @@ if (!function_exists('process_dashboard_help_label')) {
                 datasets: [
                     { label: 'Evaluadas', data: dashboardData.evaluated, backgroundColor: successColor, borderRadius: 5 },
                     { label: 'En evaluacion', data: dashboardData.inProgress, backgroundColor: warningColor, borderRadius: 5 },
+                    { label: 'Con expiradas', data: dashboardData.expired, backgroundColor: '#667085', borderRadius: 5 },
                     { label: 'Pendientes', data: dashboardData.pending, backgroundColor: pendingColor, borderRadius: 5 }
                 ]
             },
@@ -854,14 +925,15 @@ if (!function_exists('process_dashboard_help_label')) {
             type: 'doughnut',
             plugins: [doughnutValueLabels],
             data: {
-                labels: ['Evaluadas', 'En evaluacion', 'Pendientes'],
+                labels: ['Evaluadas', 'En evaluacion', 'Con expiradas', 'Pendientes'],
                 datasets: [{
                     data: [
                         dashboardData.distribution.evaluated,
                         dashboardData.distribution.inProgress,
+                        dashboardData.distribution.expired,
                         dashboardData.distribution.pending
                     ],
-                    backgroundColor: [successColor, warningColor, pendingColor],
+                    backgroundColor: [successColor, warningColor, '#667085', pendingColor],
                     borderColor: styles.getPropertyValue('--card-content-bg').trim() || '#fff',
                     borderWidth: 3
                 }]
@@ -955,6 +1027,16 @@ if (!function_exists('process_dashboard_help_label')) {
             return;
         }
 
+        if (isGlobalDashboardAdmin) {
+            var company = document.querySelector('[data-dashboard-company]');
+            var selected = document.querySelectorAll('[data-dashboard-process-inputs] input[name="process_ids[]"]');
+            if (!company || Number(company.value) <= 0 || !selected.length) {
+                setDashboardLoading(false);
+                content.innerHTML = '<div class="alert alert-info">Selecciona una empresa y al menos un proceso para visualizar el dashboard.</div>';
+                return;
+            }
+        }
+
         setDashboardError('');
         setDashboardLoading(true);
         content.innerHTML = '';
@@ -986,6 +1068,131 @@ if (!function_exists('process_dashboard_help_label')) {
     }
 
     document.addEventListener('DOMContentLoaded', function () {
+        var filterForm = document.querySelector('[data-dashboard-filter-form]');
+        var companySelect = document.querySelector('[data-dashboard-company]');
+        var pickerButton = document.querySelector('[data-dashboard-process-picker]');
+        var pickerTemplate = document.getElementById('dashboardProcessPickerTemplate');
+        var processInputs = document.querySelector('[data-dashboard-process-inputs]');
+        var processCount = document.querySelector('[data-dashboard-process-count]');
+        var processSummary = document.querySelector('[data-dashboard-selection-summary]');
+
+        function syncProcessSelection() {
+            if (!processInputs) return;
+            var checked = document.querySelectorAll('#appDrawerBody [data-dashboard-process-checkbox]:checked');
+            if (!checked.length && !document.querySelector('#appDrawerBody [data-dashboard-process-checkbox]')) {
+                var existing = document.querySelectorAll('[data-dashboard-process-inputs] input[name="process_ids[]"]');
+                if (processCount) processCount.textContent = existing.length + ' seleccionado' + (existing.length === 1 ? '' : 's');
+                if (processSummary) processSummary.textContent = existing.length ? existing.length + ' proceso' + (existing.length === 1 ? '' : 's') : 'Sin selección';
+                if (pickerButton) pickerButton.textContent = existing.length ? 'Modificar selección' : 'Seleccionar procesos';
+                return;
+            }
+            var selectedSet = {};
+            processInputs.querySelectorAll('input[name="process_ids[]"]').forEach(function (input) { selectedSet[input.value] = true; });
+            var pickerTable = document.querySelector('#appDrawerBody table.app-data-table');
+            var tableApi = pickerTable && window.jQuery && window.jQuery.fn.DataTable && window.jQuery.fn.DataTable.isDataTable(pickerTable)
+                ? window.jQuery(pickerTable).DataTable()
+                : null;
+            var activeRows = tableApi
+                ? tableApi.rows({ search: 'applied' }).nodes().toArray()
+                : Array.prototype.slice.call(document.querySelectorAll('#appDrawerBody [data-dashboard-process-row]'));
+            activeRows.filter(function (row) {
+                return !row.classList.contains('d-none') && row.querySelector('[data-dashboard-process-checkbox]');
+            }).forEach(function (row) {
+                var checkbox = row.querySelector('[data-dashboard-process-checkbox]');
+                if (checkbox.checked) selectedSet[checkbox.value] = true;
+                else delete selectedSet[checkbox.value];
+            });
+            processInputs.innerHTML = '';
+            Object.keys(selectedSet).forEach(function (value) {
+                var input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = 'process_ids[]';
+                input.value = value;
+                processInputs.appendChild(input);
+            });
+            var count = Object.keys(selectedSet).length;
+            if (processCount) processCount.textContent = count + ' seleccionado' + (count === 1 ? '' : 's');
+            if (processSummary) processSummary.textContent = count ? count + ' proceso' + (count === 1 ? '' : 's') : 'Sin selección';
+            if (pickerButton) pickerButton.textContent = count ? 'Modificar selección' : 'Seleccionar procesos';
+        }
+
+        function filterPickerRows(clearSelection) {
+            var companyId = companySelect ? companySelect.value : '<?= (int) $dashboardCompanyId ?>';
+            if (clearSelection && processInputs) processInputs.innerHTML = '';
+            document.querySelectorAll('[data-dashboard-process-row]').forEach(function (row) {
+                var matches = !isGlobalDashboardAdmin || (companyId !== '0' && row.getAttribute('data-company-id') === companyId);
+                row.classList.toggle('d-none', !matches);
+                if (!matches) row.querySelector('input[type="checkbox"]').checked = false;
+            });
+            syncProcessSelection();
+            if (pickerButton) pickerButton.disabled = isGlobalDashboardAdmin && companyId === '0';
+        }
+
+        if (companySelect) companySelect.addEventListener('change', function () { filterPickerRows(true); });
+        if (pickerButton && pickerTemplate) pickerButton.addEventListener('click', function () {
+            window.AppDrawer.open({
+                title: 'Seleccionar procesos',
+                size: 'lg',
+                html: pickerTemplate.innerHTML
+            });
+            window.setTimeout(function () {
+                var drawer = document.getElementById('appDrawerBody');
+                var companyId = companySelect ? companySelect.value : '<?= (int) $dashboardCompanyId ?>';
+                var selectedValues = Array.prototype.map.call(processInputs.querySelectorAll('input[name="process_ids[]"]'), function (input) { return input.value; });
+                var pickerTable = drawer.querySelector('table.app-data-table');
+                var selectAll = drawer.querySelector('[data-dashboard-process-select-all]');
+
+                function getSelectableProcessRows() {
+                    if (!pickerTable) return [];
+                    var tableApi = window.jQuery && window.jQuery.fn.DataTable && window.jQuery.fn.DataTable.isDataTable(pickerTable)
+                        ? window.jQuery(pickerTable).DataTable()
+                        : null;
+                    var rows = tableApi ? tableApi.rows({ search: 'applied' }).nodes().toArray() : Array.prototype.slice.call(pickerTable.querySelectorAll('[data-dashboard-process-row]'));
+                    return rows.filter(function (row) {
+                        return !row.classList.contains('d-none') && row.querySelector('[data-dashboard-process-checkbox]');
+                    });
+                }
+
+                function syncSelectAllState() {
+                    if (!selectAll) return;
+                    var rows = getSelectableProcessRows();
+                    var checkedCount = rows.filter(function (row) { return row.querySelector('[data-dashboard-process-checkbox]').checked; }).length;
+                    selectAll.checked = rows.length > 0 && checkedCount === rows.length;
+                    selectAll.indeterminate = checkedCount > 0 && checkedCount < rows.length;
+                    selectAll.disabled = rows.length === 0;
+                }
+
+                drawer.querySelectorAll('[data-dashboard-process-checkbox]').forEach(function (checkbox) {
+                    var row = checkbox.closest('[data-dashboard-process-row]');
+                    var visible = !isGlobalDashboardAdmin || (companyId !== '0' && row.getAttribute('data-company-id') === companyId);
+                    row.classList.toggle('d-none', !visible);
+                    checkbox.checked = visible && selectedValues.indexOf(checkbox.value) !== -1;
+                    checkbox.addEventListener('change', function () {
+                        document.querySelectorAll('[data-dashboard-process-checkbox][value="' + checkbox.value + '"]').forEach(function (other) { other.checked = checkbox.checked; });
+                        syncProcessSelection();
+                        syncSelectAllState();
+                    });
+                });
+                if (selectAll) {
+                    selectAll.addEventListener('change', function () {
+                        getSelectableProcessRows().forEach(function (row) {
+                            row.querySelector('[data-dashboard-process-checkbox]').checked = selectAll.checked;
+                        });
+                        syncProcessSelection();
+                        syncSelectAllState();
+                    });
+                }
+                if (pickerTable && window.jQuery && window.jQuery.fn.DataTable && window.jQuery.fn.DataTable.isDataTable(pickerTable)) {
+                    window.jQuery(pickerTable).on('draw.dt.dashboardProcessPicker', syncSelectAllState);
+                }
+                syncSelectAllState();
+            }, 0);
+        });
+        if (filterForm) filterForm.addEventListener('submit', function () {
+            syncProcessSelection();
+        });
+        filterPickerRows(false);
+
         document.querySelectorAll('[data-process-dashboard-refresh]').forEach(function (button) {
             button.addEventListener('click', loadDashboardData);
         });

@@ -10,17 +10,33 @@ defined('PUBLIC_PATH') || define('PUBLIC_PATH', BASE_PATH . '/public');
 defined('TMP_PATH') || define('TMP_PATH', BASE_PATH . '/tmp');
 
 require_once SISTEMA_PATH . '/core/security.php';
-enforce_https_policy(load_config('app'));
 
 $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
-$scriptName = (string) ($_SERVER['SCRIPT_NAME'] ?? '');
+$scriptName = str_replace('\\', '/', (string) ($_SERVER['SCRIPT_NAME'] ?? ''));
 $basePath = $scriptName !== '' ? rtrim(str_replace('\\', '/', dirname($scriptName)), '/') : '';
+$hasPhysicalBasePath = $basePath !== ''
+    && $basePath !== '.'
+    && $basePath !== '/';
+$pathUsesPhysicalBase = $hasPhysicalBasePath
+    && ($path === $basePath || strpos($path, $basePath . '/') === 0);
 
-if ($basePath !== '' && $basePath !== '.' && $basePath !== '/' && ($path === $basePath || strpos($path, $basePath . '/') === 0)) {
-    $path = substr($path, strlen($basePath)) ?: '/';
+if ($pathUsesPhysicalBase) {
+    $cleanPath = substr($path, strlen($basePath)) ?: '/';
+    $queryString = trim((string) ($_SERVER['QUERY_STRING'] ?? ''));
+    $location = $cleanPath . ($queryString !== '' ? '?' . $queryString : '');
+
+    // Canonicaliza solicitudes que llegaron con la ruta física expuesta.
+    // Se conserva íntegramente lo que siga al directorio public, incluido
+    // cualquier prefijo de empresa utilizado por la plataforma.
+    header('Location: ' . $location, true, 302);
+    exit;
 }
 
-$file = __DIR__ . $path;
+// Cuando el proyecto está detrás de una reescritura desde public_html,
+// SCRIPT_NAME puede contener la ruta física del servidor. La plataforma debe
+// generar sus URLs desde la raíz pública del dominio, no desde ese directorio.
+$_SERVER['SCRIPT_NAME'] = '/router.php';
+enforce_https_policy(load_config('app'));
 
 function configure_router_timezone(): void
 {
@@ -121,6 +137,7 @@ function protected_file_mime_type(string $file): string
         'ttf' => 'font/ttf',
         'eot' => 'application/vnd.ms-fontobject',
         'pdf' => 'application/pdf',
+        'wasm' => 'application/wasm',
     ];
 
     return $mimeTypes[$extension] ?? 'application/octet-stream';
@@ -150,6 +167,29 @@ function serve_protected_public_file(string $path, string $file): void
 
 configure_router_timezone();
 require_once dirname(__DIR__) . '/sistema/bootstrap.php';
+
+$companyContext = company_url_context_for_path($path);
+set_company_url_context($companyContext);
+remember_navigation();
+if ($companyContext) {
+    $prefix = trim((string) ($companyContext['url_prefix'] ?? ''), '/');
+    $prefixPath = '/' . $prefix;
+    $path = $path === $prefixPath ? '/' : substr($path, strlen($prefixPath)) ?: '/';
+}
+
+$file = __DIR__ . $path;
+$isSharedProtectedAsset = is_protected_asset_path($path) && is_file($file);
+
+if (current_user() && (int) (current_user()['company_id'] ?? 0) > 0) {
+    $userCompanyId = (int) current_user()['company_id'];
+    if (!$companyContext && !$isSharedProtectedAsset) {
+        $redirectPath = trim($path, '/');
+        redirect(company_route_path($redirectPath));
+    }
+    if ($companyContext && (int) ($companyContext['id'] ?? 0) !== $userCompanyId) {
+        platform_error(403, 'El usuario no pertenece a la empresa indicada en la URL.');
+    }
+}
 
 if ($path === '/favicon.ico' && !is_file($file)) {
     http_response_code(204);
@@ -185,6 +225,81 @@ try {
         return;
     }
 
+    if ($segments === ['verificar-usuario']) {
+        (new UserVerificationController())->index();
+        return;
+    }
+
+    if ($segments === ['reconocimiento-facial', 'enrolar']) {
+        (new FacialRecognitionController())->enroll();
+        return;
+    }
+
+    if ($segments === ['reconocimiento-facial', 'enrolados']) {
+        (new FacialRecognitionController())->enrolledUsers();
+        return;
+    }
+
+    if ($segments === ['administrador-cliente', 'reportes', 'incidencias-tests']) {
+        (new ClientAdminController())->testIncidents();
+        return;
+    }
+
+    if ($segments === ['administrador-cliente', 'inicio']) {
+        (new ClientAdminController())->dashboard();
+        return;
+    }
+
+    if ($segments === ['administrador-cliente', 'reportes', 'incidencias-evaluaciones']) {
+        (new EvaluationSurveyController())->dashboardIntegrityReport();
+        return;
+    }
+
+    if ($segments === ['administrador-cliente', 'avance', 'evaluaciones']) {
+        (new ClientAdminController())->evaluationProgress();
+        return;
+    }
+
+    if ($segments === ['administrador-cliente', 'avance', 'tests']) {
+        (new ClientAdminController())->testProgress();
+        return;
+    }
+
+    if ($segments === ['administrador-cliente', 'avance', 'consultar-usuario']) {
+        (new ClientAdminController())->userLookup();
+        return;
+    }
+
+    if ($segments === ['administrador-cliente', 'avance', 'revision-componentes']) {
+        (new ClientAdminController())->componentReviews();
+        return;
+    }
+
+    if ($segments === ['administrador-cliente', 'procesos', 'verificacion-usuarios']) {
+        (new ClientAdminController())->userVerifications();
+        return;
+    }
+
+    if ($segments === ['componentes', 'revision']) {
+        (new ComponentValidationController())->review();
+        return;
+    }
+
+    if ($segments === ['reconocimiento-facial', 'desafio']) {
+        (new FacialRecognitionController())->startChallenge();
+        return;
+    }
+
+    if ($segments === ['reconocimiento-facial', 'validar-identidad']) {
+        (new FacialRecognitionController())->validateIdentity();
+        return;
+    }
+
+    if ($segments === ['reconocimiento-facial', 'ingreso-evaluacion']) {
+        (new FacialRecognitionController())->assessmentEntry();
+        return;
+    }
+
     if ($segments === ['login']) {
         (new AuthController())->login();
         return;
@@ -210,6 +325,11 @@ try {
         return;
     }
 
+    if ($segments === ['my-tests', 'realizadas']) {
+        (new TestController())->mineCompleted();
+        return;
+    }
+
     if ($segments === ['my-tests', 'status']) {
         (new TestController())->mineStatus();
         return;
@@ -217,6 +337,11 @@ try {
 
     if ($segments === ['tests']) {
         (new TestController())->index();
+        return;
+    }
+
+    if ($segments === ['tests', 'company-assignments']) {
+        (new TestController())->companyAssignments();
         return;
     }
 
@@ -235,6 +360,11 @@ try {
         return;
     }
 
+    if ($segments === ['tests', 'ranking-company-assignments']) {
+        (new TestController())->rankingCompanyAssignments();
+        return;
+    }
+
     if ($segments === ['tests', 'progress', 'export']) {
         (new TestController())->progressExport();
         return;
@@ -247,6 +377,81 @@ try {
 
     if ($segments === ['tests', 'assign']) {
         (new TestController())->assign();
+        return;
+    }
+
+    if ($segments === ['reports', 'generate']) {
+        (new ReportController())->generate();
+        return;
+    }
+
+    if ($segments === ['reports', 'generate', 'new']) {
+        (new ReportController())->form();
+        return;
+    }
+
+    if ($segments === ['reports', 'company-assignments']) {
+        (new ReportController())->companyAssignments();
+        return;
+    }
+
+    if ($segments === ['reports', 'history']) {
+        (new ReportController())->history();
+        return;
+    }
+
+    if ($segments === ['reports', 'batches']) {
+        (new ReportController())->batches();
+        return;
+    }
+
+    if ($segments === ['reports', 'batches', 'status']) {
+        (new ReportController())->batchStatus();
+        return;
+    }
+
+    if ($segments === ['reports', 'batches', 'download']) {
+        (new ReportController())->batchDownload();
+        return;
+    }
+
+    if ($segments === ['reports', 'batches', 'status']) {
+        (new ReportController())->batchStatus();
+        return;
+    }
+
+    if ($segments === ['reports', 'batches', 'download']) {
+        (new ReportController())->batchDownload();
+        return;
+    }
+
+    if (($segments[0] ?? '') === 'reports' && ($segments[1] ?? '') === 'generate' && count($segments) >= 4 && ($segments[3] ?? '') === 'edit') {
+        $_GET['sid'] = $segments[2];
+        (new ReportController())->form();
+        return;
+    }
+
+    if (($segments[0] ?? '') === 'reports' && ($segments[1] ?? '') === 'generate' && count($segments) >= 4 && ($segments[3] ?? '') === 'run') {
+        $_GET['sid'] = $segments[2];
+        (new ReportController())->run();
+      return;
+    }
+
+    if (($segments[0] ?? '') === 'reports' && ($segments[1] ?? '') === 'generate' && count($segments) >= 4 && ($segments[3] ?? '') === 'approve') {
+        $_GET['sid'] = $segments[2];
+        (new ReportController())->approve();
+        return;
+    }
+
+    if (($segments[0] ?? '') === 'reports' && ($segments[1] ?? '') === 'generate' && count($segments) >= 4 && ($segments[3] ?? '') === 'delete') {
+        $_GET['sid'] = $segments[2];
+        (new ReportController())->delete();
+        return;
+    }
+
+    if (($segments[0] ?? '') === 'reports' && ($segments[1] ?? '') === 'generate' && count($segments) >= 4 && ($segments[3] ?? '') === 'batch') {
+        $_GET['sid'] = $segments[2];
+        (new ReportController())->batchRun();
         return;
     }
 
@@ -358,13 +563,33 @@ try {
             return;
         }
 
+        if (($segments[3] ?? '') === 'cancel-evaluation-assignment') {
+            (new TestProcessController())->cancelEvaluationAssignment();
+            return;
+        }
+
         if (($segments[3] ?? '') === 'reset-session') {
             (new TestProcessController())->resetSession();
             return;
         }
 
+        if (($segments[3] ?? '') === 'reset-evaluation-assignment') {
+            (new TestProcessController())->resetEvaluationAssignment();
+            return;
+        }
+
+        if (($segments[3] ?? '') === 'reopen-expired-evaluation-assignment') {
+            (new TestProcessController())->reopenExpiredEvaluationAssignment();
+            return;
+        }
+
         if (($segments[3] ?? '') === 'reopen-session') {
             (new TestProcessController())->reopenSession();
+            return;
+        }
+
+        if (($segments[3] ?? '') === 'reopen-saved-session') {
+            (new TestProcessController())->reopenSavedSession();
             return;
         }
 
@@ -452,6 +677,132 @@ try {
         return;
     }
 
+    if ($segments === ['evaluaciones-encuestas', 'evaluaciones'] || $segments === ['evaluaciones-encuestas', 'encuestas']) {
+        $_GET['type'] = $segments[1] === 'encuestas' ? 'survey' : 'assessment';
+        (new EvaluationSurveyController())->index();
+        return;
+    }
+
+    if ($segments === ['evaluaciones-encuestas', 'dashboard']) {
+        (new EvaluationSurveyController())->dashboard();
+        return;
+    }
+
+    if ($segments === ['evaluaciones-encuestas', 'dashboard', 'resumen.xlsx']) {
+        (new EvaluationSurveyController())->dashboardSummaryExport();
+        return;
+    }
+
+    if ($segments === ['evaluaciones-encuestas', 'dashboard', 'incidencias']) {
+        (new EvaluationSurveyController())->dashboardIntegrityReport();
+        return;
+    }
+
+    if ($segments === ['evaluaciones-encuestas', 'dashboard', 'incidencias', 'pdf']) {
+        (new EvaluationSurveyController())->dashboardIntegrityReportPdf();
+        return;
+    }
+
+    if ($segments === ['evaluaciones-encuestas', 'dashboard', 'incidencias', 'xlsx']) {
+        (new EvaluationSurveyController())->dashboardIntegrityReportExcel();
+        return;
+    }
+
+    if (($segments[0] ?? '') === 'evaluaciones-encuestas' && ($segments[1] ?? '') === 'dashboard' && ($segments[2] ?? '') === 'resultados' && count($segments) === 4) {
+        $_GET['sid'] = $segments[3];
+        (new EvaluationSurveyController())->dashboardResults();
+        return;
+    }
+
+    if (($segments[0] ?? '') === 'evaluaciones-encuestas' && ($segments[1] ?? '') === 'dashboard' && ($segments[2] ?? '') === 'resultados' && count($segments) === 5 && ($segments[4] ?? '') === 'export') {
+        $_GET['sid'] = $segments[3];
+        (new EvaluationSurveyController())->dashboardResultsExport();
+        return;
+    }
+
+    if (($segments[0] ?? '') === 'evaluaciones-encuestas' && ($segments[1] ?? '') === 'dashboard' && ($segments[2] ?? '') === 'resultados' && count($segments) === 5 && ($segments[4] ?? '') === 'reprocesar') {
+        $_GET['sid'] = $segments[3];
+        (new EvaluationSurveyController())->dashboardResultsReprocess();
+        return;
+    }
+
+    if (($segments[0] ?? '') === 'evaluaciones-encuestas' && ($segments[1] ?? '') === 'dashboard' && ($segments[2] ?? '') === 'resultados' && count($segments) === 5 && ($segments[4] ?? '') === 'reprocesar-media') {
+        $_GET['sid'] = $segments[3];
+        (new EvaluationSurveyController())->dashboardResultsMediaRecovery();
+        return;
+    }
+
+    if ($segments === ['evaluaciones-encuestas', 'formularios', 'new']) {
+        (new EvaluationSurveyController())->form();
+        return;
+    }
+
+    if ($segments === ['evaluaciones-encuestas', 'formularios', 'moodle-import']) {
+        (new EvaluationSurveyController())->moodleImport();
+        return;
+    }
+
+    if ($segments === ['evaluaciones-encuestas', 'ai-settings']) {
+        (new EvaluationSurveyController())->aiSettings();
+        return;
+    }
+
+    if ($segments === ['evaluaciones-encuestas', 'ai-generate']) {
+        (new EvaluationSurveyController())->aiGenerate();
+        return;
+    }
+
+    if (($segments[0] ?? '') === 'evaluaciones-encuestas' && ($segments[1] ?? '') === 'formularios' && count($segments) >= 4) {
+        $_GET['sid'] = $segments[2];
+        $action = $segments[3];
+        if ($action === 'edit') { (new EvaluationSurveyController())->form(); return; }
+        if ($action === 'preview') { (new EvaluationSurveyController())->preview(); return; }
+        if ($action === 'take') { (new EvaluationSurveyController())->take(); return; }
+        if ($action === 'delete') { (new EvaluationSurveyController())->deleteForm(); return; }
+        if ($action === 'duplicate') { (new EvaluationSurveyController())->duplicateForm(); return; }
+        if ($action === 'questions' && ($segments[4] ?? '') === 'new') { $_GET['form_sid'] = $segments[2]; (new EvaluationSurveyController())->questionForm(); return; }
+        if ($action === 'questions' && ($segments[4] ?? '') === 'reorder') { (new EvaluationSurveyController())->reorderQuestions(); return; }
+    }
+
+    if (($segments[0] ?? '') === 'evaluaciones-encuestas' && ($segments[1] ?? '') === 'preguntas' && count($segments) >= 4) {
+        $_GET['sid'] = $segments[2];
+        if (($segments[3] ?? '') === 'edit') { (new EvaluationSurveyController())->questionForm(); return; }
+        if (($segments[3] ?? '') === 'delete') { (new EvaluationSurveyController())->deleteQuestion(); return; }
+    }
+
+    if (($segments[0] ?? '') === 'evaluaciones-encuestas' && ($segments[1] ?? '') === 'preguntas-media' && count($segments) === 3) {
+        $_GET['sid'] = $segments[2];
+        (new EvaluationSurveyController())->questionMedia();
+        return;
+    }
+
+    if (($segments[0] ?? '') === 'evaluaciones-encuestas' && ($segments[1] ?? '') === 'intentos' && count($segments) === 4 && ($segments[3] ?? '') === 'result') {
+        $_GET['sid'] = $segments[2];
+        (new EvaluationSurveyController())->result();
+        return;
+    }
+
+    if (($segments[0] ?? '') === 'evaluaciones-encuestas' && ($segments[1] ?? '') === 'intentos' && count($segments) === 4 && ($segments[3] ?? '') === 'activity') {
+        $_GET['sid'] = $segments[2];
+        (new EvaluationSurveyController())->activity();
+        return;
+    }
+
+    if (($segments[0] ?? '') === 'evaluaciones-encuestas' && ($segments[1] ?? '') === 'intentos' && count($segments) === 5 && ($segments[3] ?? '') === 'media') {
+        $_GET['sid'] = $segments[2];
+        $mediaAction = $segments[4] ?? '';
+        if ($mediaAction === 'init') { (new EvaluationSurveyController())->mediaInit(); return; }
+        if ($mediaAction === 'status') { (new EvaluationSurveyController())->mediaStatus(); return; }
+        if ($mediaAction === 'chunk') { (new EvaluationSurveyController())->mediaChunk(); return; }
+        if ($mediaAction === 'finalize') { (new EvaluationSurveyController())->mediaFinalize(); return; }
+        if ($mediaAction === 'risk') { (new EvaluationSurveyController())->mediaRisk(); return; }
+        if ($mediaAction === 'failure') { (new EvaluationSurveyController())->mediaFailure(); return; }
+        if ($mediaAction === 'screenshot') { (new EvaluationSurveyController())->mediaScreenshot(); return; }
+        if ($mediaAction === 'screenshot-file') { (new EvaluationSurveyController())->mediaScreenshotFile(); return; }
+        if ($mediaAction === 'evidence') { (new EvaluationSurveyController())->mediaEvidence(); return; }
+        if ($mediaAction === 'partial') { (new EvaluationSurveyController())->mediaPartial(); return; }
+    }
+
     if ($segments === ['tests', 'results', 'clear']) {
         (new TestController())->clearAllResults();
         return;
@@ -498,8 +849,24 @@ try {
             (new TestController())->mediaRisk();
             return;
         }
+        if (($segments[3] ?? '') === 'media' && ($segments[4] ?? '') === 'failure') {
+            (new TestController())->mediaFailure();
+            return;
+        }
+        if (($segments[3] ?? '') === 'media' && ($segments[4] ?? '') === 'screenshot') {
+            (new TestController())->mediaScreenshot();
+            return;
+        }
+        if (($segments[3] ?? '') === 'media' && ($segments[4] ?? '') === 'screenshot-file') {
+            (new TestController())->mediaScreenshotFile();
+            return;
+        }
         if (($segments[3] ?? '') === 'media' && ($segments[4] ?? '') === 'evidence') {
             (new TestController())->mediaEvidence();
+            return;
+        }
+        if (($segments[3] ?? '') === 'media' && ($segments[4] ?? '') === 'partial') {
+            (new TestController())->mediaPartial();
             return;
         }
         if (($segments[3] ?? '') === 'draft') {
@@ -633,6 +1000,18 @@ try {
         return;
     }
 
+    if (($segments[0] ?? '') === 'companies' && count($segments) === 3 && $segments[2] === 'delete') {
+        $_GET['sid'] = $segments[1];
+        (new CompanyController())->delete();
+        return;
+    }
+
+    if (($segments[0] ?? '') === 'companies' && count($segments) === 3 && $segments[2] === 'cleanup-users') {
+        $_GET['sid'] = $segments[1];
+        (new CompanyController())->cleanupUsers();
+        return;
+    }
+
     if ($segments === ['profiles']) {
         (new ProfileController())->index();
         return;
@@ -676,6 +1055,13 @@ try {
         return;
     }
 } catch (Throwable $exception) {
+    security_log(sprintf(
+        'Unhandled exception %s at %s:%d :: %s',
+        get_class($exception),
+        $exception->getFile(),
+        $exception->getLine(),
+        $exception->getMessage()
+    ));
     platform_error(500, 'Ocurrio un error interno.', [
         'log' => true,
         'detailRows' => [

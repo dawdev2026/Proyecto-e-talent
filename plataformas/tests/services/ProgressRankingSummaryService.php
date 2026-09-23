@@ -44,7 +44,9 @@ final class ProgressRankingSummaryService
                 $person['cag_raw'] = $this->cagRawScore($summary);
                 $person['session_ids']['cag'] = (int) ($session['id'] ?? 0);
             } elseif ($code === 'ticl_barratt') {
-                $person['ticl_total'] = $this->summaryValueByNames($summary, ['Impulsividad total'], ['raw_score', 'score', 'adjusted_score', 'transformed_score']);
+                $person['ticl_total'] = $this->validTiclTotal(
+                    $this->summaryValueByNames($summary, ['Impulsividad total'], ['raw_score', 'score', 'adjusted_score', 'transformed_score'])
+                );
                 $person['session_ids']['ticl_barratt'] = (int) ($session['id'] ?? 0);
             }
 
@@ -466,6 +468,7 @@ final class ProgressRankingSummaryService
             'Impulsividad Total TICL' => $person['ticl_total'] !== null ? $this->round((float) $person['ticl_total']) : '-',
             '_process_id' => (int) ($person['process_id'] ?? 0),
             '_user_id' => (int) ($person['user_id'] ?? 0),
+            '_company_id' => (int) ($person['company_id'] ?? 0),
             '_report_session_id' => (int) (($person['session_ids']['ipip_16pf'] ?? 0) ?: ($person['session_ids']['cag'] ?? 0) ?: ($person['session_ids']['ticl_barratt'] ?? 0)),
         ];
     }
@@ -615,6 +618,16 @@ final class ProgressRankingSummaryService
         }
 
         return isset($ipip[$metric]) && is_numeric($ipip[$metric]) ? (float) $ipip[$metric] : null;
+    }
+
+    private function validTiclTotal($value): ?float
+    {
+        if (!is_numeric($value)) {
+            return null;
+        }
+
+        $total = (float) $value;
+        return $total >= 30.0 && $total <= 120.0 ? $total : null;
     }
 
     private function requiredIpipKeys(array $config): array

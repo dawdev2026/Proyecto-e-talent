@@ -103,6 +103,13 @@ function enforce_https_policy(array $config): void
     exit;
 }
 
+function facial_script_eval_allowed_for_path(string $requestPath): bool
+{
+    return preg_match('#(?:^|/)reconocimiento-facial/(?:enrolar|enrolados|validar-identidad|ingreso-evaluacion)/?$#', $requestPath) === 1
+        || preg_match('#(?:^|/)tests/session/[^/]+/?$#', $requestPath) === 1
+        || preg_match('#(?:^|/)evaluaciones-encuestas/formularios/[^/]+/take/?$#', $requestPath) === 1;
+}
+
 function send_security_headers(): void
 {
     if (headers_sent()) {
@@ -116,7 +123,13 @@ function send_security_headers(): void
     header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
     header('Pragma: no-cache');
     header('Expires: Thu, 01 Jan 1970 00:00:00 GMT');
-    header("Content-Security-Policy: default-src 'self'; connect-src 'self' https://api.daily.co https://*.daily.co wss://*.daily.co; frame-src 'self' https://*.daily.co; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; script-src 'self' 'unsafe-inline' https://code.jquery.com https://cdn.jsdelivr.net; font-src 'self' https://cdn.jsdelivr.net https://fonts.gstatic.com data:; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self'");
+    $requestPath = parse_url((string) ($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH) ?: '/';
+    // FaceX/OpenCV necesitan evaluar código generado durante la inicialización.
+    // Limita la excepción a las pantallas faciales y a las páginas exactas de
+    // entrada a pruebas/evaluaciones que cargan esas bibliotecas; nunca la
+    // habilites para el resto de rutas ni para endpoints de sesión/media.
+    $facialScriptPolicy = facial_script_eval_allowed_for_path($requestPath) ? " 'unsafe-eval'" : '';
+    header("Content-Security-Policy: default-src 'self'; connect-src 'self' data: https://api.daily.co https://*.daily.co wss://*.daily.co https://cdn.jsdelivr.net https://github.com https://release-assets.githubusercontent.com https://objects.githubusercontent.com; frame-src 'self' https://*.daily.co; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'{$facialScriptPolicy} https://code.jquery.com https://cdn.jsdelivr.net; font-src 'self' https://cdn.jsdelivr.net https://fonts.gstatic.com data:; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self'");
 
     if (request_is_secure()) {
         header('Strict-Transport-Security: max-age=31536000; includeSubDomains');

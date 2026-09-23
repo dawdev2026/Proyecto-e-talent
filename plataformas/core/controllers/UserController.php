@@ -29,12 +29,9 @@ final class UserController extends Controller
     {
         require_company_user_management();
 
-        $listFields = $this->fields->listableForUsers();
-
         $this->render('users/index', [
-            'title' => 'Usuarios | Metricatest',
+            'title' => 'Usuarios | e-talent',
             'currentPage' => 'users',
-            'listFields' => $listFields,
         ]);
     }
 
@@ -50,20 +47,13 @@ final class UserController extends Controller
         $order = is_array($_GET['order'][0] ?? null) ? $_GET['order'][0] : [];
         $orderColumn = (int) ($order['column'] ?? 0);
         $orderDir = (string) ($order['dir'] ?? 'asc');
-        $listFields = $this->fields->listableForUsers();
         $page = $this->users->usersDataPage($search, $start, $length, $orderColumn, $orderDir);
-        $fieldValuesByUser = $this->fields->valuesForUsers(
-            array_map(static fn(array $user): int => (int) $user['id'], $page['rows']),
-            $listFields
-        );
 
         $this->jsonResponse([
             'draw' => $draw,
             'recordsTotal' => (int) $page['total'],
             'recordsFiltered' => (int) $page['filtered'],
-            'data' => array_map(function (array $user) use ($listFields, $fieldValuesByUser): array {
-                return $this->userTableRow($user, $listFields, $fieldValuesByUser);
-            }, $page['rows']),
+            'data' => array_map(fn(array $user): array => $this->userTableRow($user), $page['rows']),
         ]);
     }
 
@@ -74,11 +64,16 @@ final class UserController extends Controller
         $id = request_secure_id('user');
         $requester = $id ? $this->users->findUser($id) : null;
         $isDrawer = (string) ($_GET['drawer'] ?? '') === '1';
+        $isCompanyAdmin = is_company_admin_user() || (has_permission('manage_company_users') && !has_permission('manage_users'));
+        $defaultProfile = $this->profiles->defaultRequesterProfile();
 
         if ($id && !$requester) {
             platform_error(404, 'Usuario no encontrado.', [
                 'chips' => ['Usuario'],
             ]);
+        }
+        if (is_array($requester)) {
+            $requester['sex'] = $this->normalizeSex(trim((string) ($requester['sex'] ?? '')));
         }
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -92,7 +87,7 @@ final class UserController extends Controller
         $fieldDefinitions = $this->fields->activeForUsers();
 
         $this->render('users/form', [
-            'title' => ($id ? 'Editar usuario' : 'Nuevo usuario') . ' | Metricatest',
+            'title' => ($id ? 'Editar usuario' : 'Nuevo usuario') . ' | e-talent',
             'currentPage' => 'users',
             'companies' => $this->users->companies(),
             'profiles' => $this->activeProfilesForUserForm(),
@@ -106,12 +101,12 @@ final class UserController extends Controller
                 'first_names' => '',
                 'last_names' => '',
                 'email' => '',
-                'sex' => '',
+                'sex' => 'no_informado',
                 'birth_date' => '',
                 'age' => '',
                 'role' => 'usuario',
-                'profile_id' => '',
-                'company_id' => '',
+                'profile_id' => $isCompanyAdmin ? (int) ($defaultProfile['id'] ?? 0) : '',
+                'company_id' => $isCompanyAdmin ? (int) (current_user()['company_id'] ?? 0) : '',
                 'is_active' => 1,
             ],
         ], $isDrawer ? null : 'app');
@@ -148,7 +143,7 @@ final class UserController extends Controller
         }
 
         $this->render('users/import', [
-            'title' => 'Carga masiva de usuarios | Metricatest',
+            'title' => 'Carga masiva de usuarios | e-talent',
             'currentPage' => 'users',
             'fieldDefinitions' => $fieldDefinitions,
             'defaultProfile' => $defaultProfile,
@@ -305,13 +300,15 @@ final class UserController extends Controller
         verify_csrf();
         $isAjax = $this->isAjaxRequest();
 
+        try {
+
         $data = [
             'rut' => UserModel::formatRut(trim($_POST['rut'] ?? '')),
             'role' => 'usuario',
             'first_names' => trim($_POST['first_names'] ?? ''),
             'last_names' => trim($_POST['last_names'] ?? ''),
             'email' => trim($_POST['email'] ?? ''),
-            'sex' => $_POST['sex'] ?? '',
+            'sex' => $this->normalizeSex(trim((string) ($_POST['sex'] ?? ''))),
             'birth_date' => $this->normalizeBirthDateInput(trim($_POST['birth_date'] ?? '')),
             'age' => trim((string) ($_POST['age'] ?? '')),
             'password' => $_POST['password'] ?? '',
@@ -319,7 +316,7 @@ final class UserController extends Controller
             'company_id' => (int) ($_POST['company_id'] ?? 0),
             'is_active' => isset($_POST['is_active']) ? 1 : 0,
         ];
-        $isCompanyAdmin = has_permission('manage_company_users') && !has_permission('manage_users');
+        $isCompanyAdmin = is_company_admin_user() || (has_permission('manage_company_users') && !has_permission('manage_users'));
         if ($isCompanyAdmin) {
             $data['role'] = 'usuario';
             $data['company_id'] = (int) (current_user()['company_id'] ?? 0);
@@ -349,7 +346,6 @@ final class UserController extends Controller
             return ['ok' => false, 'message' => $error];
         }
 
-        try {
             if ($id) {
                 $currentUser = $this->users->findUser($id);
                 if ($currentUser && (string) ($currentUser['role'] ?? '') === 'company_admin' && (int) ($currentUser['is_active'] ?? 0) === 1 && (int) $data['is_active'] === 0) {
@@ -377,17 +373,42 @@ final class UserController extends Controller
                 flash('success', 'Usuario creado correctamente.');
             }
             redirect(route_url('users'));
-        } catch (PDOException $exception) {
+        } catch (Throwable $exception) {
+            $reference = 'USER-SAVE-' . date('YmdHis') . '-' . strtoupper(bin2hex(random_bytes(3)));
+            error_log(sprintf(
+                'User save failed [%s]: %s: %s',
+                $reference,
+                get_class($exception),
+                $exception->getMessage()
+            ));
+
+            $message = $this->userSaveExceptionMessage($exception, $reference);
+
             if (!$isAjax) {
-                flash('danger', 'No se pudo guardar el usuario. Revisa si el correo ya existe.');
+                flash('danger', $message);
             }
-            return ['ok' => false, 'message' => 'No se pudo guardar el usuario. Revisa si el correo ya existe.'];
+            return ['ok' => false, 'message' => $message, 'reference' => $reference];
         }
 
         return ['ok' => true, 'message' => 'Usuario guardado correctamente.'];
     }
 
-    private function userTableRow(array $user, array $listFields, array $fieldValuesByUser): array
+    private function userSaveExceptionMessage(Throwable $exception, string $reference): string
+    {
+        $exceptionMessage = $exception->getMessage();
+        if (str_contains($exceptionMessage, 'uq_users_rut')) {
+            return 'Ya existe un usuario con ese RUT.';
+        }
+        if (str_contains($exceptionMessage, 'uq_users_email')) {
+            return 'Ya existe un usuario con ese correo.';
+        }
+
+        // El detalle técnico queda registrado mediante error_log() arriba,
+        // pero nunca debe exponerse en la interfaz, tampoco en Desarrollo.
+        return 'No se pudo guardar el usuario [' . $reference . ']. Revisa los datos e inténtalo nuevamente.';
+    }
+
+    private function userTableRow(array $user): array
     {
         $row = [
             '<span class="fw-semibold">' . e((string) ($user['rut'] ?? '')) . '</span>',
@@ -400,11 +421,6 @@ final class UserController extends Controller
             e((string) ($user['profile_name'] ?? 'Sin perfil')),
             e((string) ($user['company_name'] ?? 'Sin empresa')),
         ];
-
-        foreach ($listFields as $field) {
-            $value = $fieldValuesByUser[(int) $user['id']][(int) $field['id']] ?? '';
-            $row[] = e((string) ($field['field_type'] === 'checkbox' ? ($value === '1' ? 'Si' : 'No') : $value));
-        }
 
         $row[] = '<span class="badge ' . ((int) ($user['is_active'] ?? 0) === 1 ? 'text-bg-success' : 'text-bg-secondary') . '">' . ((int) ($user['is_active'] ?? 0) === 1 ? 'Activo' : 'Inactivo') . '</span>';
         $editUrl = route_url('user.edit', (int) $user['id']);
@@ -534,7 +550,7 @@ final class UserController extends Controller
                 'first_names' => trim((string) (($postedRow['data'] ?? [])['first_names'] ?? '')),
                 'last_names' => trim((string) (($postedRow['data'] ?? [])['last_names'] ?? '')),
                 'email' => trim((string) (($postedRow['data'] ?? [])['email'] ?? '')),
-                'sex' => trim((string) (($postedRow['data'] ?? [])['sex'] ?? '')),
+                'sex' => $this->normalizeSex(trim((string) (($postedRow['data'] ?? [])['sex'] ?? ''))),
                 'birth_date' => $this->normalizeBirthDateInput(trim((string) (($postedRow['data'] ?? [])['birth_date'] ?? ''))),
                 'age' => trim((string) (($postedRow['data'] ?? [])['age'] ?? '')),
                 'password' => trim((string) (($postedRow['data'] ?? [])['password'] ?? '')),
@@ -673,7 +689,7 @@ final class UserController extends Controller
                     'first_names' => trim((string) (($postedRow['data'] ?? [])['first_names'] ?? '')),
                     'last_names' => trim((string) (($postedRow['data'] ?? [])['last_names'] ?? '')),
                     'email' => trim((string) (($postedRow['data'] ?? [])['email'] ?? '')),
-                    'sex' => trim((string) (($postedRow['data'] ?? [])['sex'] ?? '')),
+                    'sex' => $this->normalizeSex(trim((string) (($postedRow['data'] ?? [])['sex'] ?? ''))),
                     'birth_date' => $this->normalizeBirthDateInput(trim((string) (($postedRow['data'] ?? [])['birth_date'] ?? ''))),
                     'age' => trim((string) (($postedRow['data'] ?? [])['age'] ?? '')),
                     'password' => trim((string) (($postedRow['data'] ?? [])['password'] ?? '')),
@@ -753,7 +769,7 @@ final class UserController extends Controller
 
         try {
             $rows = $preview['rows'];
-            if (has_permission('manage_company_users') && !has_permission('manage_users')) {
+            if (is_company_admin_user() || (has_permission('manage_company_users') && !has_permission('manage_users'))) {
                 $companyId = (int) (current_user()['company_id'] ?? 0);
                 foreach ($rows as &$row) {
                     $row['data']['company_id'] = $companyId;
@@ -782,6 +798,7 @@ final class UserController extends Controller
     private function validateCoreUserData(array $data, ?int $existingId = null): array
     {
         $errors = [];
+        $isCompanyAdmin = is_company_admin_user() || (has_permission('manage_company_users') && !has_permission('manage_users'));
         if (!in_array($data['role'] ?? '', UserModel::ALLOWED_ROLES, true)) {
             $errors[] = 'Selecciona un tipo de usuario valido.';
         }
@@ -806,8 +823,8 @@ final class UserController extends Controller
             $errors[] = 'Ya existe un usuario con ese correo.';
         }
 
-        if (!in_array($data['sex'] ?? '', ['masculino', 'femenino'], true)) {
-            $errors[] = 'Selecciona sexo masculino o femenino.';
+        if (!in_array($data['sex'] ?? '', UserModel::ALLOWED_SEXES, true)) {
+            $errors[] = 'Selecciona una opcion valida para sexo.';
         }
 
         if (!$this->isValidBirthDate((string) ($data['birth_date'] ?? ''))) {
@@ -825,7 +842,8 @@ final class UserController extends Controller
             $errors[] = 'Selecciona un perfil.';
         } else {
             $profile = $this->profiles->find((int) $data['profile_id']);
-            if (!$profile || (int) ($profile['is_active'] ?? 0) !== 1) {
+            $profileRole = $profile ? ProfileModel::baseRoleForProfile($profile) : '';
+            if (!$profile || (int) ($profile['is_active'] ?? 0) !== 1 || ($isCompanyAdmin && $profileRole !== 'usuario')) {
                 $errors[] = 'Selecciona un perfil activo.';
             }
         }
@@ -844,7 +862,7 @@ final class UserController extends Controller
             return $profile;
         }, $this->profiles->active());
 
-        if (has_permission('manage_company_users') && !has_permission('manage_users')) {
+        if (is_company_admin_user() || (has_permission('manage_company_users') && !has_permission('manage_users'))) {
             $profiles = array_values(array_filter($profiles, static function (array $profile): bool {
                 return (string) ($profile['role_key'] ?? '') === 'usuario';
             }));
@@ -904,11 +922,17 @@ final class UserController extends Controller
     private function normalizeSex(string $value): string
     {
         $normalized = $this->normalizeHeader($value);
+        if ($normalized === '') {
+            return 'no_informado';
+        }
         if (in_array($normalized, ['m', 'masculino', 'hombre'], true)) {
             return 'masculino';
         }
         if (in_array($normalized, ['f', 'femenino', 'mujer'], true)) {
             return 'femenino';
+        }
+        if (in_array($normalized, ['no_ingresado', 'no ingresado', 'no_informado', 'no informado', 'sin informar'], true)) {
+            return 'no_informado';
         }
 
         return $normalized;
@@ -954,13 +978,33 @@ final class UserController extends Controller
     private function validateImportRows(array $rows, array $fieldDefinitions, ?array $defaultProfile, array $preview): array
     {
         $companiesByName = $this->users->companiesByName();
+        $ruts = [];
+        $emails = [];
+        foreach ($rows as $candidateRow) {
+            $rut = $candidateRow['data']['rut'] ?? '';
+            $email = $candidateRow['data']['email'] ?? '';
+            if (UserModel::isValidRut($rut)) {
+                $ruts[] = UserModel::formatRut($rut);
+            }
+            if (filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                $emails[] = mb_strtolower(trim((string) $email));
+            }
+        }
+        $existingByRut = [];
+        $existingByEmail = [];
+        foreach ($this->users->findUsersByRutsAndEmails($ruts, $emails) as $existingUser) {
+            $existingByRut[UserModel::formatRut((string) ($existingUser['rut'] ?? ''))] = $existingUser;
+            $existingByEmail[mb_strtolower(trim((string) ($existingUser['email'] ?? '')))] = $existingUser;
+        }
         $seenEmails = [];
         $seenRuts = [];
         foreach ($rows as $row) {
             $row['errors'] = [];
             $row['field_errors'] = [];
-            $existing = UserModel::isValidRut($row['data']['rut'] ?? '') ? $this->users->findUserByRut($row['data']['rut']) : null;
-            $existing = $existing ?: (filter_var($row['data']['email'] ?? '', FILTER_VALIDATE_EMAIL) ? $this->users->findUserByEmail($row['data']['email']) : null);
+            $rutKey = UserModel::formatRut($row['data']['rut'] ?? '');
+            $emailKey = mb_strtolower(trim((string) ($row['data']['email'] ?? '')));
+            $existing = UserModel::isValidRut($rutKey) ? ($existingByRut[$rutKey] ?? null) : null;
+            $existing = $existing ?: (filter_var($row['data']['email'] ?? '', FILTER_VALIDATE_EMAIL) ? ($existingByEmail[$emailKey] ?? null) : null);
             $row['action'] = $existing ? 'update' : 'create';
             $row['existing_id'] = $existing ? (int) $existing['id'] : null;
             $role = 'usuario';
@@ -1004,8 +1048,8 @@ final class UserController extends Controller
                 $seenEmails[$emailKey] = true;
             }
 
-            if (!in_array($row['data']['sex'] ?? '', ['masculino', 'femenino'], true)) {
-                $this->addImportError($row, 'sex', 'Sexo no valido. Valores permitidos: masculino o femenino.');
+            if (!in_array($row['data']['sex'] ?? '', UserModel::ALLOWED_SEXES, true)) {
+                $this->addImportError($row, 'sex', 'Sexo no valido. Valores permitidos: masculino, femenino o no informado.');
             }
 
             $row['data']['birth_date'] = $this->normalizeBirthDateInput((string) ($row['data']['birth_date'] ?? ''));
@@ -1020,8 +1064,17 @@ final class UserController extends Controller
                 }
             }
 
-            $companyKey = mb_strtolower($row['data']['company_name']);
-            if ($role === 'usuario') {
+            $companyKey = mb_strtolower(trim((string) ($row['data']['company_name'] ?? '')));
+            $isCompanyAdmin = is_company_admin_user() || (has_permission('manage_company_users') && !has_permission('manage_users'));
+            if ($isCompanyAdmin) {
+                $companyId = (int) (current_user()['company_id'] ?? 0);
+                if ($companyId <= 0) {
+                    $this->addImportError($row, 'company_name', 'No se pudo determinar la empresa del Administrador Clientes.');
+                } else {
+                    // La empresa del administrador es la autoridad del contexto; nunca se toma del Excel.
+                    $row['data']['company_id'] = $companyId;
+                }
+            } elseif ($role === 'usuario') {
                 if ($companyKey === '' || !isset($companiesByName[$companyKey])) {
                     $this->addImportError($row, 'company_name', 'Empresa no existe o esta inactiva. Debe coincidir exactamente con una empresa activa de la plataforma.');
                 } else {
@@ -1263,8 +1316,8 @@ final class UserController extends Controller
 
         $spreadsheet = new Spreadsheet();
         $spreadsheet->getProperties()
-            ->setCreator('Metricatest')
-            ->setLastModifiedBy('Metricatest')
+            ->setCreator('e-talent')
+            ->setLastModifiedBy('e-talent')
             ->setTitle('Usuarios carga masiva');
         $sheet = $spreadsheet->getActiveSheet();
         $sheet->setTitle('Usuarios');

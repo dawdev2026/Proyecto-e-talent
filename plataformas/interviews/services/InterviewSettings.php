@@ -10,7 +10,7 @@ final class InterviewSettings
         'api_key' => '',
         'model' => '',
         'timeout_seconds' => 45,
-        'prompt_version' => 'metricatest-interviews-v1',
+        'prompt_version' => 'e_talent-interviews-v1',
     ];
 
     public static function daily(): array
@@ -23,19 +23,7 @@ final class InterviewSettings
 
     public static function ai(): array
     {
-        $integrations = load_config('integrations');
-        $ai = $integrations['interviews_ai'] ?? [];
-        $ai = array_merge(self::DEFAULT_AI, is_array($ai) ? array_intersect_key($ai, self::DEFAULT_AI) : []);
-
-        return [
-            'enabled' => self::bool($ai['enabled']),
-            'provider' => trim((string) $ai['provider']) ?: self::DEFAULT_AI['provider'],
-            'base_url' => self::httpsUrl((string) $ai['base_url'], self::DEFAULT_AI['base_url']),
-            'api_key' => trim((string) $ai['api_key']),
-            'model' => trim((string) $ai['model']),
-            'timeout_seconds' => max(10, min(180, (int) $ai['timeout_seconds'])),
-            'prompt_version' => trim((string) $ai['prompt_version']) ?: self::DEFAULT_AI['prompt_version'],
-        ];
+        return (new PlatformSettingsModel())->aiSettings(load_config('integrations'), true);
     }
 
     public static function save(array $post): void

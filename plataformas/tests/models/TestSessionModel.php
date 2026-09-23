@@ -15,7 +15,12 @@ final class TestSessionModel
     private ?bool $hasReopenedDurationColumn = null;
     private ?bool $hasPausedRemainingColumn = null;
     private ?bool $hasProcessAvailabilityStatusColumn = null;
+    private ?bool $hasProcessFacialEnrollmentColumn = null;
     private ?bool $hasActivityEventsTable = null;
+    private ?bool $hasProcessActivityPolicies = null;
+    private ?bool $hasProcessPolicySnapshot = null;
+    private array $schemaColumnCache = [];
+    private bool $policySchemaColumnsLoaded = false;
 
     public function __construct(?Database $db = null)
     {
@@ -290,7 +295,7 @@ final class TestSessionModel
             LEFT JOIN {$this->coreSchema}.companies c ON c.id = u.company_id
             LEFT JOIN test_processes p ON p.id = ts.process_id
             WHERE ts.instrument_id = ?
-              AND ts.status IN ('completed', 'expired')
+              AND ts.status = 'completed'
             ORDER BY COALESCE(ts.completed_at, ts.updated_at, ts.created_at) DESC, ts.id DESC
         ", [$instrumentId]);
 
@@ -332,7 +337,7 @@ final class TestSessionModel
             if (isset($users[$status])) {
                 $users[$status][$userId] = true;
             }
-            if (in_array($status, ['completed', 'expired'], true)) {
+            if ($status === 'completed') {
                 $users['finished'][$userId] = true;
             }
         }
@@ -352,26 +357,38 @@ final class TestSessionModel
     {
         $this->expireEndedProcessSessionsForUser($userId);
 
-        $resultVisibilitySelect = $this->hasUserResultVisibilityColumn() ? 'i.user_can_view_results' : '1 AS user_can_view_results';
-        $activityTrackingSelect = $this->hasActivityTrackingColumn() ? 'i.track_activity_enabled' : '0 AS track_activity_enabled';
+        $resultVisibilitySelect = $this->hasUserResultVisibilityColumn() ? 'COALESCE(ca.user_can_view_results, i.user_can_view_results) AS user_can_view_results' : '1 AS user_can_view_results';
+        $activityTrackingSelect = $this->hasActivityTrackingColumn()
+            ? ($this->schemaColumnExists('test_sessions', 'track_activity_enabled') ? 'COALESCE(ts.track_activity_enabled, i.track_activity_enabled)' : 'i.track_activity_enabled') . ' AS track_activity_enabled'
+            : '0 AS track_activity_enabled';
         $supervisedModeSelect = $this->hasSupervisedModeColumn() ? 'i.supervised_mode_enabled' : '0 AS supervised_mode_enabled';
-        $controlModeSelect = $this->hasControlModeColumn() ? 'i.control_mode AS control_mode' : 'ts.control_mode AS control_mode';
+        $controlModeSelect = $this->hasControlModeColumn() ? 'CASE WHEN ts.status <> "assigned" THEN COALESCE(ts.control_mode, ca.control_mode, i.control_mode) ELSE COALESCE(ca.control_mode, i.control_mode, ts.control_mode) END AS control_mode' : 'ts.control_mode AS control_mode';
         $autoStartSelect = $this->hasAutoStartColumns()
-            ? 'i.auto_start_enabled, i.auto_start_order'
+            ? 'COALESCE(ca.auto_start_enabled, i.auto_start_enabled) AS auto_start_enabled, COALESCE(ca.auto_start_order, i.auto_start_order) AS auto_start_order'
             : '0 AS auto_start_enabled, 100 AS auto_start_order';
         $processAvailabilitySelect = $this->hasProcessAvailabilityStatusColumn() ? 'COALESCE(p.availability_status, "scheduled") AS process_availability_status' : '"scheduled" AS process_availability_status';
+        $processFacialEnrollmentSelect = $this->hasProcessFacialEnrollmentColumn() ? 'COALESCE(p.require_facial_enrollment, 0) AS require_facial_enrollment' : '0 AS require_facial_enrollment';
+        $processPolicySelect = $this->processPolicySelect();
+        $snapshotSelect = $this->processPolicySnapshotSelect();
 
         $sessions = $this->db->fetchAll('
-            SELECT ts.*, i.name AS instrument_name, i.code AS instrument_code, i.category, i.duration_minutes, i.instructions,
+            SELECT ts.*, i.name AS instrument_name, i.code AS instrument_code, i.category,
+                   COALESCE(ca.duration_minutes, i.duration_minutes) AS duration_minutes, i.instructions,
                    p.name AS process_name,
                    p.status AS process_status,
                    p.starts_at AS process_starts_at,
                    p.ends_at AS process_ends_at,
                    ' . $processAvailabilitySelect . ',
-                   ' . $activityTrackingSelect . ', ' . $supervisedModeSelect . ', ' . $controlModeSelect . ', ' . $autoStartSelect . ', ' . $resultVisibilitySelect . ', COALESCE(ic.items_count, 0) AS items_count
+                   ' . $processFacialEnrollmentSelect . ',
+                   ' . $processPolicySelect . ', ' . $snapshotSelect . ',
+                   ' . $activityTrackingSelect . ', ' . $supervisedModeSelect . ', ' . $controlModeSelect . ', ' . $autoStartSelect . ', ' . $resultVisibilitySelect . ', COALESCE(ic.items_count, 0) AS items_count,
+                   COALESCE(tsr.answered_count, 0) AS answers_count
             FROM test_sessions ts
             JOIN test_instruments i ON i.id = ts.instrument_id
-            LEFT JOIN test_processes p ON p.id = ts.process_id
+            JOIN test_processes p ON p.id = ts.process_id
+            JOIN ' . $this->coreSchema . '.users target_user ON target_user.id = ts.user_id
+            LEFT JOIN company_test_instruments ca ON ca.company_id = p.company_id AND ca.instrument_id = i.id
+            LEFT JOIN test_session_rollups tsr ON tsr.session_id = ts.id
             LEFT JOIN (
                 SELECT instrument_id, COUNT(*) AS items_count
                 FROM test_items
@@ -379,10 +396,12 @@ final class TestSessionModel
                 GROUP BY instrument_id
             ) ic ON ic.instrument_id = i.id
             WHERE ts.user_id = ?
+              AND p.company_id = target_user.company_id
             ORDER BY FIELD(ts.status, "assigned", "in_progress", "completed", "expired", "cancelled"), ts.created_at DESC
         ', [$userId]);
 
         foreach ($sessions as &$session) {
+            $session = $this->resolveSessionProcessPolicy($session);
             $session['control_mode'] = $this->effectiveControlMode($session);
             $session['process_availability'] = $this->availabilityForSession($session);
         }
@@ -396,11 +415,13 @@ final class TestSessionModel
         return $this->db->execute('
             UPDATE test_sessions ts
             JOIN test_processes p ON p.id = ts.process_id
+            JOIN ' . $this->coreSchema . '.users target_user ON target_user.id = ts.user_id
             SET ts.status = "expired",
                 ts.completed_at = COALESCE(ts.completed_at, NOW())
             WHERE ts.user_id = ?
               AND ts.status IN ("assigned", "in_progress")
               AND p.status = "active"
+              AND p.company_id = target_user.company_id
               AND p.ends_at IS NOT NULL
               AND NOW() > p.ends_at
         ', [$userId]);
@@ -425,15 +446,21 @@ final class TestSessionModel
             SELECT COUNT(*) AS total
             FROM test_sessions ts
             JOIN test_instruments i ON i.id = ts.instrument_id
-            WHERE ts.status IN ("completed", "expired")
+            WHERE ts.status = "completed"
               AND i.status = "active"
         ');
 
         return (int) ($row['total'] ?? 0) > 0;
     }
 
-    public function finishedSessionsForUserResults(int $userId): array
+    public function finishedSessionsForUserResults(int $userId, int $processId = 0): array
     {
+        $processSql = $processId > 0 ? ' AND ts.process_id = ?' : '';
+        $params = [$userId];
+        if ($processId > 0) {
+            $params[] = $processId;
+        }
+
         return $this->db->fetchAll("
             SELECT ts.*, i.name AS instrument_name, i.code AS instrument_code, i.category,
                    u.name AS user_name, u.email AS user_email, u.age,
@@ -442,10 +469,12 @@ final class TestSessionModel
             JOIN test_instruments i ON i.id = ts.instrument_id
             JOIN {$this->coreSchema}.users u ON u.id = ts.user_id
             LEFT JOIN {$this->coreSchema}.companies c ON c.id = u.company_id
-            WHERE ts.user_id = ? AND " . $this->resultCompanyScopeSql('u') . "
-              AND ts.status IN ('completed', 'expired')
+            LEFT JOIN test_processes p ON p.id = ts.process_id
+            WHERE ts.user_id = ? {$processSql} AND " . $this->resultCompanyScopeSql('u') . $this->resultCompanyProcessScopeSql() . "
+              AND (ts.status IN ('completed', 'expired')
+                   OR EXISTS (SELECT 1 FROM test_answers ta WHERE ta.session_id = ts.id))
             ORDER BY COALESCE(ts.completed_at, ts.updated_at, ts.created_at) DESC, ts.id DESC
-        ", array_merge([$userId], $this->resultCompanyScopeParams()));
+        ", array_merge($params, $this->resultCompanyScopeParams()));
     }
 
     public function assign(int $instrumentId, int $userId, ?int $assignedBy): int
@@ -525,32 +554,44 @@ final class TestSessionModel
                 $existingPairs[(int) $row['instrument_id'] . ':' . (int) $row['user_id']] = true;
             }
 
-            $created = 0;
+            $requested = count($activeInstrumentIds) * count($activeUserIds);
             $existing = 0;
-
             foreach ($activeInstrumentIds as $instrumentId) {
                 foreach ($activeUserIds as $userId) {
-                    $pairKey = $instrumentId . ':' . $userId;
-                    if (isset($existingPairs[$pairKey])) {
+                    if (isset($existingPairs[$instrumentId . ':' . $userId])) {
                         $existing++;
-                        continue;
                     }
-
-                    if ($this->hasControlModeColumn()) {
-                        $db->insert('
-                            INSERT INTO test_sessions (instrument_id, user_id, assigned_by, status, control_mode, audio_visual_upload_failure_policy, audio_visual_interruption_policy, audio_visual_voice_policy, audio_visual_permission_policy, audio_visual_quality_profile)
-                            SELECT ?, ?, ?, "assigned", control_mode, audio_visual_upload_failure_policy, audio_visual_interruption_policy, audio_visual_voice_policy, audio_visual_permission_policy, audio_visual_quality_profile
-                            FROM test_instruments
-                            WHERE id = ?
-                        ', [$instrumentId, $userId, $assignedBy, $instrumentId]);
-                    } else {
-                        $db->insert('
-                            INSERT INTO test_sessions (instrument_id, user_id, assigned_by, status)
-                            VALUES (?, ?, ?, "assigned")
-                        ', [$instrumentId, $userId, $assignedBy]);
-                    }
-                    $created++;
                 }
+            }
+            $created = $requested - $existing;
+            $instrumentPlaceholders = implode(',', array_fill(0, count($activeInstrumentIds), '?'));
+            $userPlaceholders = implode(',', array_fill(0, count($activeUserIds), '?'));
+            if ($created > 0 && $this->hasControlModeColumn()) {
+                $db->execute('
+                    INSERT INTO test_sessions (instrument_id, user_id, assigned_by, status, control_mode, audio_visual_upload_failure_policy, audio_visual_interruption_policy, audio_visual_voice_policy, audio_visual_permission_policy, audio_visual_quality_profile)
+                    SELECT i.id, u.id, ?, "assigned", i.control_mode, i.audio_visual_upload_failure_policy, i.audio_visual_interruption_policy, i.audio_visual_voice_policy, i.audio_visual_permission_policy, i.audio_visual_quality_profile
+                    FROM test_instruments i
+                    CROSS JOIN ' . $this->coreSchema . '.users u
+                    WHERE i.id IN (' . $instrumentPlaceholders . ') AND u.id IN (' . $userPlaceholders . ')
+                      AND NOT EXISTS (
+                          SELECT 1 FROM test_sessions existing
+                          WHERE existing.instrument_id = i.id AND existing.user_id = u.id
+                            AND existing.status IN ("assigned", "in_progress", "completed", "expired")
+                      )
+                ', array_merge([$assignedBy], $activeInstrumentIds, $activeUserIds));
+            } elseif ($created > 0) {
+                $db->execute('
+                    INSERT INTO test_sessions (instrument_id, user_id, assigned_by, status)
+                    SELECT i.id, u.id, ?, "assigned"
+                    FROM test_instruments i
+                    CROSS JOIN ' . $this->coreSchema . '.users u
+                    WHERE i.id IN (' . $instrumentPlaceholders . ') AND u.id IN (' . $userPlaceholders . ')
+                      AND NOT EXISTS (
+                          SELECT 1 FROM test_sessions existing
+                          WHERE existing.instrument_id = i.id AND existing.user_id = u.id
+                            AND existing.status IN ("assigned", "in_progress", "completed", "expired")
+                      )
+                ', array_merge([$assignedBy], $activeInstrumentIds, $activeUserIds));
             }
 
             return [
@@ -595,37 +636,50 @@ final class TestSessionModel
 
     public function findForUser(int $sessionId, int $userId): ?array
     {
-        $resultVisibilitySelect = $this->hasUserResultVisibilityColumn() ? 'i.user_can_view_results' : '1 AS user_can_view_results';
-        $questionOrderModeSelect = $this->hasQuestionOrderModeColumn() ? 'i.question_order_mode' : '"ordered" AS question_order_mode';
-        $showQuestionNumbersSelect = $this->hasShowQuestionNumbersColumn() ? 'i.show_question_numbers' : '1 AS show_question_numbers';
-        $activityTrackingSelect = $this->hasActivityTrackingColumn() ? 'i.track_activity_enabled' : '0 AS track_activity_enabled';
+        $resultVisibilitySelect = $this->hasUserResultVisibilityColumn() ? 'COALESCE(ca.user_can_view_results, i.user_can_view_results) AS user_can_view_results' : '1 AS user_can_view_results';
+        $questionOrderModeSelect = $this->hasQuestionOrderModeColumn() ? 'COALESCE(ca.question_order_mode, i.question_order_mode) AS question_order_mode' : '"ordered" AS question_order_mode';
+        $showQuestionNumbersSelect = $this->hasShowQuestionNumbersColumn() ? 'COALESCE(ca.show_question_numbers, i.show_question_numbers) AS show_question_numbers' : '1 AS show_question_numbers';
+        $activityTrackingSelect = $this->hasActivityTrackingColumn()
+            ? ($this->schemaColumnExists('test_sessions', 'track_activity_enabled') ? 'COALESCE(ts.track_activity_enabled, i.track_activity_enabled)' : 'i.track_activity_enabled') . ' AS track_activity_enabled'
+            : '0 AS track_activity_enabled';
         $supervisedModeSelect = $this->hasSupervisedModeColumn() ? 'i.supervised_mode_enabled' : '0 AS supervised_mode_enabled';
-        $controlModeSelect = $this->hasControlModeColumn() ? 'i.control_mode AS control_mode' : 'ts.control_mode AS control_mode';
+        $controlModeSelect = $this->hasControlModeColumn() ? 'CASE WHEN ts.status <> "assigned" THEN COALESCE(ts.control_mode, ca.control_mode, i.control_mode) ELSE COALESCE(ca.control_mode, i.control_mode, ts.control_mode) END AS control_mode' : 'ts.control_mode AS control_mode';
         $autoStartSelect = $this->hasAutoStartColumns()
-            ? 'i.auto_start_enabled, i.auto_start_order'
+            ? 'COALESCE(ca.auto_start_enabled, i.auto_start_enabled) AS auto_start_enabled, COALESCE(ca.auto_start_order, i.auto_start_order) AS auto_start_order'
             : '0 AS auto_start_enabled, 100 AS auto_start_order';
         $processAvailabilitySelect = $this->hasProcessAvailabilityStatusColumn() ? 'COALESCE(p.availability_status, "scheduled") AS process_availability_status' : '"scheduled" AS process_availability_status';
+        $processFacialEnrollmentSelect = $this->hasProcessFacialEnrollmentColumn() ? 'COALESCE(p.require_facial_enrollment, 0) AS require_facial_enrollment' : '0 AS require_facial_enrollment';
+        $processPolicySelect = $this->processPolicySelect();
+        $snapshotSelect = $this->processPolicySnapshotSelect();
         $durationSelect = $this->hasReopenedDurationColumn()
-            ? 'COALESCE(ts.reopened_duration_minutes, i.duration_minutes) AS duration_minutes'
+            ? 'COALESCE(ts.reopened_duration_minutes, ca.duration_minutes, i.duration_minutes) AS duration_minutes'
             : 'i.duration_minutes';
 
         $session = $this->db->fetch('
             SELECT ts.*, i.name AS instrument_name, i.code AS instrument_code, i.category,
                    i.description, ' . $durationSelect . ', i.instructions,
-                   i.use_blocks, i.block_size, i.require_block_completion,
+                   COALESCE(ca.use_blocks, i.use_blocks) AS use_blocks,
+                   COALESCE(ca.block_size, i.block_size) AS block_size,
+                   COALESCE(ca.require_block_completion, i.require_block_completion) AS require_block_completion,
                    p.name AS process_name,
                    p.status AS process_status,
                    p.starts_at AS process_starts_at,
                    p.ends_at AS process_ends_at,
                    ' . $processAvailabilitySelect . ',
+                   ' . $processFacialEnrollmentSelect . ',
+                   ' . $processPolicySelect . ', ' . $snapshotSelect . ',
                    ' . $questionOrderModeSelect . ', ' . $showQuestionNumbersSelect . ', ' . $activityTrackingSelect . ', ' . $supervisedModeSelect . ', ' . $controlModeSelect . ', ' . $autoStartSelect . ', ' . $resultVisibilitySelect . '
             FROM test_sessions ts
             JOIN test_instruments i ON i.id = ts.instrument_id
-            LEFT JOIN test_processes p ON p.id = ts.process_id
+            JOIN test_processes p ON p.id = ts.process_id
+            JOIN ' . $this->coreSchema . '.users target_user ON target_user.id = ts.user_id
+            LEFT JOIN company_test_instruments ca ON ca.company_id = p.company_id AND ca.instrument_id = i.id
             WHERE ts.id = ? AND ts.user_id = ?
+              AND p.company_id = target_user.company_id
             LIMIT 1
         ', [$sessionId, $userId]);
         if ($session) {
+            $session = $this->resolveSessionProcessPolicy($session);
             $session['control_mode'] = $this->effectiveControlMode($session);
             $session['process_availability'] = $this->availabilityForSession($session);
         }
@@ -644,8 +698,10 @@ final class TestSessionModel
                    p.ends_at AS process_ends_at,
                    ' . $processAvailabilitySelect . '
             FROM test_sessions ts
-            LEFT JOIN test_processes p ON p.id = ts.process_id
+            JOIN test_processes p ON p.id = ts.process_id
+            JOIN ' . $this->coreSchema . '.users target_user ON target_user.id = ts.user_id
             WHERE ts.id = ? AND ts.user_id = ?
+              AND p.company_id = target_user.company_id
             LIMIT 1
         ', [$sessionId, $userId]);
 
@@ -659,11 +715,14 @@ final class TestSessionModel
     public function canSaveDraftForUser(int $sessionId, int $userId): bool
     {
         return (bool) $this->db->fetch('
-            SELECT id
-            FROM test_sessions
-            WHERE id = ?
-              AND user_id = ?
-              AND status IN ("assigned", "in_progress")
+            SELECT ts.id
+            FROM test_sessions ts
+            JOIN test_processes p ON p.id = ts.process_id
+            JOIN ' . $this->coreSchema . '.users target_user ON target_user.id = ts.user_id
+            WHERE ts.id = ?
+              AND ts.user_id = ?
+              AND ts.status IN ("assigned", "in_progress")
+              AND p.company_id = target_user.company_id
             LIMIT 1
         ', [$sessionId, $userId]);
     }
@@ -683,7 +742,7 @@ final class TestSessionModel
             JOIN test_instruments i ON i.id = ts.instrument_id
             JOIN {$this->coreSchema}.users u ON u.id = ts.user_id
             LEFT JOIN test_processes p ON p.id = ts.process_id
-            WHERE ts.id = ? AND " . $this->resultCompanyScopeSql('u') . "
+            WHERE ts.id = ? AND " . $this->resultCompanyScopeSql('u') . $this->resultCompanyProcessScopeSql() . "
             LIMIT 1
         ", array_merge([$sessionId], $this->resultCompanyScopeParams()));
         if ($session) {
@@ -741,7 +800,7 @@ final class TestSessionModel
                 'allowed' => false,
                 'reason' => 'process_ended',
                 'label' => 'Plazo finalizado',
-                'message' => 'Ya termino el tiempo para el proceso completo',
+                'message' => 'El proceso ha finalizado. Se guardarán tus respuestas y la evidencia audiovisual antes de cerrar.',
                 'remaining_seconds' => 0,
                 'starts_in_seconds' => $startsInSeconds,
             ];
@@ -773,13 +832,42 @@ final class TestSessionModel
         ];
     }
 
+    public function availabilityForProcess(int $processId): array
+    {
+        if ($processId <= 0) {
+            return $this->availabilityForSession(['process_id' => 0]);
+        }
+
+        $process = $this->db->fetch(
+            'SELECT id AS process_id, status AS process_status, starts_at AS process_starts_at, ends_at AS process_ends_at, '
+            . ($this->hasProcessAvailabilityStatusColumn() ? 'COALESCE(availability_status, "scheduled")' : '"scheduled"')
+            . ' AS process_availability_status FROM test_processes WHERE id = ? LIMIT 1',
+            [$processId]
+        );
+
+        if (!$process) {
+            return [
+                'allowed' => false,
+                'reason' => 'process_not_found',
+                'label' => 'Proceso no disponible',
+                'message' => 'El proceso no se encuentra disponible.',
+                'remaining_seconds' => null,
+                'starts_in_seconds' => null,
+            ];
+        }
+
+        return $this->availabilityForSession($process);
+    }
+
     public function itemsForSession(int $sessionId): array
     {
-        $questionOrderModeSelect = $this->hasQuestionOrderModeColumn() ? 'i.question_order_mode' : '"ordered" AS question_order_mode';
+        $questionOrderModeSelect = $this->hasQuestionOrderModeColumn() ? 'COALESCE(ca.question_order_mode, i.question_order_mode) AS question_order_mode' : '"ordered" AS question_order_mode';
         $rows = $this->db->fetchAll('
             SELECT it.*, s.scale_key, s.name AS scale_name, a.answer_value, ' . $questionOrderModeSelect . '
             FROM test_sessions ts
             JOIN test_instruments i ON i.id = ts.instrument_id
+            LEFT JOIN test_processes p ON p.id = ts.process_id
+            LEFT JOIN company_test_instruments ca ON ca.company_id = p.company_id AND ca.instrument_id = i.id
             JOIN test_items it ON it.instrument_id = ts.instrument_id AND it.is_active = 1
             LEFT JOIN test_scales s ON s.id = it.scale_id
             LEFT JOIN test_answers a ON a.session_id = ts.id AND a.item_id = it.id
@@ -922,18 +1010,23 @@ final class TestSessionModel
             'drag_blocked',
             'print_blocked',
             'audio_visual_recording_started',
+            'audio_visual_consent_accepted',
             'audio_visual_recording_interrupted',
             'audio_visual_recording_recovered',
             'audio_visual_upload_started',
             'audio_visual_upload_completed',
             'audio_visual_upload_failed',
             'audio_visual_risk',
+            'audio_visual_screen_capture_completed',
+            'multiple_voice_possible',
         ];
         if (!in_array($eventType, $allowed, true)) {
             return false;
         }
 
-        $trackActivitySelect = $this->hasActivityTrackingColumn() ? 'i.track_activity_enabled' : '0 AS track_activity_enabled';
+        $trackActivitySelect = $this->hasActivityTrackingColumn()
+            ? ($this->schemaColumnExists('test_sessions', 'track_activity_enabled') ? 'COALESCE(ts.track_activity_enabled, i.track_activity_enabled)' : 'i.track_activity_enabled') . ' AS track_activity_enabled'
+            : '0 AS track_activity_enabled';
         $controlModeSelect = $this->hasControlModeColumn() ? 'ts.control_mode AS control_mode' : 'NULL AS control_mode';
         $session = $this->db->fetch('
             SELECT ts.instrument_id, ' . $trackActivitySelect . ', ' . $controlModeSelect . '
@@ -943,6 +1036,9 @@ final class TestSessionModel
             LIMIT 1
         ', [$sessionId, $userId]);
         if (!$session || $this->effectiveControlMode($session) === 'off') {
+            return false;
+        }
+        if ((int) ($session['track_activity_enabled'] ?? 0) !== 1 && !$this->isEssentialActivityEvent($eventType)) {
             return false;
         }
 
@@ -974,6 +1070,23 @@ final class TestSessionModel
         ]);
 
         return true;
+    }
+
+    public function hasActivityEvent(int $sessionId, string $eventType): bool
+    {
+        if ($sessionId <= 0 || !$this->hasActivityEventsTable(true)) return false;
+        return $this->db->fetch('SELECT id FROM test_activity_events WHERE session_id = ? AND event_type = ? ORDER BY id DESC LIMIT 1', [$sessionId, $eventType]) !== null;
+    }
+
+    private function isEssentialActivityEvent(string $eventType): bool
+    {
+        return in_array($eventType, [
+            'evaluation_opened', 'evaluation_started', 'evaluation_reopened', 'answer_saved', 'draft_saved',
+            'block_saved', 'evaluation_paused', 'evaluation_submitted', 'evaluation_submitted_incomplete',
+            'evaluation_expired', 'audio_visual_upload_started', 'audio_visual_upload_completed',
+            'audio_visual_upload_failed', 'audio_visual_recording_started', 'audio_visual_consent_accepted', 'audio_visual_risk',
+            'audio_visual_screen_capture_completed', 'multiple_voice_possible',
+        ], true);
     }
 
     public function activityForSession(int $sessionId): array
@@ -1034,16 +1147,12 @@ final class TestSessionModel
                 }
 
                 $answer = $this->answerValueFromPayload($rawAnswer);
-                if ($answer === '') {
-                    continue;
-                }
-
                 $receivedItemIds[] = $itemId;
                 $db->execute('
                     INSERT INTO test_answers (session_id, item_id, answer_value)
                     VALUES (?, ?, ?)
                     ON DUPLICATE KEY UPDATE answer_value = VALUES(answer_value)
-                ', [$sessionId, $itemId, $answer]);
+                ', [$sessionId, $itemId, $answer !== '' ? $answer : null]);
                 $savedItemIds[] = $itemId;
             }
         });
@@ -1055,6 +1164,29 @@ final class TestSessionModel
             'received_item_ids' => array_values(array_unique($receivedItemIds)),
             'saved_item_ids' => array_values(array_unique($savedItemIds)),
         ];
+    }
+
+    public function verifyAnswersForSession(int $sessionId, array $answers): array
+    {
+        $persisted = [];
+        foreach ($this->itemsForSession($sessionId) as $item) {
+            $persisted[(int) ($item['id'] ?? 0)] = trim((string) ($item['answer_value'] ?? ''));
+        }
+
+        $answeredIds = [];
+        $missingIds = [];
+        foreach ($answers as $rawItemId => $rawAnswer) {
+            $itemId = (int) $rawItemId;
+            if ($itemId <= 0) continue;
+            $expected = $this->answerValueFromPayload($rawAnswer);
+            if (!array_key_exists($itemId, $persisted)) continue;
+            if ($expected !== '') $answeredIds[] = $itemId;
+            if ($persisted[$itemId] !== $expected) {
+                $missingIds[] = $itemId;
+            }
+        }
+
+        return ['verified' => !$missingIds, 'answered_count' => count($answeredIds), 'missing_item_ids' => $missingIds];
     }
 
     private function answerableItemIdsForSession(int $sessionId): array
@@ -1094,7 +1226,7 @@ final class TestSessionModel
         return $missing;
     }
 
-    public function start(int $sessionId, int $durationMinutes = 0): void
+    public function start(int $sessionId, int $durationMinutes = 0, ?array $policySnapshot = null): void
     {
         $fields = [
             'status = "in_progress"',
@@ -1111,15 +1243,31 @@ final class TestSessionModel
         } else {
             $fields[] = 'expires_at = CASE WHEN expires_at IS NULL AND ? > 0 THEN DATE_ADD(COALESCE(started_at, NOW()), INTERVAL ? MINUTE) ELSE expires_at END';
         }
-        if ($this->hasReopenedDurationColumn()) {
-            $fields[] = 'reopened_duration_minutes = NULL';
+        $durationParams = [$durationMinutes, $durationMinutes];
+        $policyFields = [];
+        $policyParams = [];
+        if ($this->hasProcessPolicySnapshotColumns()) {
+            $policyFields[] = 'control_mode = IF(status = "assigned", ?, control_mode)';
+            $policyParams[] = (string) ($policySnapshot['control_mode'] ?? 'off');
+            $policyFields[] = 'track_activity_enabled = IF(status = "assigned", ?, track_activity_enabled)';
+            $policyParams[] = (int) ($policySnapshot['record_activity_actions'] ?? $policySnapshot['track_activity_enabled'] ?? 0);
+            $policyFields[] = 'process_facial_enrollment_required = IF(status = "assigned", ?, process_facial_enrollment_required)';
+            $policyParams[] = (int) ($policySnapshot['require_facial_enrollment'] ?? 0);
+            $policyFields[] = 'process_component_validation_required = IF(status = "assigned", ?, process_component_validation_required)';
+            $policyParams[] = (int) ($policySnapshot['component_validation_required'] ?? 0);
+            $policyFields[] = 'process_record_audio_visual = IF(status = "assigned", ?, process_record_audio_visual)';
+            $policyParams[] = (int) ($policySnapshot['record_audio_visual'] ?? 0);
+            $policyFields[] = 'process_record_actions = IF(status = "assigned", ?, process_record_actions)';
+            $policyParams[] = (int) ($policySnapshot['record_activity_actions'] ?? 0);
+            $policyFields[] = 'process_policy_snapshot_at = IF(status = "assigned", NOW(), process_policy_snapshot_at)';
         }
-
+        $fields = array_merge($policyFields, $fields);
+        $params = array_merge($policyParams, $durationParams, [$sessionId]);
         $this->db->execute('
             UPDATE test_sessions
             SET ' . implode(', ', $fields) . '
             WHERE id = ? AND status IN ("assigned", "in_progress")
-        ', [$durationMinutes, $durationMinutes, $sessionId]);
+        ', $params);
     }
 
     public function pause(int $sessionId, int $userId, ?int $remainingSeconds): bool
@@ -1166,6 +1314,8 @@ final class TestSessionModel
 
         $this->db->transaction(function (Database $db) use ($sessionId, $answers, $items, $instrumentId, $rulesByItem, $scalesById, $formulaTerms, $adjustments, $contextValues, $norms, $finalStatus, &$summary): void {
             $db->execute('DELETE FROM test_answer_scores WHERE session_id = ?', [$sessionId]);
+            $scoreRows = [];
+            $answerRows = [];
 
             foreach ($items as $item) {
                 $itemId = (int) $item['id'];
@@ -1196,10 +1346,7 @@ final class TestSessionModel
                         $summary[$scaleKey]['raw_score'] += $score;
                         $summary[$scaleKey]['score'] = $summary[$scaleKey]['raw_score'];
 
-                        $db->execute('
-                            INSERT INTO test_answer_scores (session_id, item_id, scale_id, rule_id, score_value)
-                            VALUES (?, ?, ?, ?, ?)
-                        ', [$sessionId, $itemId, $scaleId, (int) $rule['id'], $score]);
+                        $scoreRows[] = [$sessionId, $itemId, $scaleId, (int) $rule['id'], $score];
                     }
                 } else {
                     $score = $legacyScore;
@@ -1229,15 +1376,28 @@ final class TestSessionModel
                     }
                 }
 
-                $db->execute('
-                    INSERT INTO test_answers (session_id, item_id, answer_value, score_value)
-                    VALUES (?, ?, ?, ?)
-                    ON DUPLICATE KEY UPDATE answer_value = VALUES(answer_value), score_value = VALUES(score_value)
-                ', [$sessionId, $itemId, $answer !== '' ? $answer : null, $answerScore]);
+                $answerRows[] = [$sessionId, $itemId, $answer !== '' ? $answer : null, $answerScore];
 
                 if ($answer !== '') {
                     $this->markAnswered($summary, $rules, $item);
                 }
+            }
+
+            foreach (array_chunk($scoreRows, 100) as $chunk) {
+                $params = [];
+                foreach ($chunk as $row) array_push($params, ...$row);
+                $db->execute(
+                    'INSERT INTO test_answer_scores (session_id, item_id, scale_id, rule_id, score_value) VALUES ' . implode(', ', array_fill(0, count($chunk), '(?, ?, ?, ?, ?)')),
+                    $params
+                );
+            }
+            foreach (array_chunk($answerRows, 100) as $chunk) {
+                $params = [];
+                foreach ($chunk as $row) array_push($params, ...$row);
+                $db->execute(
+                    'INSERT INTO test_answers (session_id, item_id, answer_value, score_value) VALUES ' . implode(', ', array_fill(0, count($chunk), '(?, ?, ?, ?)')) . ' ON DUPLICATE KEY UPDATE answer_value = VALUES(answer_value), score_value = VALUES(score_value)',
+                    $params
+                );
             }
 
             $summary = $this->applyNorms($instrumentId, $summary, $norms);
@@ -2056,6 +2216,91 @@ final class TestSessionModel
         return (int) ($row['track_activity_enabled'] ?? 0) === 1 ? 'activity' : 'off';
     }
 
+    private function resolveSessionProcessPolicy(array $session): array
+    {
+        if (!empty($session['process_policy_snapshot_at'])) {
+            $session['require_facial_enrollment'] = (int) ($session['process_facial_enrollment_required'] ?? 0);
+            $session['component_validation_required'] = (int) ($session['process_component_validation_required'] ?? 0);
+            $session['record_audio_visual'] = (int) ($session['process_record_audio_visual'] ?? 0);
+            $session['record_activity_actions'] = (int) ($session['process_record_actions'] ?? 0);
+            $session['track_activity_enabled'] = (int) ($session['track_activity_enabled'] ?? 0);
+            return $session;
+        }
+
+        if ((string) ($session['status'] ?? '') === 'assigned') {
+            return ProcessPrerequisiteService::resolve($session);
+        }
+
+        // Historical sessions have no policy snapshot; preserve the mode saved
+        // on assignment and the legacy behavior rather than applying new rules.
+        $mode = (string) ($session['control_mode'] ?? 'off');
+        $session['component_validation_required'] = $mode === 'supervised_audio_visual' ? 1 : 0;
+        $session['record_audio_visual'] = $mode === 'supervised_audio_visual' ? 1 : 0;
+        $session['record_activity_actions'] = (int) ($session['track_activity_enabled'] ?? 0) === 1
+            || in_array($mode, ['activity', 'supervised', 'supervised_audio_visual'], true) ? 1 : 0;
+        return $session;
+    }
+
+    private function processPolicySelect(): string
+    {
+        $fields = ['facial_enrollment_policy', 'component_validation_policy', 'audio_visual_recording_policy', 'action_logging_policy'];
+        $selects = [];
+        foreach ($fields as $field) {
+            $selects[] = $this->schemaColumnExists('test_processes', $field)
+                ? 'p.' . $field . ' AS ' . $field
+                : '"inherit" AS ' . $field;
+        }
+        return implode(', ', $selects);
+    }
+
+    private function processPolicySnapshotSelect(): string
+    {
+        $fields = [
+            'process_facial_enrollment_required', 'process_component_validation_required',
+            'process_record_audio_visual', 'process_record_actions', 'process_policy_snapshot_at',
+        ];
+        $selects = [];
+        foreach ($fields as $field) {
+            $selects[] = $this->schemaColumnExists('test_sessions', $field)
+                ? 'ts.' . $field . ' AS ' . $field
+                : 'NULL AS ' . $field;
+        }
+        return implode(', ', $selects);
+    }
+
+    private function hasProcessPolicySnapshotColumns(): bool
+    {
+        if ($this->hasProcessPolicySnapshot !== null) return $this->hasProcessPolicySnapshot;
+        foreach (['process_facial_enrollment_required', 'process_component_validation_required', 'process_record_audio_visual', 'process_record_actions', 'process_policy_snapshot_at', 'track_activity_enabled'] as $field) {
+            if (!$this->schemaColumnExists('test_sessions', $field)) {
+                $this->hasProcessPolicySnapshot = false;
+                return false;
+            }
+        }
+        $this->hasProcessPolicySnapshot = true;
+        return true;
+    }
+
+    private function schemaColumnExists(string $table, string $column): bool
+    {
+        $key = $table . '.' . $column;
+        if (array_key_exists($key, $this->schemaColumnCache)) return $this->schemaColumnCache[$key];
+        if (!$this->policySchemaColumnsLoaded) {
+            $this->policySchemaColumnsLoaded = true;
+            try {
+                $rows = $this->db->fetchAll('SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ("test_processes", "test_sessions")');
+                foreach ($rows as $row) {
+                    $this->schemaColumnCache[(string) $row['TABLE_NAME'] . '.' . (string) $row['COLUMN_NAME']] = true;
+                }
+            } catch (Throwable $exception) {
+                error_log('Test session policy schema check error: ' . $exception->getMessage());
+            }
+        }
+        if (array_key_exists($key, $this->schemaColumnCache)) return true;
+        $this->schemaColumnCache[$key] = false;
+        return false;
+    }
+
     private function hasShowQuestionNumbersColumn(): bool
     {
         if ($this->hasShowQuestionNumbersColumn !== null) {
@@ -2169,6 +2414,23 @@ final class TestSessionModel
         }
 
         return $this->hasProcessAvailabilityStatusColumn;
+    }
+
+    private function hasProcessFacialEnrollmentColumn(): bool
+    {
+        if ($this->hasProcessFacialEnrollmentColumn !== null) {
+            return $this->hasProcessFacialEnrollmentColumn;
+        }
+
+        try {
+            $row = $this->db->fetch("SELECT COUNT(*) AS total FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'test_processes' AND COLUMN_NAME = 'require_facial_enrollment'");
+            $this->hasProcessFacialEnrollmentColumn = (int) ($row['total'] ?? 0) > 0;
+        } catch (Throwable $exception) {
+            error_log('Test schema check error: ' . $exception->getMessage());
+            $this->hasProcessFacialEnrollmentColumn = false;
+        }
+
+        return $this->hasProcessFacialEnrollmentColumn;
     }
 
     private function timestampOrNull($value): ?int
@@ -2339,7 +2601,7 @@ final class TestSessionModel
         if ($status !== '') {
             $rowStatus = (string) $row['status'];
             if ($status === 'finished') {
-                if (!in_array($rowStatus, ['completed', 'expired'], true)) {
+                if ($rowStatus !== 'completed') {
                     return false;
                 }
             } elseif ($rowStatus !== $status) {
@@ -2384,9 +2646,15 @@ final class TestSessionModel
     private function resultCompanyScopeSql(string $alias): string
     {
         $user = current_user();
-        if (!$user || has_permission('view_test_results')) {
+        if (!$user) {
             return '1 = 1';
         }
+
+        if ((string) ($user['role'] ?? '') === 'company_admin') {
+            return (int) ($user['company_id'] ?? 0) > 0 ? $alias . '.company_id = ?' : '1 = 0';
+        }
+
+        if (has_permission('view_test_results')) return '1 = 1';
 
         if (has_permission('view_company_results') && (int) ($user['company_id'] ?? 0) > 0) {
             return $alias . '.company_id = ?';
@@ -2398,10 +2666,20 @@ final class TestSessionModel
     private function resultCompanyScopeParams(): array
     {
         $user = current_user();
-        if ($user && !has_permission('view_test_results') && has_permission('view_company_results') && (int) ($user['company_id'] ?? 0) > 0) {
+        if ($user && ((string) ($user['role'] ?? '') === 'company_admin' || (!has_permission('view_test_results') && has_permission('view_company_results'))) && (int) ($user['company_id'] ?? 0) > 0) {
             return [(int) $user['company_id']];
         }
 
         return [];
+    }
+
+    private function resultCompanyProcessScopeSql(): string
+    {
+        $user = current_user();
+        if ($user && ((string) ($user['role'] ?? '') === 'company_admin' || (!has_permission('view_test_results') && has_permission('view_company_results')))) {
+            return ' AND (ts.process_id IS NULL OR p.company_id = u.company_id)';
+        }
+
+        return '';
     }
 }

@@ -10,6 +10,7 @@ $rankingUsesOfficialConfig = (bool) ($rankingUsesOfficialConfig ?? false);
 $dashboardQueryString = (string) ($dashboardQueryString ?? '');
 $dashboardBackUrl = route_url('test-process.dashboard') . ($dashboardQueryString !== '' ? '?' . $dashboardQueryString : '');
 $reportsZipUrl = route_url('test-process.ranking-all-reports-zip') . ($dashboardQueryString !== '' ? '?' . $dashboardQueryString : '');
+$rankingReportsByCompany = is_array($rankingReportsByCompany ?? null) ? $rankingReportsByCompany : [];
 
 $rankingHeaders = [
     'Proceso',
@@ -48,25 +49,25 @@ $rankingHeaders = [
 
 <section class="row g-3 mb-4">
     <div class="col-12 col-md-3">
-        <div class="content-panel h-100">
+        <div class="card content-panel h-100">
             <p class="text-muted small fw-bold text-uppercase mb-1">Procesos</p>
             <p class="display-6 fw-bold mb-0"><?= $processesTotal ?></p>
         </div>
     </div>
     <div class="col-12 col-md-3">
-        <div class="content-panel h-100">
+        <div class="card content-panel h-100">
             <p class="text-muted small fw-bold text-uppercase mb-1">Usuarios</p>
             <p class="display-6 fw-bold mb-0"><?= $usersTotal ?></p>
         </div>
     </div>
     <div class="col-12 col-md-3">
-        <div class="content-panel h-100">
+        <div class="card content-panel h-100">
             <p class="text-muted small fw-bold text-uppercase mb-1">Sesiones</p>
             <p class="display-6 fw-bold mb-0"><?= $sessionsTotal ?></p>
         </div>
     </div>
     <div class="col-12 col-md-3">
-        <div class="content-panel h-100">
+        <div class="card content-panel h-100">
             <p class="text-muted small fw-bold text-uppercase mb-1">Ranqueados</p>
             <p class="display-6 fw-bold mb-0"><?= count($rows) ?></p>
         </div>
@@ -75,19 +76,19 @@ $rankingHeaders = [
 
 <section class="row g-3 mb-4">
     <div class="col-12 col-md-4">
-        <div class="content-panel h-100">
+        <div class="card content-panel h-100">
             <p class="text-muted small fw-bold text-uppercase mb-1">Recomendado</p>
             <p class="h2 fw-bold mb-0"><?= (int) ($classificationCounts['R'] ?? 0) ?></p>
         </div>
     </div>
     <div class="col-12 col-md-4">
-        <div class="content-panel h-100">
+        <div class="card content-panel h-100">
             <p class="text-muted small fw-bold text-uppercase mb-1">Observacion</p>
             <p class="h2 fw-bold mb-0"><?= (int) ($classificationCounts['RO'] ?? 0) ?></p>
         </div>
     </div>
     <div class="col-12 col-md-4">
-        <div class="content-panel h-100">
+        <div class="card content-panel h-100">
             <p class="text-muted small fw-bold text-uppercase mb-1">No Recomendado</p>
             <p class="h2 fw-bold mb-0"><?= (int) ($classificationCounts['NR'] ?? 0) ?></p>
         </div>
@@ -100,7 +101,7 @@ $rankingHeaders = [
     </div>
 <?php endif; ?>
 
-<section class="content-panel">
+<section class="card content-panel">
     <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
         <div>
             <h2 class="h5 fw-bold mb-1">Ranking completo de procesos</h2>
@@ -113,7 +114,7 @@ $rankingHeaders = [
             <?php if ($rows): ?>
                 <a
                     class="btn btn-outline-primary"
-                    href="<?= e($reportsZipUrl) ?>"
+                    href="<?= e($reportsZipUrl . (strpos($reportsZipUrl, '?') === false ? '?' : '&') . 'prepare=1') ?>"
                     data-download-processing
                     data-processing-message="Generando informes ZIP..."
                     data-processing-detail="Preparando PDFs y comprimiendo el archivo.">
@@ -125,7 +126,7 @@ $rankingHeaders = [
 
     <?php if ($rows): ?>
         <div class="table-responsive">
-            <table class="table align-middle app-table app-data-table" data-export-title="Ranking Completo Procesos">
+            <table class="table table-hover align-middle app-table app-data-table" data-export-title="Ranking Completo Procesos">
                 <thead>
                     <tr>
                         <?php foreach ($rankingHeaders as $header): ?>
@@ -163,12 +164,20 @@ $rankingHeaders = [
                                             $reportUrl = $reportProcessId > 0 && $reportSessionId > 0
                                                 ? route_url('test-process.ranking-report', $reportProcessId) . '?session=' . rawurlencode(secure_url_token($reportSessionId, 'test_session'))
                                                 : '';
+                                            $reportUserId = (int) ($row['_user_id'] ?? 0);
+                                            $reportCompanyId = (int) ($row['_company_id'] ?? 0);
+                                            $registeredReports = $rankingReportsByCompany[$reportCompanyId] ?? [];
                                         ?>
                                         <div class="text-end">
                                             <?php if ($reportUrl !== ''): ?>
-                                                <a class="btn btn-sm btn-outline-primary" href="<?= e($reportUrl) ?>" title="Descargar informe PDF">
-                                                    <i class="bi bi-file-earmark-pdf me-1"></i> Informe
-                                                </a>
+                                                <?php if (count($registeredReports) === 1 && $reportUserId > 0): ?>
+                                                    <?php $registeredReport = $registeredReports[0]; ?>
+                                                    <a class="btn btn-sm btn-outline-primary" href="<?= e(route_url('reports.run', (int) $registeredReport['id']) . '?company_id=' . $reportCompanyId . '&process_id=' . $reportProcessId . '&user_id=' . $reportUserId . '&format=pdf') ?>" title="Descargar informe registrado"><i class="bi bi-file-earmark-pdf me-1"></i> <?= e((string) $registeredReport['name']) ?></a>
+                                                <?php elseif (count($registeredReports) > 1 && $reportUserId > 0): ?>
+                                                    <div class="dropdown"><button class="btn btn-sm btn-outline-primary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false"><i class="bi bi-file-earmark-pdf me-1"></i> Informes</button><ul class="dropdown-menu dropdown-menu-end"><?php foreach ($registeredReports as $registeredReport): ?><li><a class="dropdown-item" href="<?= e(route_url('reports.run', (int) $registeredReport['id']) . '?company_id=' . $reportCompanyId . '&process_id=' . $reportProcessId . '&user_id=' . $reportUserId . '&format=pdf') ?>"><i class="bi bi-file-earmark-pdf me-2"></i><?= e((string) $registeredReport['name']) ?> <span class="text-muted small">v<?= e((string) $registeredReport['version']) ?></span></a></li><?php endforeach; ?></ul></div>
+                                                <?php else: ?>
+                                                    <a class="btn btn-sm btn-outline-primary" href="<?= e($reportUrl) ?>" title="Descargar informe estándar"><i class="bi bi-file-earmark-pdf me-1"></i> Informe estándar</a>
+                                                <?php endif; ?>
                                             <?php else: ?>
                                                 <span class="text-muted small">Sin informe</span>
                                             <?php endif; ?>
@@ -189,7 +198,7 @@ $rankingHeaders = [
 </section>
 
 <?php if ($warnings): ?>
-    <section class="content-panel mt-4">
+    <section class="card content-panel mt-4">
         <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
             <div>
                 <h2 class="h5 fw-bold mb-1">Advertencias</h2>
@@ -198,7 +207,7 @@ $rankingHeaders = [
             <span class="badge text-bg-warning"><?= count($warnings) ?> advertencias</span>
         </div>
         <div class="table-responsive">
-            <table class="table align-middle app-table app-data-table" data-export-title="Advertencias Ranking Completo">
+            <table class="table table-hover align-middle app-table app-data-table" data-export-title="Advertencias Ranking Completo">
                 <thead>
                     <tr>
                         <th>Proceso</th>

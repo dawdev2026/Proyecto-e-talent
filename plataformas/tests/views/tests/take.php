@@ -18,6 +18,27 @@ $audioVisualInterruptionPolicy = (string) ($session['audio_visual_interruption_p
 $audioVisualVoicePolicy = (string) ($session['audio_visual_voice_policy'] ?? 'warn');
 $audioVisualPermissionPolicy = (string) ($session['audio_visual_permission_policy'] ?? 'pause');
 $audioVisualQualityProfile = (string) ($session['audio_visual_quality_profile'] ?? 'standard');
+$assessmentNeedsActivation = (string) ($session['status'] ?? '') === 'assigned';
+$assessmentEntryFlow = !empty($assessmentEntryFlow);
+$assessmentRequirements = ProcessPrerequisiteService::requirements($session);
+$assessmentIdentityRequired = !empty($assessmentRequirements['facial_required']);
+$assessmentComponentsRequired = !empty($assessmentRequirements['component_required']) || $audioVisualMode;
+$assessmentIdentityVerified = !$assessmentIdentityRequired || !$assessmentEntryFlow || !empty($assessmentIdentityVerified);
+$assessmentFinalLabel = 'Test';
+$assessmentFlowSteps = [];
+if ($assessmentIdentityRequired) $assessmentFlowSteps[] = ['id' => 'identity', 'label' => 'Reconocimiento facial'];
+if ($assessmentComponentsRequired) $assessmentFlowSteps[] = ['id' => 'components', 'label' => 'Validación de componentes'];
+$assessmentFlowSteps[] = ['id' => 'instructions', 'label' => 'Instrucciones y registro'];
+$assessmentFlowSteps[] = ['id' => 'assessment', 'label' => $assessmentFinalLabel];
+$assessmentCurrentStage = $assessmentIdentityRequired && !$assessmentIdentityVerified
+    ? 'identity'
+    : ($assessmentComponentsRequired ? 'components' : 'instructions');
+$assessmentStep = 1;
+$assessmentComponentStepNumber = null;
+foreach ($assessmentFlowSteps as $flowIndex => $flowStep) {
+    if ($flowStep['id'] === $assessmentCurrentStage) $assessmentStep = $flowIndex + 1;
+    if ($flowStep['id'] === 'components') $assessmentComponentStepNumber = $flowIndex + 1;
+}
 $showQuestionNumbers = (int) ($session['show_question_numbers'] ?? 1) === 1;
 $answeredTotal = 0;
 $currentAnswered = 0;
@@ -150,8 +171,8 @@ if (!function_exists('test_choice_marker')) {
     }
 }
 ?>
-<section class="test-taking-shell">
-    <div class="test-taking-header">
+<section class="test-taking-shell<?= $assessmentNeedsActivation ? ' is-assessment-preparing' : '' ?>">
+    <?php if (!$assessmentNeedsActivation): ?><div class="test-taking-header">
         <div>
             <p class="text-uppercase text-primary fw-bold small mb-1">Responder</p>
             <h1 class="fw-bold mb-1"><?= e($session['instrument_name']) ?></h1>
@@ -169,14 +190,19 @@ if (!function_exists('test_choice_marker')) {
                 <i class="bi bi-arrow-left me-1"></i> Volver
             </a>
         </div>
-    </div>
+    </div><?php endif; ?>
     <div class="test-fullscreen-stage" data-test-fullscreen-stage>
         <form
             method="post"
             class="needs-validation"
             novalidate
             data-test-taking-form
+            <?= $assessmentEntryFlow && $assessmentIdentityRequired ? 'data-face-capture-form data-face-purpose="assessment_entry" data-face-liveness-threshold="' . e((string) ($assessmentFaceSettings['liveness_threshold'] ?? 0.60)) . '"' : '' ?>
             data-supervised-mode="<?= $supervisedMode ? '1' : '0' ?>"
+            data-assessment-needs-activation="<?= $assessmentNeedsActivation ? '1' : '0' ?>"
+            data-assessment-entry-url="<?= e(route_url('facial-recognition.assessment-entry')) ?>"
+            data-assessment-identity-verified="<?= $assessmentIdentityVerified ? '1' : '0' ?>"
+            data-assessment-components-required="<?= $assessmentComponentsRequired ? '1' : '0' ?>"
             data-audio-visual-mode="<?= $audioVisualMode ? '1' : '0' ?>"
             data-audio-visual-upload-failure-policy="<?= e((string) ($session['audio_visual_upload_failure_policy'] ?? 'continue')) ?>"
             data-audio-visual-interruption-policy="<?= e($audioVisualInterruptionPolicy) ?>"
@@ -193,6 +219,8 @@ if (!function_exists('test_choice_marker')) {
             data-media-chunk-url="<?= e(route_url('test-session.media-chunk', (int) $session['id'])) ?>"
             data-media-finalize-url="<?= e(route_url('test-session.media-finalize', (int) $session['id'])) ?>"
             data-media-risk-url="<?= e(route_url('test-session.media-risk', (int) $session['id'])) ?>"
+            data-media-failure-url="<?= e(route_url('test-session.media-failure', (int) $session['id'])) ?>"
+            data-media-screenshot-url="<?= e(route_url('test-session.media-screenshot', (int) $session['id'])) ?>"
             data-draft-url="<?= e(route_url('test-session.draft', (int) $session['id'])) ?>"
             data-process-availability-url="<?= e(route_url('test-session.availability', (int) $session['id'])) ?>"
             data-current-block="<?= (int) $currentBlock ?>"
@@ -202,15 +230,40 @@ if (!function_exists('test_choice_marker')) {
             data-test-exit-message="<?= e($evaluationMessages['exit_confirm_message']) ?>"
             data-test-exit-continue-button="<?= e($evaluationMessages['exit_continue_button']) ?>"
             data-test-exit-save-button="<?= e($evaluationMessages['exit_save_exit_button']) ?>"
+            data-incomplete-confirm-title="<?= e($evaluationMessages['incomplete_confirm_title']) ?>"
+            data-incomplete-confirm-message="<?= e($evaluationMessages['incomplete_confirm_message']) ?>"
+            data-incomplete-confirm-button="<?= e($evaluationMessages['incomplete_confirm_button']) ?>"
+            data-incomplete-cancel-button="<?= e($evaluationMessages['incomplete_cancel_button']) ?>"
+            data-expired-message="<?= e($evaluationMessages['expired_message']) ?>"
         >
         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-        <?php if ($supervisedMode): ?>
-            <div class="supervised-gate" data-supervised-gate role="dialog" aria-modal="true" aria-labelledby="supervisedGateTitle">
+        <?php if ($assessmentEntryFlow): ?>
+            <header class="assessment-preparation-heading">
+                <p class="dashboard-kicker mb-2">Preparación de actividad</p>
+                <h1 class="h2 fw-bold mb-2" id="assessmentPreparationTitle">Antes de comenzar el test</h1>
+                <p class="text-muted mb-0">Completa los pasos habilitados para este proceso. El tiempo comenzará cuando confirmes las instrucciones.</p>
+            </header>
+            <?php if ($assessmentIdentityRequired): ?>
+                <input type="hidden" name="user_id" value="<?= (int) ($assessmentUserId ?? 0) ?>">
+                <input type="hidden" name="return_to" value="<?= e($assessmentReturnTo ?? '') ?>">
+                <input type="hidden" name="face_challenge" value="">
+                <input type="hidden" name="face_start_key" value="">
+                <input type="hidden" name="face_embedding" value="">
+                <input type="hidden" name="face_liveness" value="0">
+            <?php endif; ?>
+            <?php include PLATAFORMAS_PATH . '/core/views/partials/assessment_stepper.php'; ?>
+        <?php endif; ?>
+        <?php if ($assessmentNeedsActivation): ?>
+            <section class="supervised-gate assessment-preparation-page" data-assessment-wizard aria-labelledby="assessmentPreparationTitle">
                 <div class="supervised-gate-panel">
+                    <?php if ($assessmentEntryFlow && $assessmentIdentityRequired && !$assessmentIdentityVerified): ?>
+                        <?php include PLATAFORMAS_PATH . '/core/views/partials/assessment_face_stage.php'; ?>
+                    <?php endif; ?>
+                    <?php if ($assessmentComponentsRequired): ?><section class="assessment-flow-stage <?= $assessmentCurrentStage !== 'components' ? 'd-none' : '' ?>" data-assessment-stage="components" aria-labelledby="supervisedGateTitle" <?= $assessmentCurrentStage !== 'components' ? 'hidden inert' : '' ?>>
                     <span class="supervised-gate-icon"><i class="bi bi-shield-lock"></i></span>
-                    <h2 id="supervisedGateTitle">Modo de rendicion supervisada</h2>
-                    <p>Para comenzar, intenta usar pantalla completa. Si tu dispositivo o navegador no lo permite, la evaluacion continuara registrando otras senales de actividad.</p>
-                    <?php if ($audioVisualMode): ?>
+                    <h2 id="supervisedGateTitle" class="assessment-stage-title">Valida los componentes</h2>
+                    <p>Autoriza los componentes que este proceso necesita. El test y su tiempo aún no comienzan.</p>
+                    <?php if ($assessmentComponentsRequired): ?>
                         <div class="border rounded p-3 mb-3 text-start" data-audio-visual-setup>
                             <strong class="d-block mb-2">Control audiovisual</strong>
                             <span class="form-label d-block">Regla ante interrupcion</span>
@@ -218,22 +271,48 @@ if (!function_exists('test_choice_marker')) {
                             <div class="form-text mb-2"><?php
                                 echo e(['continue' => 'Registrar y continuar', 'pause' => 'Registrar y pausar', 'block' => 'Registrar y bloquear'][$audioVisualInterruptionPolicy] ?? 'Registrar y pausar');
                             ?></div>
-                            <div class="alert alert-secondary py-2 mb-2 d-none" role="status" aria-live="polite" data-audio-visual-status></div>
-                            <div class="form-check">
-                                <input id="audio_visual_consent" class="form-check-input" type="checkbox" data-audio-visual-consent>
-                                <label class="form-check-label small" for="audio_visual_consent">Acepto la captura de camara y microfono durante la evaluacion y su revision por administradores autorizados.</label>
+                            <div class="row g-2 mb-2" data-audio-visual-checks>
+                                <div class="col-12 col-md-4"><div class="border rounded p-2 small" data-audio-visual-check="camera"><i class="bi bi-hourglass-split me-1" data-audio-visual-check-icon aria-hidden="true"></i><span data-audio-visual-check-label>Cámara: pendiente</span><span class="d-block text-muted" data-audio-visual-check-message></span></div></div>
+                                <div class="col-12 col-md-4"><div class="border rounded p-2 small" data-audio-visual-check="microphone"><i class="bi bi-hourglass-split me-1" data-audio-visual-check-icon aria-hidden="true"></i><span data-audio-visual-check-label>Micrófono: pendiente</span><span class="d-block text-muted" data-audio-visual-check-message></span></div></div>
+                                <div class="col-12 col-md-4"><div class="border rounded p-2 small" data-audio-visual-check="screen"><i class="bi bi-hourglass-split me-1" data-audio-visual-check-icon aria-hidden="true"></i><span data-audio-visual-check-label>Captura: pendiente</span><span class="d-block text-muted" data-audio-visual-check-message></span></div></div>
                             </div>
-                            <div class="form-text">La camara y el microfono dependen de los permisos del navegador y del dispositivo. Toda interrupcion quedara registrada.</div>
+                            <video class="w-100 rounded border d-none mb-2 audio-visual-camera-preview" muted playsinline autoplay data-audio-visual-preview aria-label="Vista previa de cámara"></video>
+                            <div class="alert alert-secondary py-2 mb-2 d-none" role="status" aria-live="polite" data-audio-visual-status></div>
+                            <button class="btn btn-outline-primary d-none mb-2" type="button" data-audio-visual-preflight-retry><i class="bi bi-arrow-repeat me-1"></i>Reintentar autorización de componentes</button>
+                            <div class="audio-visual-consent-box" role="group" aria-labelledby="audioVisualConsentTitle">
+                            <div id="audioVisualConsentTitle" class="audio-visual-consent-title"><i class="bi bi-hand-index-thumb me-1" aria-hidden="true"></i>Aceptación de componentes</div>
+                                <div class="form-check">
+                                    <input id="audio_visual_consent" class="form-check-input" type="checkbox" data-audio-visual-consent>
+                                    <label class="form-check-label small" for="audio_visual_consent">Acepto la captura de camara, microfono y pantalla o contenido visible durante la evaluacion y su revision por administradores autorizados.</label>
+                                </div>
+                            </div>
+                            <div class="form-text">La cámara, el micrófono y la captura visual dependen de los permisos del navegador y del dispositivo. Esta comprobación no inicia la grabación del test.</div>
                         </div>
                     <?php endif; ?>
-                    <button class="btn btn-primary" type="button" data-supervised-start>
-                        <i class="bi bi-fullscreen me-1"></i> Iniciar evaluacion
+                    <button class="btn btn-primary mt-2" type="button" data-supervised-start <?= ($audioVisualMode || !$supervisedMode) ? 'disabled' : '' ?>>
+                        <i class="bi bi-fullscreen me-1"></i> <?= ($audioVisualMode || !$supervisedMode) ? 'Validar componentes y continuar' : 'Continuar a instrucciones' ?>
                     </button>
                     <button class="btn btn-outline-secondary d-none" type="button" data-supervised-continue>
                         Continuar sin pantalla completa
                     </button>
+                    </section><?php endif; ?>
+                    <section class="assessment-flow-stage <?= $assessmentCurrentStage !== 'instructions' ? 'd-none' : '' ?>" data-assessment-stage="instructions" aria-labelledby="assessmentInstructionsTitle" <?= $assessmentCurrentStage !== 'instructions' ? 'hidden inert' : '' ?>>
+                        <span class="supervised-gate-icon"><i class="bi bi-info-circle"></i></span>
+                        <h2 id="assessmentInstructionsTitle" class="assessment-stage-title">Instrucciones y reglas del test</h2>
+                        <div class="text-start assessment-instructions-content">
+                            <h3 class="h6 fw-bold">Instrucciones del test</h3>
+                            <?= test_prompt_html((string) ($session['instructions'] ?? '')) ?: '<p class="text-muted">No se registraron instrucciones adicionales para este test.</p>' ?>
+                            <h3 class="h6 fw-bold mt-3">Registro de actividades</h3>
+                            <p><?= e((int) ($session['track_activity_enabled'] ?? 0) === 1 ? $evaluationMessages['activity_tracking_notice'] : $evaluationMessages['activity_tracking_disabled_notice']) ?></p>
+                            <?php if ($audioVisualMode): ?><p>Además se grabarán audio y video y se generarán capturas de pantalla para revisión autorizada.</p><?php endif; ?>
+                        </div>
+                        <button class="btn btn-primary mt-3" type="button" data-assessment-begin><i class="bi bi-play-circle me-1"></i> Entendido, comenzar test</button>
+                        <p class="small text-danger mt-2 mb-0" data-assessment-begin-status role="status" aria-live="polite"></p>
+                    </section>
                 </div>
-            </div>
+            </section>
+        <?php endif; ?>
+        <?php if ($supervisedMode): ?>
             <div class="supervised-gate is-exit-warning d-none" data-supervised-exit-warning role="dialog" aria-modal="true" aria-labelledby="supervisedExitTitle">
                 <div class="supervised-gate-panel">
                     <span class="supervised-gate-icon"><i class="bi bi-fullscreen-exit"></i></span>
@@ -259,13 +338,14 @@ if (!function_exists('test_choice_marker')) {
                         <span class="supervised-gate-icon"><i class="bi bi-camera-video-off"></i></span>
                         <h2 id="audioVisualReconnectTitle">Control audiovisual interrumpido</h2>
                         <p>La evaluación está pausada y las preguntas permanecen ocultas. Permite nuevamente la cámara y el micrófono para continuar.</p>
+                        <div class="alert alert-danger text-start small" data-inline-alert data-audio-visual-reconnect-indicator><i class="bi bi-exclamation-circle-fill me-1" data-audio-visual-reconnect-icon aria-hidden="true"></i><span data-audio-visual-reconnect-component>Componente audiovisual no disponible</span></div>
                         <div class="small text-muted" data-audio-visual-reconnect-status>La acción quedará registrada.</div>
                         <button class="btn btn-primary" type="button" data-audio-visual-reconnect>Reintentar conexión audiovisual</button>
                     </div>
                 </div>
             <?php endif; ?>
         <?php endif; ?>
-        <div class="test-taking-scroll" data-test-fullscreen-scroll tabindex="-1" aria-label="Contenido de la evaluacion">
+        <div class="test-taking-scroll" data-test-fullscreen-scroll tabindex="-1" aria-label="Contenido de la evaluacion" <?= $assessmentNeedsActivation ? 'aria-hidden="true" inert' : '' ?>>
         <div class="test-block-saving d-none" data-test-block-saving role="status" aria-live="polite">
             <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
             <span>Guardando datos...</span>
@@ -366,7 +446,7 @@ if (!function_exists('test_choice_marker')) {
                     <?php if ($currentBlock < $totalBlocks): ?>
                         <button class="btn btn-primary px-4" type="submit" name="test_action" value="save_block_next"><i class="bi bi-arrow-right-circle me-1"></i> Guardar y Continuar</button>
                     <?php else: ?>
-                        <button class="btn btn-primary px-4" type="submit" name="test_action" value="save_block_finish"><i class="bi bi-arrow-right-circle me-1"></i> Guardar y Continuar</button>
+                        <button class="btn btn-primary px-4" type="submit" name="test_action" value="save_block_finish"><i class="bi bi-check2-circle me-1"></i> Guardar y Finalizar</button>
                     <?php endif; ?>
                 <?php else: ?>
                     <button class="btn btn-primary px-4" type="submit" name="test_action" value="complete"><i class="bi bi-check2-circle me-1"></i> Guardar y Finalizar</button>
