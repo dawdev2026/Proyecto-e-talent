@@ -1604,7 +1604,7 @@ final class EvaluationSurveyController extends Controller
             }
         }
         $returnUrl = trim((string) ($_POST['return_url'] ?? ''));
-        if ($returnUrl === '' || $returnUrl[0] !== '/' || str_starts_with($returnUrl, '//')) {
+        if ($returnUrl === '' || $returnUrl[0] !== '/' || substr($returnUrl, 0, 2) === '//') {
             $returnUrl = route_url('evaluation-surveys.attempt.result', $attemptId);
         }
         redirect($returnUrl);
