@@ -3395,9 +3395,12 @@ final class TestProcessModel
     private function processPolicySelect(): string
     {
         $columns = ['facial_enrollment_policy', 'component_validation_policy', 'audio_visual_recording_policy', 'action_logging_policy'];
+        // information_schema recibe el nombre sin delimitadores; los JOIN SQL
+        // siguen usando database_identifier() donde corresponde.
+        $testsSchema = database_name('tests');
         $selects = [];
         foreach ($columns as $column) {
-            $selects[] = $this->policySchemaColumnExists('e_talent_tests', 'test_processes', $column)
+            $selects[] = $this->policySchemaColumnExists($testsSchema, 'test_processes', $column)
                 ? 'p.' . $column . ' AS ' . $column
                 : '"inherit" AS ' . $column;
         }
@@ -3410,9 +3413,10 @@ final class TestProcessModel
             'process_facial_enrollment_required', 'process_component_validation_required',
             'process_record_audio_visual', 'process_record_actions', 'process_policy_snapshot_at',
         ];
+        $evaluationSchema = database_name('evaluaciones_encuestas');
         $selects = [];
         foreach ($columns as $column) {
-            $exists = $this->policySchemaColumnExists('e_talent_evaluaciones_encuestas', 'evaluation_survey_attempts', $column);
+            $exists = $this->policySchemaColumnExists($evaluationSchema, 'evaluation_survey_attempts', $column);
             if (!$exists) {
                 $selects[] = 'NULL AS ' . $column;
             } else {
