@@ -810,6 +810,7 @@ try {
         if ($mediaAction === 'screenshot') { (new EvaluationSurveyController())->mediaScreenshot(); return; }
         if ($mediaAction === 'screenshot-file') { (new EvaluationSurveyController())->mediaScreenshotFile(); return; }
         if ($mediaAction === 'evidence') { (new EvaluationSurveyController())->mediaEvidence(); return; }
+        if ($mediaAction === 'process') { (new EvaluationSurveyController())->mediaProcess(); return; }
         if ($mediaAction === 'partial') { (new EvaluationSurveyController())->mediaPartial(); return; }
     }
 

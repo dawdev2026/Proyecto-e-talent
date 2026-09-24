@@ -409,6 +409,7 @@ function route_url(string $route, ?int $id = null): string
         'evaluation-surveys.attempt.media.screenshot' => ['evaluaciones-encuestas/intentos/%s/media/screenshot', 'evaluation_survey_attempt'],
         'evaluation-surveys.attempt.media.screenshot-file' => ['evaluaciones-encuestas/intentos/%s/media/screenshot-file', 'evaluation_survey_attempt'],
         'evaluation-surveys.attempt.media.evidence' => ['evaluaciones-encuestas/intentos/%s/media/evidence', 'evaluation_survey_attempt'],
+        'evaluation-surveys.attempt.media.process' => ['evaluaciones-encuestas/intentos/%s/media/process', 'evaluation_survey_attempt'],
         'evaluation-surveys.attempt.media.partial' => ['evaluaciones-encuestas/intentos/%s/media/partial', 'evaluation_survey_attempt'],
     ];
 

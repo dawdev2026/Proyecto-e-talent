@@ -28,7 +28,7 @@ final class EvaluationSurveyMediaEvidenceModel
 
     public function evidencesForAttempt(int $attemptId): array
     {
-        return $this->db->fetchAll('SELECT * FROM evaluation_survey_media_evidence WHERE attempt_id=? ORDER BY segment_number ASC, id ASC', [$attemptId]);
+        return $this->db->fetchAll('SELECT e.*, j.status AS processing_job_status, j.attempts AS processing_job_attempts, j.last_error AS processing_job_error FROM evaluation_survey_media_evidence e LEFT JOIN evaluation_survey_media_processing_jobs j ON j.evidence_id=e.id WHERE e.attempt_id=? ORDER BY e.segment_number ASC, e.id ASC', [$attemptId]);
     }
 
     /** Removes audiovisual files and database rows for an evaluation attempt. */
