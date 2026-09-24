@@ -76,6 +76,7 @@ final class TestMediaEvidenceModel
         }
 
         $this->deleteStorageFiles($keys);
+        $this->deleteStorageDirectory('sessions/' . $sessionId);
         $this->db->execute('DELETE FROM test_screen_captures WHERE session_id = ?', [$sessionId]);
         $this->db->execute('DELETE FROM test_media_evidence WHERE session_id = ?', [$sessionId]);
     }
@@ -480,6 +481,29 @@ final class TestMediaEvidenceModel
                 @unlink($path);
             }
         }
+    }
+
+    private function deleteStorageDirectory(string $relative): void
+    {
+        $root = realpath($this->storageRoot);
+        $path = $this->absolutePath($relative);
+        $realPath = realpath($path);
+        if ($root === false || $realPath === false || !is_dir($realPath) || ($realPath !== $root && strpos($realPath, $root . DIRECTORY_SEPARATOR) !== 0)) {
+            return;
+        }
+
+        $iterator = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($realPath, FilesystemIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::CHILD_FIRST
+        );
+        foreach ($iterator as $item) {
+            if ($item->isDir()) {
+                @rmdir($item->getPathname());
+            } else {
+                @unlink($item->getPathname());
+            }
+        }
+        @rmdir($realPath);
     }
 
     private function ensureDirectory(string $path): void

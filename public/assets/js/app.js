@@ -5403,6 +5403,31 @@ $(function () {
         });
     });
 
+    $(document).on('submit', 'form[action*="/media/process"]', function (event) {
+        event.preventDefault();
+        var $form = $(this);
+        var $button = $form.find('button[type="submit"]');
+        var originalLabel = $button.html();
+        $button.prop('disabled', true).html('<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>Procesando...');
+        $.ajax({
+            url: $form.attr('action'),
+            method: 'POST',
+            data: $form.serialize(),
+            dataType: 'json',
+            headers: {'X-Requested-With': 'XMLHttpRequest'}
+        }).done(function (payload) {
+            var $pending = $form.prev('.alert');
+            var $video = $('<video>').addClass('w-100 rounded border').attr({controls: true, preload: 'metadata', src: payload.video_url});
+            $pending.replaceWith($video);
+            $form.remove();
+            showNotification('success', payload.message || 'La evidencia audiovisual ya está disponible.');
+        }).fail(function (xhr) {
+            var payload = xhr.responseJSON || {};
+            showNotification('danger', payload.message || 'No se pudo procesar la evidencia audiovisual.');
+            $button.prop('disabled', false).html(originalLabel);
+        });
+    });
+
     function renderImportErrorSummary(errorSummary) {
         var summary = errorSummary || {};
         var total = parseInt(summary.total_errors || 0, 10);
