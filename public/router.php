@@ -66,6 +66,13 @@ function deny_protected_asset_access(string $file): void
     exit;
 }
 
+function is_authenticated_face_model_asset(string $path): bool
+{
+    $cleanPath = ltrim((string) parse_url($path, PHP_URL_PATH), '/');
+
+    return strpos($cleanPath, 'assets/facex/runtime/human-models/') === 0;
+}
+
 function is_same_origin_platform_request(): bool
 {
     $referer = $_SERVER['HTTP_REFERER'] ?? '';
@@ -143,7 +150,7 @@ function protected_file_mime_type(string $file): string
     return $mimeTypes[$extension] ?? 'application/octet-stream';
 }
 
-function serve_protected_public_file(string $path, string $file): void
+function serve_protected_public_file(string $path, string $file, bool $allowAuthenticatedFaceModel = false): void
 {
     $publicRoot = realpath(__DIR__);
     $realFile = realpath($file);
@@ -152,7 +159,10 @@ function serve_protected_public_file(string $path, string $file): void
         deny_public_file_access();
     }
 
-    if (!is_valid_daily_asset_signature($path)) {
+    $authenticatedFaceModel = $allowAuthenticatedFaceModel
+        && is_authenticated_face_model_asset($path)
+        && current_user();
+    if (!$authenticatedFaceModel && !is_valid_daily_asset_signature($path)) {
         deny_protected_asset_access($realFile);
     }
 
@@ -206,7 +216,7 @@ if ($path !== '/' && is_file($file)) {
         return;
     }
 
-    serve_protected_public_file($path, $file);
+    serve_protected_public_file($path, $file, true);
 }
 
 if ($path !== '/' && is_dir($file)) {

@@ -1271,6 +1271,9 @@
                     skipFrames: 99,
                     skipTime: 3000
                 },
+                // Emotion inference is not part of enrollment/liveness and
+                // requires an additional model that is not shipped by QA.
+                emotion: { enabled: false },
                 iris: { enabled: false },
                 antispoof: { enabled: false },
                 liveness: { enabled: false }
