@@ -567,7 +567,12 @@ final class TestProcessModel
                         ELSE COALESCE(latest.status, "assigned") END AS status,
                    latest.id AS attempt_id, latest.final_score, latest.completed_at,
                    COALESCE(latest.answers_count, 0) AS answers_count,
-                   COALESCE(q.questions_count, 0) AS items_count
+                   COALESCE(NULLIF(latest.question_set_count, 0), CASE
+                       WHEN COALESCE(f.question_display_limit, 0) > 0
+                            AND f.question_display_limit < COALESCE(q.questions_count, 0)
+                       THEN f.question_display_limit
+                       ELSE COALESCE(q.questions_count, 0)
+                   END) AS items_count
             FROM test_process_evaluation_assignments a
             JOIN test_processes p ON p.id = a.process_id
             JOIN ' . $this->coreSchema . '.users u ON u.id = a.user_id
@@ -577,7 +582,8 @@ final class TestProcessModel
                        eme.recording_started_at,
                        ' . $this->evaluationSnapshotSelect('ea', false) . ',
                        (SELECT MIN(ae.created_at) FROM ' . $schema . '.evaluation_survey_activity_events ae WHERE ae.attempt_id = ea.id AND ae.event_type = "supervised_started") AS supervised_started_at,
-                       COALESCE(answer_counts.answers_count, 0) AS answers_count
+                       COALESCE(answer_counts.answers_count, 0) AS answers_count,
+                       JSON_LENGTH(ea.question_set_json) AS question_set_count
                 FROM ' . $schema . '.evaluation_survey_attempts ea
                 LEFT JOIN ' . $schema . '.evaluation_survey_media_evidence eme ON eme.attempt_id = ea.id
                     AND eme.segment_number = (SELECT MAX(eme2.segment_number) FROM ' . $schema . '.evaluation_survey_media_evidence eme2 WHERE eme2.attempt_id = ea.id)
@@ -1374,9 +1380,19 @@ final class TestProcessModel
 
     public function removeAllUsers(int $processId): int
     {
-        $userRows = $this->db->fetchAll('SELECT user_id FROM test_process_users WHERE process_id = ? AND status <> "cancelled"', [$processId]);
-        foreach ($userRows as $userRow) {
-            $this->removeEvaluationAttemptsForProcessUser($processId, (int) ($userRow['user_id'] ?? 0));
+        $userRows = $this->db->fetchAll('SELECT user_id FROM test_process_users WHERE process_id = ?', [$processId]);
+        $evaluationUserRows = $this->tableExists('test_process_evaluation_assignments')
+            ? $this->db->fetchAll('SELECT DISTINCT user_id FROM test_process_evaluation_assignments WHERE process_id = ?', [$processId])
+            : [];
+        $userIds = [];
+        foreach (array_merge($userRows, $evaluationUserRows) as $userRow) {
+            $userId = (int) ($userRow['user_id'] ?? 0);
+            if ($userId > 0) {
+                $userIds[$userId] = true;
+            }
+        }
+        foreach (array_keys($userIds) as $userId) {
+            $this->removeEvaluationAttemptsForProcessUser($processId, (int) $userId);
         }
 
         $media = new TestMediaEvidenceModel($this->db);

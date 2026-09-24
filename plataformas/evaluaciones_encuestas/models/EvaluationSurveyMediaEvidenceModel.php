@@ -62,6 +62,7 @@ final class EvaluationSurveyMediaEvidenceModel
         }
 
         $this->deleteStorageFiles($keys);
+        $this->deleteStorageDirectory('attempts/' . $attemptId);
         $this->db->execute('DELETE FROM evaluation_survey_screen_captures WHERE attempt_id = ?', [$attemptId]);
         $this->db->execute('DELETE FROM evaluation_survey_media_evidence WHERE attempt_id = ?', [$attemptId]);
     }
@@ -367,6 +368,29 @@ final class EvaluationSurveyMediaEvidenceModel
             if ($parent === false || ($parent !== $root && strpos($parent, $root . DIRECTORY_SEPARATOR) !== 0)) continue;
             if (is_file($path)) @unlink($path);
         }
+    }
+
+    private function deleteStorageDirectory(string $relative): void
+    {
+        $root = realpath($this->storageRoot);
+        $path = $this->absolutePath($relative);
+        $realPath = realpath($path);
+        if ($root === false || $realPath === false || !is_dir($realPath) || ($realPath !== $root && strpos($realPath, $root . DIRECTORY_SEPARATOR) !== 0)) {
+            return;
+        }
+
+        $iterator = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($realPath, FilesystemIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::CHILD_FIRST
+        );
+        foreach ($iterator as $item) {
+            if ($item->isDir()) {
+                @rmdir($item->getPathname());
+            } else {
+                @unlink($item->getPathname());
+            }
+        }
+        @rmdir($realPath);
     }
     private function ensureDirectory(string $path): void { if (!is_dir($path)) mkdir($path, 0700, true); }
 }
