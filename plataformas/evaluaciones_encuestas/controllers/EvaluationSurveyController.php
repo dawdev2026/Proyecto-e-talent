@@ -1589,17 +1589,36 @@ final class EvaluationSurveyController extends Controller
     public function mediaProcess(): void
     {
         require_permission('manage_evaluation_surveys'); verify_csrf();
+        $isAjax = strtolower((string) ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '')) === 'xmlhttprequest';
         $attemptId = request_secure_id('evaluation_survey_attempt');
         $attempt = $this->attempts->findAttempt($attemptId);
         $evidenceId = max(0, (int) ($_POST['evidence_id'] ?? 0));
         $evidence = $attempt && $evidenceId > 0 ? $this->mediaEvidence->evidenceByIdForAttempt($attemptId, $evidenceId) : null;
         if (!$attempt || !$evidence) {
+            if ($isAjax) {
+                $this->jsonResponse(['ok' => false, 'message' => 'No se encontró la evidencia audiovisual solicitada.'], 404);
+                return;
+            }
             flash('warning', 'No se encontró la evidencia audiovisual solicitada.');
         } else {
             $result = (new EvaluationSurveyMediaProcessingService(database('evaluaciones_encuestas')))->processEvidenceNow($evidenceId);
             if (!empty($result['ok'])) {
+                if ($isAjax) {
+                    $this->jsonResponse([
+                        'ok' => true,
+                        'status' => 'saved',
+                        'message' => 'La evidencia audiovisual fue procesada correctamente.',
+                        'video_url' => route_url('evaluation-surveys.attempt.media.evidence', $attemptId) . '?evidence_id=' . $evidenceId,
+                        'file_size' => (int) ($result['file_size'] ?? 0),
+                    ]);
+                    return;
+                }
                 flash('success', 'La evidencia audiovisual fue procesada correctamente y ya está disponible.');
             } else {
+                if ($isAjax) {
+                    $this->jsonResponse(['ok' => false, 'message' => (string) ($result['message'] ?? 'El procesamiento manual no pudo completarse.')], 422);
+                    return;
+                }
                 flash('warning', (string) ($result['message'] ?? 'El procesamiento manual no pudo completarse. Revisa el estado del job y los fragmentos recibidos.'));
             }
         }
