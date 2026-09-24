@@ -1586,6 +1586,30 @@ final class EvaluationSurveyController extends Controller
         header('Content-Type: ' . $file['mime_type']); header('Content-Length: ' . (string) $file['size']); header('Content-Disposition: inline; filename="evaluacion-' . $attemptId . '.media"'); header('Cache-Control: private, no-store'); readfile($file['path']); exit;
     }
 
+    public function mediaProcess(): void
+    {
+        require_permission('manage_evaluation_surveys'); verify_csrf();
+        $attemptId = request_secure_id('evaluation_survey_attempt');
+        $attempt = $this->attempts->findAttempt($attemptId);
+        $evidenceId = max(0, (int) ($_POST['evidence_id'] ?? 0));
+        $evidence = $attempt && $evidenceId > 0 ? $this->mediaEvidence->evidenceByIdForAttempt($attemptId, $evidenceId) : null;
+        if (!$attempt || !$evidence) {
+            flash('warning', 'No se encontró la evidencia audiovisual solicitada.');
+        } else {
+            $result = (new EvaluationSurveyMediaProcessingService(database('evaluaciones_encuestas')))->processEvidenceNow($evidenceId);
+            if (!empty($result['ok'])) {
+                flash('success', 'La evidencia audiovisual fue procesada correctamente y ya está disponible.');
+            } else {
+                flash('warning', (string) ($result['message'] ?? 'El procesamiento manual no pudo completarse. Revisa el estado del job y los fragmentos recibidos.'));
+            }
+        }
+        $returnUrl = trim((string) ($_POST['return_url'] ?? ''));
+        if ($returnUrl === '' || $returnUrl[0] !== '/' || str_starts_with($returnUrl, '//')) {
+            $returnUrl = route_url('evaluation-surveys.attempt.result', $attemptId);
+        }
+        redirect($returnUrl);
+    }
+
     public function mediaPartial(): void
     {
         require_permission('manage_evaluation_surveys'); verify_csrf();
