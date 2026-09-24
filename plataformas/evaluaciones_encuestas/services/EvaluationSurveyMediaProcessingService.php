@@ -56,11 +56,60 @@ final class EvaluationSurveyMediaProcessingService
         }
     }
 
+    /** Processes one evidence item from an administrative recovery action. */
+    public function processEvidenceNow(int $evidenceId, int $maxAttempts = 3): array
+    {
+        if ($evidenceId <= 0) {
+            return ['ok' => false, 'reason' => 'evidence_not_found'];
+        }
+        $maxAttempts = max(1, min(10, $maxAttempts));
+        $job = $this->claimEvidence($evidenceId, $maxAttempts);
+        if (!$job) {
+            return ['ok' => false, 'reason' => 'job_not_available'];
+        }
+
+        try {
+            $result = $this->inspectEvidence($job);
+            $summary = json_encode($result, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            $this->db->transaction(function (Database $db) use ($job, $summary, $result): void {
+                $db->execute('UPDATE evaluation_survey_media_processing_jobs SET status="completed", completed_at=NOW(), last_error=NULL, updated_at=NOW() WHERE id=? AND status="processing"', [(int) $job['id']]);
+                $db->execute('UPDATE evaluation_survey_media_evidence SET status="saved", file_size=?, sha256=?, processing_status="completed", processing_error=NULL, processing_summary_json=?, processed_at=NOW(), updated_at=NOW() WHERE id=?', [(int) ($result['file_size'] ?? 0), (string) ($result['sha256'] ?? ''), $summary, (int) $job['evidence_id']]);
+            });
+            return ['ok' => true, 'status' => 'saved', 'file_size' => (int) ($result['file_size'] ?? 0)];
+        } catch (Throwable $exception) {
+            $message = mb_substr($exception->getMessage(), 0, 500);
+            $retry = (int) ($job['attempts'] ?? 0) < $maxAttempts;
+            $this->db->transaction(function (Database $db) use ($job, $message, $retry): void {
+                $db->execute('UPDATE evaluation_survey_media_processing_jobs SET status=?, locked_at=NULL, last_error=?, updated_at=NOW() WHERE id=? AND status="processing"', [$retry ? 'queued' : 'failed', $message, (int) $job['id']]);
+                $db->execute('UPDATE evaluation_survey_media_evidence SET processing_status=?, processing_error=?, updated_at=NOW() WHERE id=?', [$retry ? 'queued' : 'failed', $message, (int) $job['evidence_id']]);
+            });
+            return ['ok' => false, 'reason' => 'processing_failed', 'message' => $message, 'retryable' => $retry];
+        }
+    }
+
     private function claimNext(int $maxAttempts): ?array
     {
         return $this->db->transaction(function (Database $db) use ($maxAttempts): ?array {
             $db->execute('UPDATE evaluation_survey_media_processing_jobs SET status="queued", locked_at=NULL WHERE status="processing" AND locked_at < DATE_SUB(NOW(), INTERVAL 30 MINUTE)');
             $job = $db->fetch('SELECT j.*, e.storage_key, e.file_size, e.sha256, e.mime_type, e.status AS evidence_status FROM evaluation_survey_media_processing_jobs j JOIN evaluation_survey_media_evidence e ON e.id=j.evidence_id WHERE j.status="queued" AND j.attempts < ? ORDER BY j.id ASC LIMIT 1 FOR UPDATE', [$maxAttempts]);
+            if (!$job) {
+                return null;
+            }
+            $changed = $db->execute('UPDATE evaluation_survey_media_processing_jobs SET status="processing", attempts=attempts+1, locked_at=NOW(), started_at=COALESCE(started_at,NOW()), updated_at=NOW() WHERE id=? AND status="queued" AND attempts < ?', [(int) $job['id'], $maxAttempts]);
+            return $changed > 0 ? $job : null;
+        });
+    }
+
+    private function claimEvidence(int $evidenceId, int $maxAttempts): ?array
+    {
+        return $this->db->transaction(function (Database $db) use ($evidenceId, $maxAttempts): ?array {
+            $db->execute('UPDATE evaluation_survey_media_processing_jobs SET status="queued", locked_at=NULL WHERE status="processing" AND locked_at < DATE_SUB(NOW(), INTERVAL 30 MINUTE) AND evidence_id=?', [$evidenceId]);
+            $evidence = $db->fetch('SELECT id, status FROM evaluation_survey_media_evidence WHERE id=? LIMIT 1', [$evidenceId]);
+            if (!$evidence || !in_array((string) ($evidence['status'] ?? ''), ['processing', 'saved'], true)) {
+                return null;
+            }
+            $db->execute('INSERT INTO evaluation_survey_media_processing_jobs (evidence_id, status, attempts, last_error) VALUES (?, "queued", 0, NULL) ON DUPLICATE KEY UPDATE status=IF(status="failed", "queued", status), attempts=IF(status="failed", 0, attempts), locked_at=NULL, completed_at=IF(status="failed", NULL, completed_at), last_error=IF(status="failed", NULL, last_error), updated_at=CURRENT_TIMESTAMP', [$evidenceId]);
+            $job = $db->fetch('SELECT j.*, e.storage_key, e.file_size, e.sha256, e.mime_type, e.status AS evidence_status FROM evaluation_survey_media_processing_jobs j JOIN evaluation_survey_media_evidence e ON e.id=j.evidence_id WHERE j.evidence_id=? AND j.status="queued" AND j.attempts < ? LIMIT 1 FOR UPDATE', [$evidenceId, $maxAttempts]);
             if (!$job) {
                 return null;
             }
