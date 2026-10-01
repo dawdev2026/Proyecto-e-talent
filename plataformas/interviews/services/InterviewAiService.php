@@ -24,11 +24,15 @@ final class InterviewAiService
             return ['ok' => false, 'pending' => true, 'data' => $fallback, 'error' => 'IA no configurada.'];
         }
 
-        $prompt = 'Genera un resumen ejecutivo y 10 preguntas de entrevista laboral basadas en report.structured_summary y documents cuando existan. '
+        $prompt = 'Genera un brief estructurado de entrevista laboral basado en job_profile, report.structured_summary y documents cuando existan. '
             . 'No inventes puntajes, instrumentos ni rasgos ausentes; si hay missing_data o consistency_alerts, indicalo como cautela para el moderador. '
+            . 'Usa technical_requirements, behavioral_requirements y evaluation_criteria del perfil del cargo para orientar las preguntas, sin convertirlos en evidencia del candidato. '
             . 'Usa los documentos como antecedentes, identifica su tipo y no trates un documento no procesado como evidencia. '
             . 'Usa lenguaje prudente: indicadores con contexto, sin diagnosticos clinicos ni conclusiones absolutas. '
-            . 'Devuelve JSON con keys summary y questions.';
+            . 'Devuelve JSON con keys summary, competencies, questions, gaps y warnings. '
+            . 'competencies debe ser un array de objetos con keys name, type, relevance, evidence_to_validate y source_refs. '
+            . 'questions debe ser un array de objetos con keys competency, question, follow_ups, expected_evidence y source_refs. '
+            . 'No generes una recomendacion final de contratacion: solo prepara la validacion de la entrevista.';
 
         $result = $this->completeJson($prompt, $context, $fallback);
         if (!empty($result['data']) && is_array($result['data'])) {
@@ -36,6 +40,27 @@ final class InterviewAiService
         }
 
         return $result;
+    }
+
+    public function parseJobProfile(string $text): array
+    {
+        $text = trim($text);
+        $fallback = $this->fallbackJobProfile($text);
+        if ($text === '') {
+            return ['ok' => false, 'pending' => false, 'data' => $fallback, 'error' => 'No se encontró texto para analizar.'];
+        }
+        if (!$this->isConfigured()) {
+            return ['ok' => false, 'pending' => true, 'data' => $fallback, 'error' => 'IA no configurada. Se aplicó una lectura básica del documento.'];
+        }
+
+        $prompt = 'Analiza el perfil de un cargo para preparar una entrevista laboral. '
+            . 'Extrae únicamente información presente en el texto, sin inventar requisitos. '
+            . 'Devuelve JSON con keys title, description, technical_requirements, behavioral_requirements y evaluation_criteria. '
+            . 'technical_requirements y behavioral_requirements deben ser texto con un requisito por línea. '
+            . 'evaluation_criteria debe ser un array de objetos con keys name, type y weight; type debe ser technical, behavioral o general; los pesos deben sumar 100 solo si el documento los informa. '
+            . 'Si un dato no aparece, déjalo vacío.';
+
+        return $this->completeJson($prompt, ['job_profile_text' => mb_substr($text, 0, 500000)], $fallback);
     }
 
     public function normalizeModeratorBrief(array $brief): array
@@ -69,14 +94,44 @@ final class InterviewAiService
             $brief['summary'] = trim((string) $summary);
         }
 
+        $competencies = $brief['competencies'] ?? [];
+        $brief['competencies'] = is_array($competencies) ? array_values(array_filter(array_map(static function ($item): array {
+            if (is_string($item)) {
+                return ['name' => trim($item), 'type' => 'general', 'relevance' => '', 'evidence_to_validate' => '', 'source_refs' => []];
+            }
+            if (!is_array($item)) {
+                return [];
+            }
+            return [
+                'name' => trim((string) ($item['name'] ?? '')),
+                'type' => trim((string) ($item['type'] ?? 'general')),
+                'relevance' => trim((string) ($item['relevance'] ?? '')),
+                'evidence_to_validate' => trim((string) ($item['evidence_to_validate'] ?? '')),
+                'source_refs' => is_array($item['source_refs'] ?? null) ? array_values($item['source_refs']) : [],
+            ];
+        }, $competencies), static fn(array $item): bool => $item['name'] !== '')) : [];
+
         $questions = $brief['questions'] ?? [];
         if (is_string($questions)) {
             $decodedQuestions = json_decode(trim($questions), true);
             $questions = is_array($decodedQuestions) ? $decodedQuestions : [$questions];
         }
-        $brief['questions'] = is_array($questions)
-            ? array_values(array_filter(array_map('strval', $questions), static fn(string $question): bool => trim($question) !== ''))
-            : [];
+        $brief['questions'] = is_array($questions) ? array_values(array_filter(array_map(static function ($item): array {
+            if (is_string($item)) {
+                return ['competency' => '', 'question' => trim($item), 'follow_ups' => [], 'expected_evidence' => '', 'source_refs' => []];
+            }
+            if (!is_array($item)) {
+                return [];
+            }
+            $followUps = is_array($item['follow_ups'] ?? null) ? array_values(array_filter(array_map('strval', $item['follow_ups']))) : [];
+            return [
+                'competency' => trim((string) ($item['competency'] ?? '')),
+                'question' => trim((string) ($item['question'] ?? '')),
+                'follow_ups' => $followUps,
+                'expected_evidence' => trim((string) ($item['expected_evidence'] ?? '')),
+                'source_refs' => is_array($item['source_refs'] ?? null) ? array_values($item['source_refs']) : [],
+            ];
+        }, $questions), static fn(array $item): bool => $item['question'] !== '')) : [];
 
         return $brief;
     }
@@ -88,8 +143,9 @@ final class InterviewAiService
             return ['ok' => false, 'pending' => true, 'data' => $fallback, 'error' => 'IA no configurada.'];
         }
 
-        $prompt = 'Genera un reporte final de entrevista de seleccion combinando report.structured_summary, documents, transcripcion y apuntes. '
+        $prompt = 'Genera un reporte final de entrevista de seleccion combinando job_profile, report.structured_summary, documents, transcripcion, apuntes y evaluations. '
             . 'Usa el informe psicometrico solo como indicador contextual y cita unicamente datos presentes en report.structured_summary. '
+            . 'Compara las respuestas y evaluaciones contra el perfil del cargo, diferenciando requisitos declarados de evidencia observada. '
             . 'Considera el texto extraido de documents solo cuando su estado sea ready y cita el nombre del documento como fuente. '
             . 'Diferencia evidencia observada en entrevista, apuntes, transcripcion e indicadores psicometricos. '
             . 'La key evidence debe ser un array de objetos con keys source, finding, support, interpretation y follow_up. '
@@ -241,9 +297,30 @@ final class InterviewAiService
     private function fallbackBrief(array $context): array
     {
         $candidate = (string) ($context['candidate']['name'] ?? 'Postulante');
+        $profile = is_array($context['process']['job_profile'] ?? null) ? $context['process']['job_profile'] : [];
+        $requirements = [];
+        foreach (['technical_requirements', 'behavioral_requirements'] as $key) {
+            $lines = preg_split('/\R/u', (string) ($profile[$key] ?? '')) ?: [];
+            foreach ($lines as $line) {
+                $line = trim($line, " \t\n\r\0\x0B-•");
+                if ($line !== '') $requirements[] = $line;
+            }
+        }
+        $competencies = [];
+        foreach (array_slice($requirements, 0, 6) as $requirement) {
+            $competencies[] = ['name' => $requirement, 'type' => 'general', 'relevance' => 'Validar evidencia concreta durante la entrevista.', 'evidence_to_validate' => 'Ejemplos, resultados y conductas observables.', 'source_refs' => ['job_profile']];
+        }
+        if (!$competencies) {
+            $competencies = [
+                ['name' => 'Experiencia relacionada con el cargo', 'type' => 'general', 'relevance' => 'Contrastar experiencia y responsabilidades previas.', 'evidence_to_validate' => 'Ejemplos concretos y resultados.', 'source_refs' => ['job_profile']],
+                ['name' => 'Comunicación y colaboración', 'type' => 'behavioral', 'relevance' => 'Observar claridad, escucha y coordinación.', 'evidence_to_validate' => 'Situaciones reales de trabajo con otras personas.', 'source_refs' => ['interview']],
+                ['name' => 'Organización y resolución de problemas', 'type' => 'behavioral', 'relevance' => 'Explorar cómo prioriza y responde ante dificultades.', 'evidence_to_validate' => 'Caso real, decisiones tomadas y resultado.', 'source_refs' => ['interview']],
+            ];
+        }
 
         return [
             'summary' => 'Resumen pendiente de generacion automatica para ' . $candidate . '. Revisa el informe disponible antes de iniciar la entrevista.',
+            'competencies' => $competencies,
             'questions' => [
                 'Que aspectos de tu experiencia reciente se relacionan mas con este cargo?',
                 'Que condiciones te ayudan a rendir de forma consistente?',
@@ -256,6 +333,19 @@ final class InterviewAiService
                 'Que evidencias concretas muestran tus principales fortalezas?',
                 'Que apoyo necesitarias para adaptarte bien al rol?',
             ],
+        ];
+    }
+
+    private function fallbackJobProfile(string $text): array
+    {
+        $lines = array_values(array_filter(array_map(static fn(string $line): string => trim($line), preg_split('/\R/u', $text) ?: [])));
+
+        return [
+            'title' => mb_substr((string) ($lines[0] ?? ''), 0, 180),
+            'description' => mb_substr($text, 0, 12000),
+            'technical_requirements' => '',
+            'behavioral_requirements' => '',
+            'evaluation_criteria' => [],
         ];
     }
 

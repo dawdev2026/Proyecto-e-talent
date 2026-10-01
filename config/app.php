@@ -11,5 +11,7 @@ return [
     'force_https' => 'auto',
     'tmp_path' => dirname(__DIR__) . '/tmp',
     'public_tmp_url' => 'tmp/',
-    'max_upload_mb' => 5,
+    // Límite común para imágenes cargadas desde formularios administrativos.
+    // Los flujos de evidencias, rostro y documentos mantienen sus propios límites.
+    'max_upload_mb' => 10,
 ];

@@ -77,7 +77,9 @@ DROP TABLE IF EXISTS `interview_documents`;
 /*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `interview_documents` (
   `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
-  `appointment_id` int(10) unsigned NOT NULL,
+  `process_id` int(10) unsigned DEFAULT NULL,
+  `candidate_user_id` int(10) unsigned DEFAULT NULL,
+  `appointment_id` int(10) unsigned DEFAULT NULL,
   `document_type` enum('performance','psychological','job_profile','resume','reference','other') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'other',
   `original_name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   `stored_name` varchar(180) COLLATE utf8mb4_unicode_ci NOT NULL,
@@ -92,6 +94,7 @@ CREATE TABLE `interview_documents` (
   `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`) USING BTREE,
+  KEY `idx_interview_documents_process_scope` (`process_id`,`candidate_user_id`,`created_at`) USING BTREE,
   KEY `idx_interview_documents_appointment` (`appointment_id`,`created_at`) USING BTREE,
   KEY `idx_interview_documents_status` (`processing_status`,`created_at`) USING BTREE,
   KEY `idx_interview_documents_hash` (`sha256`) USING BTREE,
@@ -147,6 +150,24 @@ CREATE TABLE `interview_processes` (
 ) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
+-- Perfil estructurado del cargo asociado a cada proceso.
+DROP TABLE IF EXISTS `interview_job_profiles`;
+CREATE TABLE `interview_job_profiles` (
+  `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
+  `process_id` int(10) unsigned NOT NULL,
+  `title` varchar(180) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `description` text COLLATE utf8mb4_unicode_ci,
+  `technical_requirements` text COLLATE utf8mb4_unicode_ci,
+  `behavioral_requirements` text COLLATE utf8mb4_unicode_ci,
+  `evaluation_criteria_json` json DEFAULT NULL,
+  `created_by` int(10) unsigned DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_interview_job_profiles_process` (`process_id`),
+  CONSTRAINT `fk_interview_job_profiles_process` FOREIGN KEY (`process_id`) REFERENCES `interview_processes` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 --
 -- Table structure for table `interview_report_jobs`
 --
@@ -192,6 +213,30 @@ CREATE TABLE `interview_transcription_events` (
   CONSTRAINT `fk_interview_transcription_events_appointment` FOREIGN KEY (`appointment_id`) REFERENCES `interview_appointments` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
+
+-- Evaluación estructurada del entrevistador.
+DROP TABLE IF EXISTS `interview_evaluations`;
+CREATE TABLE `interview_evaluations` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `appointment_id` int(10) unsigned NOT NULL,
+  `evaluator_user_id` int(10) unsigned NOT NULL,
+  `status` enum('draft','submitted') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'draft',
+  `technical_score` tinyint(3) unsigned DEFAULT NULL,
+  `behavioral_score` tinyint(3) unsigned DEFAULT NULL,
+  `overall_score` tinyint(3) unsigned DEFAULT NULL,
+  `recommendation` enum('pending','recommended','not_recommended','hold') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'pending',
+  `strengths` text COLLATE utf8mb4_unicode_ci,
+  `risks` text COLLATE utf8mb4_unicode_ci,
+  `comments` text COLLATE utf8mb4_unicode_ci,
+  `criteria_json` json DEFAULT NULL,
+  `submitted_at` datetime DEFAULT NULL,
+  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_interview_evaluations_appointment_evaluator` (`appointment_id`,`evaluator_user_id`),
+  KEY `idx_interview_evaluations_status` (`status`,`recommendation`,`updated_at`),
+  CONSTRAINT `fk_interview_evaluations_appointment` FOREIGN KEY (`appointment_id`) REFERENCES `interview_appointments` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 --
 -- Dumping events for database 'e_talent_interviews'

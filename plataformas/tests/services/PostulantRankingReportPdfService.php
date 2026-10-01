@@ -561,20 +561,28 @@ final class PostulantRankingReportPdfService
 
     private function brandLogoPath(array $design, array $login): string
     {
+        // El generador PDF embebido trabaja con imágenes rasterizadas. En
+        // particular, el logo del topbar suele ser SVG y el motor lo omite;
+        // priorizamos el logo PNG de la identidad visual de la empresa.
         $candidates = [
-            (string) ($design['topbar_icon_path'] ?? ''),
-            (string) ($design['html_favicon_path'] ?? ''),
             (string) ($login['login_logo_path'] ?? ''),
+            (string) ($design['html_favicon_path'] ?? ''),
+            (string) ($design['topbar_icon_path'] ?? ''),
         ];
 
         foreach ($candidates as $path) {
             $resolved = $this->publicPath($path);
-            if ($resolved !== '' && is_file($resolved)) {
+            if ($resolved !== '' && is_file($resolved) && $this->isPdfImage($resolved)) {
                 return $resolved;
             }
         }
 
         return '';
+    }
+
+    private function isPdfImage(string $path): bool
+    {
+        return in_array(strtolower(pathinfo($path, PATHINFO_EXTENSION)), ['png', 'jpg', 'jpeg'], true);
     }
 
     private function publicPath(string $path): string
@@ -601,6 +609,13 @@ final class PostulantRankingReportPdfService
     {
         $name = trim((string) ($process['name'] ?? ''));
         if ($name !== '') {
+            // Algunos procesos históricos heredaron el nombre de la agenda
+            // (día y rango horario). No es un nombre útil para un informe.
+            if (preg_match('/\b(?:lunes|martes|miércoles|miercoles|jueves|viernes|sábado|sabado|domingo)\b/i', $name)
+                || preg_match('/\b\d{1,2}:\d{2}\b/', $name)) {
+                return 'Evaluación psicométrica';
+            }
+
             return mb_substr($name, 0, 34);
         }
 
