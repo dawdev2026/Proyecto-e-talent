@@ -215,7 +215,7 @@ function require_company_user_field_management(): void
 function require_company_interview_management(): void
 {
     require_auth();
-    if (!has_permission('manage_interview_processes') && !has_permission('manage_company_interviews')) {
+    if (!has_permission('manage_interview_processes') && !has_permission('manage_company_interviews') && !is_company_admin_user()) {
         platform_error(403, 'No tienes permisos para administrar entrevistas.', [
             'detailRows' => ['Permiso requerido' => 'manage_interview_processes o manage_company_interviews'],
         ]);

@@ -41,6 +41,20 @@
         });
     });
 
+    document.querySelectorAll('[data-interview-evaluation]').forEach((form) => {
+        form.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            try {
+                const result = await postForm(form);
+                if (window.AppNotify) {
+                    (result.ok ? window.AppNotify.success : window.AppNotify.error)(result.message || 'Evaluación guardada.');
+                }
+            } catch (error) {
+                if (window.AppNotify) window.AppNotify.error('No se pudo guardar la evaluación.');
+            }
+        });
+    });
+
     document.querySelectorAll('[data-interview-finish]').forEach((button) => {
         button.addEventListener('click', async () => {
             const body = new FormData();
@@ -76,30 +90,58 @@
         });
     });
 
-    const documentModal = document.querySelector('#interviewDocumentModal');
-    if (documentModal) {
-        const frame = documentModal.querySelector('[data-interview-document-frame]');
-        const title = documentModal.querySelector('[data-interview-document-title]');
-        const download = documentModal.querySelector('[data-interview-document-download]');
-        const openTab = documentModal.querySelector('[data-interview-document-open-tab]');
+    const escapeHtml = (value) => String(value || '').replace(/[&<>'"]/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[character]));
+    let documentDrawer = null;
 
-        document.querySelectorAll('[data-interview-document-open]').forEach((button) => {
-            button.addEventListener('click', () => {
-                const viewUrl = button.dataset.viewUrl || '';
-                const downloadUrl = button.dataset.downloadUrl || viewUrl || '#';
-                const label = button.dataset.title || 'Documento';
+    const closeDocumentDrawer = () => {
+        if (!documentDrawer) return;
+        document.body.classList.remove('interview-report-drawer-open');
+        documentDrawer.remove();
+        documentDrawer = null;
+    };
 
-                if (title) title.textContent = label;
-                if (download) download.href = downloadUrl;
-                if (openTab) openTab.href = viewUrl || downloadUrl;
-                if (frame) frame.src = viewUrl || downloadUrl;
-            });
+    const openDocumentDrawer = (button) => {
+        closeDocumentDrawer();
+        const viewUrl = button.dataset.viewUrl || button.getAttribute('href') || '';
+        const downloadUrl = button.dataset.downloadUrl || viewUrl || '#';
+        const label = button.dataset.title || 'Documento';
+        const iframeUrl = viewUrl + (viewUrl.indexOf('?') === -1 ? '?' : '&') + 'view=1';
+        documentDrawer = document.createElement('aside');
+        documentDrawer.className = 'interview-report-drawer is-open';
+        documentDrawer.setAttribute('data-interview-report-drawer', '');
+        documentDrawer.innerHTML = '<div class="interview-report-drawer-backdrop" data-report-close></div>'
+            + '<section class="interview-report-drawer-panel" role="dialog" aria-modal="true" aria-labelledby="interview-document-drawer-title">'
+            + '<header class="interview-report-drawer-header"><div><p class="text-uppercase text-primary fw-bold small mb-1">Documentos</p><h2 class="h5 mb-0" id="interview-document-drawer-title">' + escapeHtml(label) + '</h2></div><button type="button" class="btn btn-outline-secondary btn-sm" data-report-close aria-label="Cerrar"><i class="bi bi-x-lg"></i></button></header>'
+            + '<div class="interview-report-drawer-body"><iframe title="Visualizador de documento" src="' + escapeHtml(iframeUrl) + '"></iframe></div>'
+            + '<footer class="interview-report-drawer-footer"><a class="btn btn-outline-primary" href="' + escapeHtml(downloadUrl) + '"><i class="bi bi-download me-1"></i>Descargar</a><a class="btn btn-outline-secondary" href="' + escapeHtml(viewUrl || downloadUrl) + '" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right me-1"></i>Abrir en pestaña</a></footer>'
+            + '</section>';
+        document.body.appendChild(documentDrawer);
+        document.body.classList.add('interview-report-drawer-open');
+        documentDrawer.querySelectorAll('[data-report-close]').forEach((close) => close.addEventListener('click', closeDocumentDrawer));
+        documentDrawer.querySelector('[data-report-close]')?.focus();
+    };
+
+    document.querySelectorAll('[data-interview-document-open]').forEach((button) => {
+        button.addEventListener('click', (event) => {
+            event.preventDefault();
+            openDocumentDrawer(button);
         });
+    });
 
-        documentModal.addEventListener('hidden.bs.modal', () => {
-            if (frame) frame.src = 'about:blank';
+    const documentDeleteForm = document.getElementById('interview-document-delete-form');
+    document.querySelectorAll('[data-interview-document-delete]').forEach((button) => {
+        button.addEventListener('click', () => {
+            if (!documentDeleteForm || !button.dataset.deleteUrl) return;
+            const documentName = button.dataset.documentName || 'este documento';
+            if (!window.confirm('¿Eliminar "' + documentName + '"? Esta acción no se puede deshacer.')) return;
+            documentDeleteForm.action = button.dataset.deleteUrl;
+            documentDeleteForm.submit();
         });
-    }
+    });
+
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') closeDocumentDrawer();
+    });
 
     document.querySelectorAll('[data-ai-test-connection]').forEach((button) => {
         button.addEventListener('click', async () => {

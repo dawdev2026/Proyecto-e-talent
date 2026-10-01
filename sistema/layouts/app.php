@@ -253,8 +253,8 @@ if ($user) {
     if ($isCompanyAdmin && has_permission('view_company_client_portal')) {
         $clientAdminAuditMenuItem = ['page' => 'client-admin.component-reviews', 'route' => 'client-admin.component-reviews', 'label' => 'Historial de Validaciones', 'icon' => 'bi-pc-display'];
     }
-    if (has_permission('manage_interview_processes') || has_permission('manage_company_interviews') || has_permission('conduct_selection_interviews') || has_permission('view_interview_reports')) {
-        $interviewsMenuItems[] = ['page' => 'interviews', 'route' => 'interviews', 'label' => 'Procesos', 'icon' => 'bi-camera-video'];
+    if ($isCompanyAdmin || has_permission('manage_interview_processes') || has_permission('manage_company_interviews') || has_permission('conduct_selection_interviews') || has_permission('view_interview_reports')) {
+        $interviewsMenuItems[] = ['page' => 'interviews', 'route' => 'interviews', 'label' => $isCompanyAdmin ? 'Agenda entrevistas' : 'Procesos', 'icon' => 'bi-camera-video'];
     }
     if (has_permission('manage_interview_settings')) {
         $interviewsMenuItems[] = ['page' => 'interviews.settings', 'route' => 'interviews.settings', 'label' => 'Configuracion', 'icon' => 'bi-sliders'];

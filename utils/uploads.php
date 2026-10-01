@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 
-function valid_image_uploads(array $files, int $maxSizeMb = 5): array
+function valid_image_uploads(array $files, int $maxSizeMb = 10): array
 {
     $valid = [];
     $allowed = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp'];

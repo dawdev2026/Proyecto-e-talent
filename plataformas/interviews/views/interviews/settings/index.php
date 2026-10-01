@@ -56,7 +56,7 @@ $progressWidth = max(0, min(100, (int) ($dailyPool['committed_percent'] ?? 0)));
                     <input class="form-check-input" type="checkbox" name="daily_transcription_enabled" <?= !empty($daily['transcription_enabled']) ? 'checked' : '' ?>>
                     <span>Habilitar controles de transcripcion Daily</span>
                 </label>
-                <div class="form-text">El moderador podra iniciar y detener transcripcion desde el aula remota.</div>
+                <div class="form-text">El entrevistador podrá iniciar y detener la transcripción desde la sala remota.</div>
             </div>
             <div class="col-12 col-md-6 col-lg-3">
                 <label class="interview-setting-toggle">

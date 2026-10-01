@@ -447,15 +447,22 @@ final class PlatformSettingsController extends Controller
             return '';
         }
 
-        if (($file['error'] ?? UPLOAD_ERR_OK) !== UPLOAD_ERR_OK || !is_uploaded_file($file['tmp_name'] ?? '')) {
-            flash('danger', 'No se pudo cargar una imagen de marca.');
+        $uploadError = (int) ($file['error'] ?? UPLOAD_ERR_NO_FILE);
+        if ($uploadError !== UPLOAD_ERR_OK) {
+            flash('danger', $this->brandUploadErrorMessage($prefix, $uploadError));
+            return '';
+        }
+
+        if (!is_uploaded_file($file['tmp_name'] ?? '')) {
+            flash('danger', 'No se pudo cargar ' . $this->brandAssetLabel($prefix) . ': el archivo temporal no está disponible. Inténtalo nuevamente.');
             return '';
         }
 
         $allowed = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp'];
         $mime = $this->detectImageMime((string) $file['tmp_name']);
-        if (!isset($allowed[$mime]) || (int) ($file['size'] ?? 0) > 3 * 1024 * 1024) {
-            flash('danger', 'Las imagenes de marca deben ser JPG, PNG o WEBP y pesar maximo 3 MB.');
+        $maxSizeMb = max(1, min(20, (int) (load_config('app')['max_upload_mb'] ?? 10)));
+        if (!isset($allowed[$mime]) || (int) ($file['size'] ?? 0) > $maxSizeMb * 1024 * 1024) {
+            flash('danger', 'Las imagenes de marca deben ser JPG, PNG o WEBP y pesar maximo ' . $maxSizeMb . ' MB.');
             return '';
         }
 
@@ -491,5 +498,34 @@ final class PlatformSettingsController extends Controller
         $mime = is_array($imageInfo) ? (string) ($imageInfo['mime'] ?? '') : '';
 
         return strtolower($mime);
+    }
+
+    private function brandUploadErrorMessage(string $prefix, int $error): string
+    {
+        $label = $this->brandAssetLabel($prefix);
+        $messages = [
+            UPLOAD_ERR_INI_SIZE => 'supera el límite de carga configurado por el servidor',
+            UPLOAD_ERR_FORM_SIZE => 'supera el límite permitido por el formulario',
+            UPLOAD_ERR_PARTIAL => 'se cargó de forma incompleta',
+            UPLOAD_ERR_NO_TMP_DIR => 'no tiene disponible el directorio temporal del servidor',
+            UPLOAD_ERR_CANT_WRITE => 'no pudo guardarse temporalmente en el servidor',
+            UPLOAD_ERR_EXTENSION => 'fue bloqueado por una extensión del servidor',
+        ];
+
+        $reason = $messages[$error] ?? 'no pudo procesarse por un error de carga';
+        return 'No se pudo cargar ' . $label . ': ' . $reason . '. Verifica el archivo e inténtalo nuevamente.';
+    }
+
+    private function brandAssetLabel(string $prefix): string
+    {
+        $labels = [
+            'logo' => 'el logo',
+            'background' => 'la imagen de fondo',
+            'topbar' => 'el logo de la barra superior',
+            'login_reference' => 'la imagen de referencia del login',
+            'design_reference' => 'la imagen de referencia del diseño',
+        ];
+
+        return $labels[$prefix] ?? 'la imagen de marca';
     }
 }

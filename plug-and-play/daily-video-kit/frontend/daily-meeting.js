@@ -89,6 +89,7 @@
         var transcriptionStart = transcriptionPanel ? transcriptionPanel.querySelector('[data-transcription-start]') : null;
         var transcriptionStop = transcriptionPanel ? transcriptionPanel.querySelector('[data-transcription-stop]') : null;
         var transcriptionStatus = transcriptionPanel ? transcriptionPanel.querySelector('[data-transcription-status]') : null;
+        var transcriptionFeed = transcriptionPanel ? transcriptionPanel.querySelector('[data-transcription-feed]') : null;
         var transcriptionEnabled = container.getAttribute('data-daily-transcription-enabled') === '1';
         var transcriptionAutoStart = container.getAttribute('data-daily-transcription-auto-start') === '1';
         var transcriptionUrl = container.getAttribute('data-transcription-url') || '';
@@ -186,6 +187,21 @@
             return transcriptLines.join('\n').trim();
         }
 
+        function renderTranscript() {
+            if (!transcriptionFeed) {
+                return;
+            }
+            transcriptionFeed.replaceChildren();
+            transcriptLines.slice(-100).forEach(function (line) {
+                var item = document.createElement('div');
+                item.className = 'daily-kit-transcription-line';
+                item.textContent = line;
+                transcriptionFeed.appendChild(item);
+            });
+            transcriptionFeed.hidden = transcriptLines.length === 0;
+            transcriptionFeed.scrollTop = transcriptionFeed.scrollHeight;
+        }
+
         function sendTranscription(action, message, transcriptText, status, useBeacon) {
             if (!transcriptionUrl) {
                 return;
@@ -270,7 +286,11 @@
             setTranscriptionStatus('Solicitando inicio...');
             setTranscriptionButtons(false);
             runTranscriptionAction(function () {
-                return api.startTranscription({ language: 'es', punctuate: true });
+                return api.startTranscription({
+                    language: 'es',
+                    model: 'nova-2',
+                    punctuate: true
+                });
             }, 'Daily rechazo la solicitud de transcripcion.');
         }
 
@@ -374,6 +394,8 @@
                     setShellState(shell, true, false, container);
                     if (transcriptionPanel && transcriptionEnabled) {
                         transcriptionPanel.hidden = false;
+                        setTranscriptionStatus('Transcripción disponible');
+                        setTranscriptionButtons(false);
                     }
                     if (transcriptionAutoStart && !autoTranscriptionRequested) {
                         autoTranscriptionRequested = true;
@@ -433,6 +455,7 @@
                     var line = transcriptLineFrom(event);
                     if (line) {
                         transcriptLines.push(line);
+                        renderTranscript();
                     }
                 });
                 api.on('transcription-error', function (event) {

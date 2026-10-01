@@ -131,11 +131,13 @@ $facialActive = $settingsTab === 'facial';
                     <div class="col-12 col-lg-6">
                         <label class="form-label" for="login_logo">Logo</label>
                         <input id="login_logo" class="form-control" type="file" name="login_logo" accept="image/png,image/jpeg,image/webp">
+                        <div class="form-text">JPG, PNG o WEBP. Máximo 10 MB.</div>
                         <?php if ($loginSettings['login_logo_path']): ?><div class="form-text"><?= e($loginSettings['login_logo_path']) ?></div><?php endif; ?>
                     </div>
                     <div class="col-12">
                         <label class="form-label" for="login_background">Imagen de fondo</label>
                         <input id="login_background" class="form-control" type="file" name="login_background" accept="image/png,image/jpeg,image/webp">
+                        <div class="form-text">JPG, PNG o WEBP. Máximo 10 MB.</div>
                         <?php if ($loginSettings['login_background_path']): ?><div class="form-text"><?= e($loginSettings['login_background_path']) ?></div><?php endif; ?>
                     </div>
                 </div>
