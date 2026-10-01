@@ -19,7 +19,9 @@ final class InterviewController extends Controller
 
     public function index(): void
     {
-        $this->requireAnyPermission(['manage_interview_processes', 'manage_company_interviews', 'conduct_selection_interviews', 'view_interview_reports']);
+        if (!is_company_admin_user()) {
+            $this->requireAnyPermission(['manage_interview_processes', 'manage_company_interviews', 'conduct_selection_interviews', 'view_interview_reports']);
+        }
 
         $this->render('interviews/index', [
             'title' => 'Entrevistas seleccion | e-talent',
@@ -45,7 +47,14 @@ final class InterviewController extends Controller
         }
 
         $appointments = $id ? $this->interviews->appointments($id) : [];
-        $selectedCandidates = array_map('intval', array_column($appointments, 'candidate_user_id'));
+        $jobProfile = $id ? ($this->interviews->jobProfile($id) ?: []) : [];
+        $selectedCandidates = array_slice(array_map('intval', array_column($appointments, 'candidate_user_id')), 0, 1);
+        $existingModeratorBrief = [];
+        if ($appointments && (string) ($appointments[0]['moderator_brief_status'] ?? '') === 'ready') {
+            $decodedBrief = json_decode((string) ($appointments[0]['moderator_brief_json'] ?? ''), true);
+            $existingModeratorBrief = is_array($decodedBrief) ? $decodedBrief : [];
+        }
+        $candidateTestProcesses = $selectedCandidates ? $this->interviews->assessmentProcessesForCandidate((int) $selectedCandidates[0]) : [];
         $associatedTestProcessId = 0;
         foreach ($appointments as $appointment) {
             if ((int) ($appointment['test_process_id'] ?? 0) > 0) {
@@ -61,10 +70,16 @@ final class InterviewController extends Controller
                 'starts_at' => '09:00:00',
                 'slot_duration_minutes' => 45,
                 'break_minutes' => 10,
-                'moderator_user_id' => (int) (current_user()['id'] ?? 0),
+            'moderator_user_id' => (int) (current_user()['id'] ?? 0),
                 'status' => 'draft',
                 'test_process_id' => $associatedTestProcessId,
             ]);
+        $profileCriteria = $values['evaluation_criteria'] ?? json_decode((string) ($jobProfile['evaluation_criteria_json'] ?? '[]'), true);
+        $values['job_profile_title'] = (string) ($values['job_profile_title'] ?? $jobProfile['title'] ?? '');
+        $values['job_profile_description'] = (string) ($values['job_profile_description'] ?? $jobProfile['description'] ?? '');
+        $values['technical_requirements'] = (string) ($values['technical_requirements'] ?? $jobProfile['technical_requirements'] ?? '');
+        $values['behavioral_requirements'] = (string) ($values['behavioral_requirements'] ?? $jobProfile['behavioral_requirements'] ?? '');
+        $values['evaluation_criteria'] = is_array($profileCriteria) ? $profileCriteria : [];
 
         $this->render('interviews/processes/form', [
             'title' => ($id ? 'Editar proceso' : 'Nuevo proceso') . ' | e-talent',
@@ -73,14 +88,19 @@ final class InterviewController extends Controller
             'values' => $values,
             'moderators' => $this->interviews->moderators(),
             'candidates' => $this->interviews->candidates(),
-            'testProcesses' => $this->interviews->testProcesses(),
+            'testProcesses' => $candidateTestProcesses,
             'selectedCandidates' => $selectedCandidates,
+            'jobProfile' => $jobProfile,
+            'processDocuments' => $id ? $this->interviews->processDocuments($id) : [],
+            'existingModeratorBrief' => $existingModeratorBrief,
         ]);
     }
 
     public function show(): void
     {
-        $this->requireAnyPermission(['manage_interview_processes', 'manage_company_interviews', 'conduct_selection_interviews', 'view_interview_reports']);
+        if (!is_company_admin_user()) {
+            $this->requireAnyPermission(['manage_interview_processes', 'manage_company_interviews', 'conduct_selection_interviews', 'view_interview_reports']);
+        }
 
         $id = request_secure_id('interview_process');
         $process = $this->interviews->find($id);
@@ -94,7 +114,25 @@ final class InterviewController extends Controller
             'process' => $process,
             'appointments' => $this->interviews->appointments($id),
             'moderators' => $this->interviews->moderators(),
+            'jobProfile' => $this->interviews->jobProfile($id) ?: [],
+            'processDocuments' => $this->interviews->processDocuments($id),
         ]);
+    }
+
+    public function delete(): void
+    {
+        require_company_interview_management();
+        verify_csrf();
+
+        $id = request_secure_id('interview_process');
+        try {
+            $this->interviews->deleteProcess($id);
+            flash('success', 'Proceso de entrevistas eliminado correctamente.');
+        } catch (Throwable $exception) {
+            flash('warning', $exception->getMessage());
+        }
+
+        redirect(route_url('interviews'));
     }
 
     public function appointmentSchedule(): void
@@ -153,8 +191,12 @@ final class InterviewController extends Controller
                 $appointment = $this->interviews->findAppointment($id, true) ?: $appointment;
             }
 
-            if (($appointment['moderator_brief_status'] ?? '') === 'pending') {
+            if (($appointment['moderator_brief_status'] ?? '') === 'pending' || trim((string) ($appointment['moderator_brief_json'] ?? '')) === '') {
                 try {
+                    $aiSettings = InterviewSettings::ai();
+                    if (!empty($aiSettings['enabled']) && !empty($aiSettings['has_api_key']) && trim((string) ($aiSettings['model'] ?? '')) !== '') {
+                        $this->interviews->retryJob($id, 'moderator_brief');
+                    }
                     $this->interviews->queueJob($id, 'moderator_brief');
                     $this->processOneJob('moderator_brief');
                     $appointment = $this->interviews->findAppointment($id, true) ?: $appointment;
@@ -178,9 +220,9 @@ final class InterviewController extends Controller
                     'user_name' => (string) ($user['name'] ?? ($isModerator ? $appointment['moderator_name'] : $appointment['candidate_name'])),
                     'user_id' => 'user-' . (int) ($user['id'] ?? 0),
                     'is_owner' => $isModerator,
-                    'transcription_enabled' => true,
+                    'transcription_enabled' => $isModerator,
                     'transcription_auto_start' => $isModerator,
-                    'transcription_url' => route_url('interview-appointment.transcription', $id),
+                    'transcription_url' => $isModerator ? route_url('interview-appointment.transcription', $id) : '',
                     'transcription_snapshot_interval_seconds' => $dailySettings['transcription_snapshot_interval_seconds'] ?? 20,
                     'csrf_token' => csrf_token(),
                 ]);
@@ -218,6 +260,7 @@ final class InterviewController extends Controller
             : '';
         $finalReportViewUrl = $finalReportUrl !== '' ? $finalReportUrl . '?view=1' : '';
         $finalReportHtml = $this->displayFinalReportHtml($appointment);
+        $jobProfile = $isModerator ? ($this->interviews->jobProfile((int) $appointment['process_id']) ?: []) : [];
 
         $this->render('interviews/appointments/room', [
             'title' => 'Sala entrevista | e-talent',
@@ -234,7 +277,9 @@ final class InterviewController extends Controller
             'finalReportUrl' => $finalReportUrl,
             'finalReportViewUrl' => $finalReportViewUrl,
             'finalReportHtml' => $finalReportHtml,
+            'jobProfile' => $jobProfile,
             'documents' => $this->interviews->documents($id),
+            'evaluation' => $this->interviews->evaluationFor($id, (int) ($user['id'] ?? 0)) ?: [],
         ]);
     }
 
@@ -303,7 +348,22 @@ final class InterviewController extends Controller
 
     public function downloadDocument(): void
     {
-        require_permission('conduct_selection_interviews');
+        require_auth();
+
+        // Los administradores de empresa pueden revisar los antecedentes de las
+        // entrevistas de su propia empresa. El modelo aplica el alcance por
+        // company_id antes de devolver el documento, por lo que esta excepción
+        // no habilita acceso cruzado entre empresas.
+        if (!has_permission('conduct_selection_interviews')
+            && !has_permission('view_interview_reports')
+            && !is_company_admin_user()) {
+            platform_error(403, 'No tienes permisos para acceder a este documento.', [
+                'detailRows' => [
+                    'Permiso requerido' => 'conduct_selection_interviews, view_interview_reports o administrador de empresa',
+                ],
+            ]);
+        }
+
         $documentId = request_secure_id('interview_document');
         $document = $this->interviews->document($documentId);
         if (!$document) {
@@ -320,6 +380,107 @@ final class InterviewController extends Controller
         readfile($path);
     }
 
+    public function deleteDocument(): void
+    {
+        require_company_interview_management();
+        verify_csrf();
+
+        $documentId = request_secure_id('interview_document');
+        $document = $this->interviews->document($documentId);
+        if (!$document) {
+            platform_error(404, 'Documento no encontrado.');
+        }
+
+        try {
+            $deletedDocument = $this->interviews->deleteDocument($documentId);
+            $processId = (int) ($deletedDocument['scoped_process_id'] ?? 0);
+            if ($processId > 0) {
+                foreach ($this->interviews->appointments($processId) as $appointment) {
+                    $this->interviews->invalidateModeratorBrief((int) ($appointment['id'] ?? 0));
+                }
+            }
+            flash('success', 'Documento eliminado correctamente. La preparación IA quedó pendiente de regeneración.');
+            redirect($processId > 0 ? route_url('interview-process.edit', $processId) : route_url('interviews'));
+        } catch (Throwable $exception) {
+            flash('danger', $exception->getMessage());
+            $processId = (int) ($document['scoped_process_id'] ?? 0);
+            redirect($processId > 0 ? route_url('interview-process.edit', $processId) : route_url('interviews'));
+        }
+    }
+
+    public function uploadProcessDocument(): void
+    {
+        require_company_interview_management();
+        verify_csrf();
+
+        $processId = request_secure_id('interview_process');
+        $process = $this->interviews->find($processId);
+        if (!$process) {
+            platform_error(404, 'Proceso de entrevistas no encontrado.');
+        }
+
+        $candidateId = max(0, (int) ($_POST['candidate_user_id'] ?? 0));
+        if ($candidateId > 0 && !$this->interviews->candidateBelongsToProcess($processId, $candidateId)) {
+            flash('danger', 'El postulante no pertenece a este proceso de entrevistas.');
+            redirect(route_url('interview-process.show', $processId));
+        }
+
+        $file = $_FILES['interview_document'] ?? [];
+        $redirect = route_url('interview-process.show', $processId);
+        if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK || !is_uploaded_file((string) ($file['tmp_name'] ?? ''))) {
+            flash('danger', 'Selecciona un documento válido para cargar.');
+            redirect($redirect);
+        }
+
+        $maxBytes = 10 * 1024 * 1024;
+        if ((int) ($file['size'] ?? 0) <= 0 || (int) $file['size'] > $maxBytes) {
+            flash('danger', 'El documento debe pesar entre 1 byte y 10 MB.');
+            redirect($redirect);
+        }
+
+        $mime = (new finfo(FILEINFO_MIME_TYPE))->file((string) $file['tmp_name']);
+        $allowed = [
+            'application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'text/plain', 'text/csv', 'text/markdown', 'application/json',
+        ];
+        if (!in_array($mime, $allowed, true)) {
+            flash('danger', 'Formato no permitido. Usa PDF, Word, Excel, CSV, TXT, MD o JSON.');
+            redirect($redirect);
+        }
+
+        $extension = strtolower(pathinfo((string) $file['name'], PATHINFO_EXTENSION));
+        $storedName = bin2hex(random_bytes(16)) . ($extension !== '' ? '.' . preg_replace('/[^a-z0-9]+/i', '', $extension) : '');
+        $relativePath = 'storage/interviews/' . date('Y/m') . '/' . $storedName;
+        $absoluteDir = BASE_PATH . '/storage/interviews/' . date('Y/m');
+        if (!is_dir($absoluteDir) && !mkdir($absoluteDir, 0700, true) && !is_dir($absoluteDir)) {
+            throw new RuntimeException('No se pudo preparar el almacenamiento privado.');
+        }
+        $absolutePath = $absoluteDir . '/' . $storedName;
+        if (!move_uploaded_file((string) $file['tmp_name'], $absolutePath)) {
+            throw new RuntimeException('No se pudo guardar el documento.');
+        }
+
+        $extraction = (new InterviewDocumentTextExtractor())->extract($absolutePath, $mime);
+        $this->interviews->addDocument(null, [
+            'process_id' => $processId,
+            'candidate_user_id' => $candidateId ?: null,
+            'document_type' => in_array((string) ($_POST['document_type'] ?? ''), ['performance', 'psychological', 'job_profile', 'resume', 'reference', 'other'], true) ? (string) $_POST['document_type'] : 'other',
+            'original_name' => mb_substr(basename((string) $file['name']), 0, 255),
+            'stored_name' => $storedName,
+            'storage_path' => $relativePath,
+            'mime_type' => $mime,
+            'file_size' => (int) $file['size'],
+            'sha256' => hash_file('sha256', $absolutePath),
+            'extracted_text' => $extraction['text'],
+            'processing_status' => $extraction['status'],
+            'processing_error' => $extraction['error'],
+        ], (int) (current_user()['id'] ?? 0));
+
+        flash('success', $candidateId > 0 ? 'Documento asociado al postulante dentro del proceso.' : 'Documento asociado al proceso.');
+        redirect($redirect);
+    }
+
     public function saveNotes(): void
     {
         require_permission('conduct_selection_interviews');
@@ -328,6 +489,33 @@ final class InterviewController extends Controller
         $id = request_secure_id('interview_appointment');
         $this->interviews->saveNotes($id, (int) (current_user()['id'] ?? 0), trim((string) ($_POST['notes'] ?? '')));
         $this->jsonResponse(['ok' => true, 'message' => 'Apuntes guardados.']);
+    }
+
+    public function saveEvaluation(): void
+    {
+        require_permission('conduct_selection_interviews');
+        verify_csrf();
+
+        $id = request_secure_id('interview_appointment');
+        $userId = (int) (current_user()['id'] ?? 0);
+        $appointment = $this->interviews->findAppointment($id);
+        if (!$appointment) {
+            $this->jsonResponse(['ok' => false, 'message' => 'Entrevista no encontrada.'], 404);
+            return;
+        }
+        $profile = $this->interviews->jobProfile((int) $appointment['process_id']);
+        $this->interviews->saveEvaluation($id, $userId, [
+            'status' => $_POST['status'] ?? 'draft',
+            'technical_score' => $_POST['technical_score'] ?? null,
+            'behavioral_score' => $_POST['behavioral_score'] ?? null,
+            'overall_score' => $_POST['overall_score'] ?? null,
+            'recommendation' => $_POST['recommendation'] ?? 'pending',
+            'strengths' => $_POST['strengths'] ?? '',
+            'risks' => $_POST['risks'] ?? '',
+            'comments' => $_POST['comments'] ?? '',
+            'criteria' => json_decode((string) ($profile['evaluation_criteria_json'] ?? '[]'), true) ?: [],
+        ]);
+        $this->jsonResponse(['ok' => true, 'message' => 'Evaluación guardada.']);
     }
 
     public function transcription(): void
@@ -425,6 +613,142 @@ final class InterviewController extends Controller
         ]);
     }
 
+    public function candidateAssessmentPreview(): void
+    {
+        // Las consultas del stepper son AJAX. Evita que una sesión expirada
+        // termine siguiendo una redirección HTML al inicio del cliente: el
+        // navegador necesita recibir un JSON para mantener el postulante
+        // seleccionado y mostrar el motivo real del error.
+        if (!current_user()) {
+            $this->jsonResponse([
+                'available' => false,
+                'message' => 'La sesión expiró. Recarga la página e inicia sesión nuevamente.',
+            ], 401);
+            return;
+        }
+
+        require_company_interview_management();
+
+        $testProcessId = (int) ($_GET['test_process_id'] ?? 0);
+        $candidateId = (int) ($_GET['candidate_user_id'] ?? 0);
+        $preview = $this->interviews->assessmentPreview($testProcessId, $candidateId);
+        if (!empty($preview['available'])) {
+            $sessionId = $this->interviews->latestTestSessionId($testProcessId, $candidateId);
+            $preview['report_url'] = $sessionId > 0
+                ? route_url('test-process.ranking-report', $testProcessId) . '?session=' . rawurlencode(secure_url_token($sessionId, 'test_session'))
+                : '';
+        }
+        $this->jsonResponse($preview);
+    }
+
+    public function parseJobProfile(): void
+    {
+        require_company_interview_management();
+        verify_csrf();
+
+        $text = trim((string) ($_POST['job_profile_text'] ?? ''));
+        $file = $_FILES['job_profile_file'] ?? [];
+        if ($text === '' && ($file['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK && is_uploaded_file((string) ($file['tmp_name'] ?? ''))) {
+            if ((int) ($file['size'] ?? 0) <= 0 || (int) $file['size'] > 10 * 1024 * 1024) {
+                $this->jsonResponse(['ok' => false, 'message' => 'El perfil de cargo supera el máximo de 10 MB.'], 422);
+                return;
+            }
+            $mime = (new finfo(FILEINFO_MIME_TYPE))->file((string) $file['tmp_name']);
+            $allowed = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain', 'text/markdown'];
+            if (!in_array($mime, $allowed, true)) {
+                $this->jsonResponse(['ok' => false, 'message' => 'Formato no permitido para el perfil de cargo.'], 422);
+                return;
+            }
+            $extraction = (new InterviewDocumentTextExtractor())->extract((string) $file['tmp_name'], $mime);
+            $text = trim((string) ($extraction['text'] ?? ''));
+            if ($text === '') {
+                $this->jsonResponse(['ok' => false, 'message' => 'No se pudo extraer texto del perfil. Puedes pegarlo manualmente.'], 422);
+                return;
+            }
+        }
+
+        $result = $this->ai->parseJobProfile($text);
+        $this->jsonResponse([
+            'ok' => true,
+            'ai_used' => !empty($result['ok']),
+            'pending' => !empty($result['pending']),
+            'message' => (string) ($result['error'] ?? 'Perfil analizado correctamente.'),
+            'data' => $result['data'] ?? [],
+        ]);
+    }
+
+    public function preparePreview(): void
+    {
+        require_company_interview_management();
+        verify_csrf();
+
+        $candidateId = (int) ($_POST['candidate_user_id'] ?? 0);
+        $candidate = $this->interviews->candidateById($candidateId);
+        if (!$candidate) {
+            $this->jsonResponse(['ok' => false, 'message' => 'Selecciona un postulante válido.'], 422);
+            return;
+        }
+
+        $testProcessId = (int) ($_POST['test_process_id'] ?? 0);
+        if ($testProcessId <= 0) {
+            $testProcessId = $this->interviews->recommendedAssessmentProcessId($candidateId);
+        }
+        $assessment = $testProcessId > 0 ? $this->interviews->assessmentPreview($testProcessId, $candidateId) : ['available' => false, 'message' => 'No hay una evaluación finalizada asociada.'];
+        $profile = [
+            'title' => trim((string) ($_POST['job_profile_title'] ?? '')),
+            'description' => trim((string) ($_POST['job_profile_description'] ?? '')),
+            'technical_requirements' => trim((string) ($_POST['technical_requirements'] ?? '')),
+            'behavioral_requirements' => trim((string) ($_POST['behavioral_requirements'] ?? '')),
+            'evaluation_criteria' => $this->criteriaFromPost($_POST['evaluation_criteria'] ?? []),
+        ];
+        $documents = [];
+        foreach (['resume' => 'Currículum vitae', 'performance' => 'Informe de desempeño', 'psychological' => 'Informe psicolaboral'] as $key => $label) {
+            $text = trim((string) ($_POST['interview_document_text'][$key] ?? ''));
+            $uploadedDocuments = $_FILES['interview_documents'] ?? [];
+            $file = [
+                'name' => $uploadedDocuments['name'][$key] ?? '',
+                'tmp_name' => $uploadedDocuments['tmp_name'][$key] ?? '',
+                'error' => $uploadedDocuments['error'][$key] ?? UPLOAD_ERR_NO_FILE,
+                'size' => $uploadedDocuments['size'][$key] ?? 0,
+            ];
+            if ($text === '' && ($file['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK && is_uploaded_file((string) ($file['tmp_name'] ?? ''))) {
+                if ((int) ($file['size'] ?? 0) > 10 * 1024 * 1024) {
+                    $this->jsonResponse(['ok' => false, 'message' => $label . ' supera el máximo de 10 MB.'], 422);
+                    return;
+                }
+                $mime = (new finfo(FILEINFO_MIME_TYPE))->file((string) $file['tmp_name']);
+                $allowed = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain', 'text/markdown'];
+                if (in_array($mime, $allowed, true)) {
+                    $extraction = (new InterviewDocumentTextExtractor())->extract((string) $file['tmp_name'], $mime);
+                    $text = trim((string) ($extraction['text'] ?? ''));
+                }
+            }
+            if ($text !== '') {
+                $documents[] = ['type' => $key, 'name' => $label, 'status' => 'ready', 'text' => mb_substr($text, 0, 18000)];
+            }
+        }
+
+        $context = [
+            'candidate' => ['name' => (string) $candidate['name'], 'email' => (string) $candidate['email'], 'rut' => (string) $candidate['rut']],
+            'process' => ['job_profile' => $profile, 'test_process' => $assessment['candidate']['process_name'] ?? ''],
+            'report' => $assessment,
+            'documents' => $documents,
+            'transcript' => '',
+            'notes' => '',
+            'evaluations' => [],
+        ];
+        $result = $this->ai->moderatorBrief($context);
+        $this->jsonResponse([
+            'ok' => true,
+            'ai_used' => !empty($result['ok']),
+            'pending' => !empty($result['pending']),
+            'test_process_id' => $testProcessId,
+            'assessment' => $assessment,
+            'brief' => $this->ai->normalizeModeratorBrief($result['data'] ?? []),
+            'message' => (string) ($result['error'] ?? 'Preparación generada correctamente.'),
+        ]);
+    }
+
     public function testAiConnection(): void
     {
         require_permission('manage_interview_settings');
@@ -457,24 +781,83 @@ final class InterviewController extends Controller
             'moderator_user_id' => (int) ($_POST['moderator_user_id'] ?? 0),
             'status' => in_array((string) ($_POST['status'] ?? 'draft'), ['draft', 'scheduled', 'in_progress', 'closed', 'cancelled'], true) ? (string) $_POST['status'] : 'draft',
             'test_process_id' => (int) ($_POST['test_process_id'] ?? 0),
+            'job_profile_title' => trim((string) ($_POST['job_profile_title'] ?? '')),
+            'job_profile_description' => trim((string) ($_POST['job_profile_description'] ?? '')),
+            'technical_requirements' => trim((string) ($_POST['technical_requirements'] ?? '')),
+            'behavioral_requirements' => trim((string) ($_POST['behavioral_requirements'] ?? '')),
+            'evaluation_criteria' => $this->criteriaFromPost($_POST['evaluation_criteria'] ?? []),
         ];
         if (strlen($data['starts_at']) === 5) {
             $data['starts_at'] .= ':00';
         }
-        $candidateIds = is_array($_POST['candidate_user_ids'] ?? null) ? $_POST['candidate_user_ids'] : [];
+        $candidateId = (int) ($_POST['candidate_user_id'] ?? 0);
+        $candidateIds = $candidateId > 0 ? [$candidateId] : [];
 
-        if ($data['name'] === '' || $data['interview_date'] === '' || $data['moderator_user_id'] <= 0) {
-            flash('danger', 'Completa nombre, fecha y moderador.');
+        // La entrevista reutiliza los resultados que el postulante ya tiene.
+        // Si el navegador no envió una selección explícita, elegimos el
+        // proceso finalizado más reciente dentro del alcance de la empresa.
+        if ($data['test_process_id'] <= 0 && $candidateId > 0) {
+            $data['test_process_id'] = $this->interviews->recommendedAssessmentProcessId($candidateId);
+        }
+
+        if ($data['name'] === '' || $data['interview_date'] === '' || $data['moderator_user_id'] <= 0 || $candidateId <= 0) {
+            flash('danger', 'Completa nombre, fecha, entrevistador y postulante.');
+            return false;
+        }
+        if ($id === 0 && (int) ($_POST['preparation_approved'] ?? 0) !== 1) {
+            flash('danger', 'Debes generar y aprobar la preparación asistida por IA antes de agendar la entrevista.');
             return false;
         }
 
         try {
             if ($id) {
                 $this->interviews->update($id, $data, $candidateIds, (int) (current_user()['id'] ?? 0));
+                $processId = $id;
                 flash('success', 'Proceso actualizado correctamente.');
             } else {
                 $id = $this->interviews->create($data, $candidateIds, (int) (current_user()['id'] ?? 0));
+                $processId = $id;
                 flash('success', 'Proceso creado correctamente.');
+            }
+            $this->interviews->saveJobProfile($processId, [
+                'title' => $data['job_profile_title'] !== '' ? $data['job_profile_title'] : $data['name'],
+                'description' => $data['job_profile_description'],
+                'technical_requirements' => $data['technical_requirements'],
+                'behavioral_requirements' => $data['behavioral_requirements'],
+                'evaluation_criteria' => $data['evaluation_criteria'],
+            ], (int) (current_user()['id'] ?? 0));
+            $documentResult = $this->storeRegistrationDocuments($processId, $candidateId, $_FILES['interview_documents'] ?? []);
+            $textResult = $this->storeRegistrationTextDocuments($processId, $candidateId, $_POST['interview_document_text'] ?? [], $_FILES['interview_documents'] ?? []);
+            $documentResult['count'] += $textResult['count'];
+            $documentResult['errors'] = array_merge($documentResult['errors'], $textResult['errors']);
+            if ($documentResult['count'] > 0) {
+                flash('success', $documentResult['count'] . ' documento(s) asociado(s) al postulante.');
+            }
+            if ($documentResult['errors']) {
+                flash('warning', implode(' ', $documentResult['errors']));
+            }
+
+            $appointment = $this->interviews->appointmentForCandidate($processId, $candidateId);
+            if ($appointment) {
+                $currentBrief = json_decode((string) ($appointment['moderator_brief_json'] ?? ''), true);
+                $currentFingerprint = is_array($currentBrief) ? trim((string) ($currentBrief['_source_fingerprint'] ?? '')) : '';
+                $newFingerprint = $this->interviews->moderatorBriefSourceFingerprint($appointment);
+                $forcePreparation = (int) ($_POST['force_preparation'] ?? 0) === 1;
+                $briefNeedsRefresh = $forcePreparation
+                    || (string) ($appointment['moderator_brief_status'] ?? '') !== 'ready'
+                    || $currentFingerprint === ''
+                    || !hash_equals($currentFingerprint, $newFingerprint);
+
+                if ($briefNeedsRefresh) {
+                    // Solo invalidamos y consumimos IA cuando cambió alguno de
+                    // los antecedentes que alimentan el brief.
+                    $this->interviews->invalidateModeratorBrief((int) $appointment['id']);
+                    $this->interviews->queueJob((int) $appointment['id'], 'moderator_brief');
+                    // El primer intento deja preparado el brief inmediatamente
+                    // en desarrollo y mantiene el job reintentable si la IA
+                    // está temporalmente indisponible.
+                    $this->processOneJob('moderator_brief');
+                }
             }
             redirect(route_url('interview-process.show', $id));
         } catch (Throwable $exception) {
@@ -482,6 +865,152 @@ final class InterviewController extends Controller
         }
 
         return false;
+    }
+
+    private function storeRegistrationDocuments(int $processId, int $candidateId, array $files): array
+    {
+        $result = ['count' => 0, 'errors' => []];
+        if ($processId <= 0 || $candidateId <= 0 || !is_array($files['name'] ?? null)) {
+            return $result;
+        }
+
+        $allowedTypes = ['job_profile', 'resume', 'performance', 'psychological', 'reference', 'other'];
+        $allowedMimes = [
+            'application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'text/plain', 'text/csv', 'text/markdown', 'application/json',
+        ];
+        foreach ($allowedTypes as $type) {
+            $file = [
+                'name' => $files['name'][$type] ?? '',
+                'tmp_name' => $files['tmp_name'][$type] ?? '',
+                'error' => $files['error'][$type] ?? UPLOAD_ERR_NO_FILE,
+                'size' => $files['size'][$type] ?? 0,
+            ];
+            if ((int) $file['error'] === UPLOAD_ERR_NO_FILE || trim((string) $file['name']) === '') {
+                continue;
+            }
+            if ((int) $file['error'] !== UPLOAD_ERR_OK || !is_uploaded_file((string) $file['tmp_name'])) {
+                $result['errors'][] = 'No se pudo cargar ' . $type . '.';
+                continue;
+            }
+            if ((int) $file['size'] <= 0 || (int) $file['size'] > 10 * 1024 * 1024) {
+                $result['errors'][] = basename((string) $file['name']) . ' supera el máximo de 10 MB.';
+                continue;
+            }
+            $mime = (new finfo(FILEINFO_MIME_TYPE))->file((string) $file['tmp_name']);
+            if (!in_array($mime, $allowedMimes, true)) {
+                $result['errors'][] = basename((string) $file['name']) . ' tiene un formato no permitido.';
+                continue;
+            }
+            $extension = strtolower(pathinfo((string) $file['name'], PATHINFO_EXTENSION));
+            $storedName = bin2hex(random_bytes(16)) . ($extension !== '' ? '.' . preg_replace('/[^a-z0-9]+/i', '', $extension) : '');
+            $relativePath = 'storage/interviews/' . date('Y/m') . '/' . $storedName;
+            $absoluteDir = BASE_PATH . '/storage/interviews/' . date('Y/m');
+            if (!is_dir($absoluteDir) && !mkdir($absoluteDir, 0700, true) && !is_dir($absoluteDir)) {
+                $result['errors'][] = 'No se pudo preparar el almacenamiento de documentos.';
+                continue;
+            }
+            $absolutePath = $absoluteDir . '/' . $storedName;
+            if (!move_uploaded_file((string) $file['tmp_name'], $absolutePath)) {
+                $result['errors'][] = 'No se pudo guardar ' . basename((string) $file['name']) . '.';
+                continue;
+            }
+            $extraction = (new InterviewDocumentTextExtractor())->extract($absolutePath, $mime);
+            $this->interviews->addDocument(null, [
+                'process_id' => $processId,
+                'candidate_user_id' => $candidateId,
+                'document_type' => $type,
+                'original_name' => mb_substr(basename((string) $file['name']), 0, 255),
+                'stored_name' => $storedName,
+                'storage_path' => $relativePath,
+                'mime_type' => $mime,
+                'file_size' => (int) $file['size'],
+                'sha256' => hash_file('sha256', $absolutePath),
+                'extracted_text' => $extraction['text'],
+                'processing_status' => $extraction['status'],
+                'processing_error' => $extraction['error'],
+            ], (int) (current_user()['id'] ?? 0));
+            $result['count']++;
+        }
+        return $result;
+    }
+
+    private function storeRegistrationTextDocuments(int $processId, int $candidateId, array $texts, array $files = []): array
+    {
+        $result = ['count' => 0, 'errors' => []];
+        if ($processId <= 0 || $candidateId <= 0 || !is_array($texts)) {
+            return $result;
+        }
+
+        foreach (['job_profile' => 'Perfil de cargo', 'resume' => 'Currículum vitae'] as $type => $label) {
+            if (trim((string) ($files['name'][$type] ?? '')) !== '') {
+                continue;
+            }
+            $text = trim((string) ($texts[$type] ?? ''));
+            if ($text === '') {
+                continue;
+            }
+            if (mb_strlen($text) > 500000) {
+                $result['errors'][] = $label . ' supera el máximo de 500.000 caracteres.';
+                continue;
+            }
+
+            $storedName = bin2hex(random_bytes(16)) . '.txt';
+            $relativePath = 'storage/interviews/' . date('Y/m') . '/' . $storedName;
+            $absoluteDir = BASE_PATH . '/storage/interviews/' . date('Y/m');
+            if (!is_dir($absoluteDir) && !mkdir($absoluteDir, 0700, true) && !is_dir($absoluteDir)) {
+                $result['errors'][] = 'No se pudo preparar el almacenamiento de texto.';
+                continue;
+            }
+            $absolutePath = $absoluteDir . '/' . $storedName;
+            if (file_put_contents($absolutePath, $text, LOCK_EX) === false) {
+                $result['errors'][] = 'No se pudo guardar el texto de ' . strtolower($label) . '.';
+                continue;
+            }
+
+            $this->interviews->addDocument(null, [
+                'process_id' => $processId,
+                'candidate_user_id' => $candidateId,
+                'document_type' => $type,
+                'original_name' => $label . ' (texto).txt',
+                'stored_name' => $storedName,
+                'storage_path' => $relativePath,
+                'mime_type' => 'text/plain',
+                'file_size' => strlen($text),
+                'sha256' => hash('sha256', $text),
+                'extracted_text' => $text,
+                'processing_status' => 'ready',
+                'processing_error' => null,
+            ], (int) (current_user()['id'] ?? 0));
+            $result['count']++;
+        }
+        return $result;
+    }
+
+    private function criteriaFromPost($criteria): array
+    {
+        if (!is_array($criteria)) {
+            return [];
+        }
+
+        $normalized = [];
+        foreach ($criteria as $criterion) {
+            if (!is_array($criterion)) {
+                continue;
+            }
+            $name = trim((string) ($criterion['name'] ?? ''));
+            if ($name === '') {
+                continue;
+            }
+            $normalized[] = [
+                'name' => mb_substr($name, 0, 120),
+                'type' => in_array(($criterion['type'] ?? 'behavioral'), ['technical', 'behavioral', 'general'], true) ? (string) $criterion['type'] : 'general',
+                'weight' => max(0, min(100, (int) ($criterion['weight'] ?? 0))),
+            ];
+        }
+
+        return array_values($normalized);
     }
 
     public function processOneJob(string $type): bool
@@ -500,8 +1029,14 @@ final class InterviewController extends Controller
         $context = $this->interviews->reportContext($appointment);
         if ($type === 'moderator_brief') {
             $result = $this->ai->moderatorBrief($context);
-            if (!empty($result['ok'])) {
-                $this->interviews->completeBrief((int) $appointment['id'], (int) $job['id'], $result['data']);
+            // Aunque la IA no esté configurada o esté temporalmente pendiente,
+            // mostramos el brief base para que el entrevistador nunca quede
+            // frente a una pestaña vacía. El brief puede regenerarse al
+            // invalidarlo después de configurar el proveedor.
+            if (!empty($result['ok']) || !empty($result['data'])) {
+                $brief = is_array($result['data'] ?? null) ? $result['data'] : [];
+                $brief['_source_fingerprint'] = $this->interviews->moderatorBriefSourceFingerprint($appointment);
+                $this->interviews->completeBrief((int) $appointment['id'], (int) $job['id'], $brief);
             } else {
                 $this->interviews->failBrief((int) $appointment['id'], (int) $job['id'], (string) $result['error'], !empty($result['pending']));
             }

@@ -642,10 +642,33 @@ try {
         return;
     }
 
+    if ($segments === ['interviews', 'assessments', 'preview']) {
+        (new InterviewController())->candidateAssessmentPreview();
+        return;
+    }
+
+    if ($segments === ['interviews', 'job-profile', 'parse']) {
+        (new InterviewController())->parseJobProfile();
+        return;
+    }
+
+    if ($segments === ['interviews', 'preparation', 'preview']) {
+        (new InterviewController())->preparePreview();
+        return;
+    }
+
     if (($segments[0] ?? '') === 'interviews' && ($segments[1] ?? '') === 'processes' && count($segments) >= 3) {
         $_GET['sid'] = $segments[2];
         if (($segments[3] ?? '') === 'edit') {
             (new InterviewController())->form();
+            return;
+        }
+        if (($segments[3] ?? '') === 'documents') {
+            (new InterviewController())->uploadProcessDocument();
+            return;
+        }
+        if (($segments[3] ?? '') === 'delete') {
+            (new InterviewController())->delete();
             return;
         }
 
@@ -667,6 +690,10 @@ try {
             (new InterviewController())->saveNotes();
             return;
         }
+        if (($segments[3] ?? '') === 'evaluation') {
+            (new InterviewController())->saveEvaluation();
+            return;
+        }
         if (($segments[3] ?? '') === 'transcription') {
             (new InterviewController())->transcription();
             return;
@@ -684,6 +711,12 @@ try {
     if (($segments[0] ?? '') === 'interviews' && ($segments[1] ?? '') === 'documents' && count($segments) === 3 && ($segments[2] ?? '') !== '') {
         $_GET['sid'] = $segments[2];
         (new InterviewController())->downloadDocument();
+        return;
+    }
+
+    if (($segments[0] ?? '') === 'interviews' && ($segments[1] ?? '') === 'documents' && ($segments[3] ?? '') === 'delete' && count($segments) === 4) {
+        $_GET['sid'] = $segments[2];
+        (new InterviewController())->deleteDocument();
         return;
     }
 

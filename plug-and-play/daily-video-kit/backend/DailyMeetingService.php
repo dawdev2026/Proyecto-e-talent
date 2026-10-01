@@ -395,4 +395,5 @@ final class DailyMeetingService
         $lang = strtolower(trim((string) ($this->config['default_lang'] ?? 'es')));
         return preg_match('/^[a-z]{2}$/', $lang) ? $lang : 'es';
     }
+
 }

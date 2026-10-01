@@ -43,6 +43,57 @@ final class InterviewProcessModel
         ", array_merge([$id], $this->companyScopeParams()));
     }
 
+    public function jobProfile(int $processId): ?array
+    {
+        return $this->db->fetch('
+            SELECT jp.*
+            FROM interview_job_profiles jp
+            JOIN interview_processes p ON p.id = jp.process_id
+            WHERE jp.process_id = ? AND ' . $this->companyScopeSql('p') . '
+            LIMIT 1
+        ', array_merge([$processId], $this->companyScopeParams()));
+    }
+
+    public function candidateBelongsToProcess(int $processId, int $candidateId): bool
+    {
+        if (!$this->find($processId) || $candidateId <= 0) {
+            return false;
+        }
+
+        return (bool) $this->db->fetch('
+            SELECT id FROM interview_appointments
+            WHERE process_id = ? AND candidate_user_id = ?
+            LIMIT 1
+        ', [$processId, $candidateId]);
+    }
+
+    public function saveJobProfile(int $processId, array $data, int $userId): void
+    {
+        if (!$this->find($processId)) {
+            throw new RuntimeException('Proceso de entrevistas no encontrado.');
+        }
+
+        $this->db->execute('
+            INSERT INTO interview_job_profiles
+                (process_id, title, description, technical_requirements, behavioral_requirements, evaluation_criteria_json, created_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+                title = VALUES(title), description = VALUES(description),
+                technical_requirements = VALUES(technical_requirements),
+                behavioral_requirements = VALUES(behavioral_requirements),
+                evaluation_criteria_json = VALUES(evaluation_criteria_json),
+                updated_at = CURRENT_TIMESTAMP
+        ', [
+            $processId,
+            trim((string) ($data['title'] ?? '')),
+            trim((string) ($data['description'] ?? '')) ?: null,
+            trim((string) ($data['technical_requirements'] ?? '')) ?: null,
+            trim((string) ($data['behavioral_requirements'] ?? '')) ?: null,
+            json_encode($data['evaluation_criteria'] ?? [], JSON_UNESCAPED_UNICODE),
+            $userId ?: null,
+        ]);
+    }
+
     public function appointments(int $processId): array
     {
         return $this->db->fetchAll("
@@ -52,8 +103,14 @@ final class InterviewProcessModel
                    candidate.rut AS candidate_rut,
                    moderator.name AS moderator_name,
                    tp.name AS test_process_name,
-                   ts.status AS test_session_status
+                   ts.status AS test_session_status,
+                   ((SELECT COUNT(*) FROM interview_documents d WHERE d.appointment_id = a.id)
+                    + (SELECT COUNT(*) FROM interview_documents d WHERE d.process_id = a.process_id AND d.candidate_user_id IS NULL)
+                    + (SELECT COUNT(*) FROM interview_documents d WHERE d.process_id = a.process_id AND d.candidate_user_id = a.candidate_user_id)) AS document_count,
+                   (SELECT COUNT(*) FROM interview_notes n WHERE n.appointment_id = a.id) AS notes_count,
+                   (SELECT COUNT(*) FROM interview_evaluations e WHERE e.appointment_id = a.id AND e.status = 'submitted') AS evaluations_submitted
             FROM interview_appointments a
+            JOIN interview_processes p ON p.id = a.process_id
             LEFT JOIN {$this->coreSchema}.users candidate ON candidate.id = a.candidate_user_id
             LEFT JOIN {$this->coreSchema}.users moderator ON moderator.id = a.moderator_user_id
             LEFT JOIN {$this->testsSchema}.test_processes tp ON tp.id = a.test_process_id
@@ -124,6 +181,21 @@ final class InterviewProcessModel
         ", $this->companyScopeParams());
     }
 
+    public function candidateById(int $candidateId): ?array
+    {
+        if ($candidateId <= 0) {
+            return null;
+        }
+
+        return $this->db->fetch("SELECT u.id, u.name, u.email, u.rut, c.name AS company_name
+            FROM {$this->coreSchema}.users u
+            LEFT JOIN {$this->coreSchema}.companies c ON c.id = u.company_id
+            LEFT JOIN {$this->coreSchema}.role_profiles p ON p.id = u.profile_id
+            WHERE u.id = ? AND u.is_active = 1 AND " . $this->companyScopeSql('u') . "
+              AND COALESCE(p.role_key, u.role) = 'usuario'
+            LIMIT 1", array_merge([$candidateId], $this->companyScopeParams()));
+    }
+
     public function testProcesses(): array
     {
         return $this->db->fetchAll("
@@ -132,6 +204,96 @@ final class InterviewProcessModel
             WHERE " . $this->companyScopeSql('tp') . "
             ORDER BY tp.created_at DESC, tp.id DESC
         ", $this->companyScopeParams());
+    }
+
+    public function assessmentPreview(int $testProcessId, int $candidateId): array
+    {
+        if ($candidateId <= 0) {
+            return ['available' => false, 'message' => 'Selecciona un postulante.'];
+        }
+
+        $candidate = $this->db->fetch("SELECT u.id FROM {$this->coreSchema}.users u WHERE u.id = ? AND " . $this->companyScopeSql('u') . " LIMIT 1", array_merge([$candidateId], $this->companyScopeParams()));
+        if (!$candidate) {
+            return ['available' => false, 'message' => 'El postulante no pertenece a esta empresa.'];
+        }
+        if ($testProcessId <= 0) {
+            $processes = $this->assessmentProcessesForCandidate($candidateId);
+            $recommended = 0;
+            foreach ($processes as $process) {
+                if ((int) ($process['completed_count'] ?? 0) > 0) {
+                    $recommended = (int) $process['id'];
+                    break;
+                }
+            }
+            return [
+                'available' => false,
+                'message' => $recommended > 0
+                    ? 'Se encontró automáticamente la evaluación más reciente con resultados.'
+                    : 'Este postulante no tiene evaluaciones finalizadas disponibles.',
+                'processes' => $processes,
+                'recommended_process_id' => $recommended,
+            ];
+        }
+
+        $testProcess = $this->db->fetch("SELECT tp.id FROM {$this->testsSchema}.test_processes tp WHERE tp.id = ? AND " . $this->companyScopeSql('tp') . " LIMIT 1", array_merge([$testProcessId], $this->companyScopeParams()));
+        if (!$testProcess) {
+            return ['available' => false, 'message' => 'Ese proceso no pertenece a las evaluaciones del postulante.'];
+        }
+
+        $payload = $this->postulantReports->payloadForProcessUser($testProcessId, $candidateId);
+        return [
+            'available' => !empty($payload['available']),
+            'message' => (string) ($payload['message'] ?? 'Informe no disponible.'),
+            'candidate' => $payload['candidate'] ?? [],
+            'structured_summary' => $payload['structured_summary'] ?? [],
+            'warnings' => $payload['warnings'] ?? [],
+        ];
+    }
+
+    public function assessmentProcessesForCandidate(int $candidateId): array
+    {
+        if ($candidateId <= 0) {
+            return [];
+        }
+        return $this->db->fetchAll("SELECT tp.id, tp.name, COUNT(ts.id) AS sessions_count, SUM(CASE WHEN ts.status = 'completed' THEN 1 ELSE 0 END) AS completed_count, MAX(ts.completed_at) AS last_completed_at
+            FROM {$this->testsSchema}.test_process_users pu
+            JOIN {$this->testsSchema}.test_processes tp ON tp.id = pu.process_id
+            JOIN {$this->testsSchema}.test_sessions ts ON ts.process_id = pu.process_id AND ts.user_id = pu.user_id AND ts.status <> 'cancelled'
+            WHERE pu.user_id = ? AND pu.status <> 'cancelled' AND " . $this->companyScopeSql('tp') . "
+            GROUP BY tp.id, tp.name
+            ORDER BY MAX(ts.completed_at) IS NULL ASC, MAX(ts.completed_at) DESC, tp.name ASC", array_merge([$candidateId], $this->companyScopeParams()));
+    }
+
+    public function recommendedAssessmentProcessId(int $candidateId): int
+    {
+        foreach ($this->assessmentProcessesForCandidate($candidateId) as $process) {
+            if ((int) ($process['completed_count'] ?? 0) > 0) {
+                return (int) ($process['id'] ?? 0);
+            }
+        }
+
+        return 0;
+    }
+
+    public function appointmentForCandidate(int $processId, int $candidateId): ?array
+    {
+        if ($processId <= 0 || $candidateId <= 0) {
+            return null;
+        }
+
+        return $this->db->fetch('
+            SELECT a.*
+            FROM interview_appointments a
+            JOIN interview_processes p ON p.id = a.process_id
+            WHERE a.process_id = ? AND a.candidate_user_id = ? AND ' . $this->companyScopeSql('p') . '
+            LIMIT 1
+        ', array_merge([$processId, $candidateId], $this->companyScopeParams()));
+    }
+
+    public function latestTestSessionId(int $testProcessId, int $candidateId): int
+    {
+        $latest = $this->latestSessionIds([$candidateId], $testProcessId);
+        return (int) ($latest[$candidateId] ?? 0);
     }
 
     public function futureDailySubEvents(): array
@@ -217,6 +379,51 @@ final class InterviewProcessModel
         });
     }
 
+    public function deleteProcess(int $processId): void
+    {
+        $process = $this->find($processId);
+        if (!$process) {
+            throw new RuntimeException('Proceso de entrevistas no encontrado.');
+        }
+
+        $active = $this->db->fetch('
+            SELECT COUNT(*) AS total
+            FROM interview_appointments
+            WHERE process_id = ? AND meeting_status IN ("in_progress", "finished")
+        ', [$processId]);
+        if ((int) ($active['total'] ?? 0) > 0) {
+            throw new RuntimeException('No se puede eliminar una entrevista que ya comenzó o finalizó.');
+        }
+
+        $documents = $this->db->fetchAll('
+            SELECT d.storage_path
+            FROM interview_documents d
+            WHERE d.process_id = ?
+        ', [$processId]);
+
+        $this->db->transaction(function () use ($processId): void {
+            // Los documentos nuevos tienen process_id; los documentos
+            // históricos vinculados por appointment_id se eliminan por
+            // cascada al borrar el proceso y sus citas.
+            $this->db->execute('DELETE FROM interview_documents WHERE process_id = ?', [$processId]);
+            $deleted = $this->db->execute('DELETE FROM interview_processes WHERE id = ?', [$processId]);
+            if ($deleted !== 1) {
+                throw new RuntimeException('No se pudo eliminar el proceso de entrevistas.');
+            }
+        });
+
+        foreach ($documents as $document) {
+            $relativePath = ltrim((string) ($document['storage_path'] ?? ''), '/');
+            if (strpos($relativePath, 'storage/interviews/') !== 0) {
+                continue;
+            }
+            $absolutePath = BASE_PATH . '/' . $relativePath;
+            if (is_file($absolutePath)) {
+                @unlink($absolutePath);
+            }
+        }
+    }
+
     public function update(int $id, array $data, array $candidateIds, int $updatedBy): void
     {
         $this->db->transaction(function () use ($id, $data, $candidateIds, $updatedBy): void {
@@ -272,35 +479,166 @@ final class InterviewProcessModel
     public function documents(int $appointmentId): array
     {
         return $this->db->fetchAll('
-            SELECT id, appointment_id, document_type, original_name, mime_type, file_size, sha256,
-                   processing_status, processing_error, uploaded_by, created_at, updated_at
-            FROM interview_documents
-            WHERE appointment_id = ?
-            ORDER BY created_at DESC, id DESC
-        ', [$appointmentId]);
+            SELECT d.id, d.process_id, d.candidate_user_id, d.appointment_id, d.document_type,
+                   d.original_name, d.mime_type, d.file_size, d.sha256, d.extracted_text, d.processing_status,
+                   d.processing_error, d.uploaded_by, d.created_at, d.updated_at
+            FROM interview_documents d
+            JOIN interview_appointments a ON a.id = ?
+            JOIN interview_processes p ON p.id = a.process_id
+            WHERE ' . $this->companyScopeSql('p') . '
+              AND (d.appointment_id = a.id OR (d.process_id = p.id AND (d.candidate_user_id IS NULL OR d.candidate_user_id = a.candidate_user_id)))
+            ORDER BY d.created_at DESC, d.id DESC
+        ', array_merge([$appointmentId], $this->companyScopeParams()));
+    }
+
+    public function processDocuments(int $processId): array
+    {
+        $scopedParams = $this->companyScopeParams();
+        $processDocuments = $this->db->fetchAll('
+            SELECT d.id, d.process_id, d.candidate_user_id, d.document_type, d.original_name,
+                   d.mime_type, d.file_size, d.processing_status, d.processing_error,
+                   d.created_at, u.name AS candidate_name
+            FROM interview_documents d
+            JOIN interview_processes p ON p.id = d.process_id
+            LEFT JOIN ' . $this->coreSchema . '.users u ON u.id = d.candidate_user_id
+            WHERE d.process_id = ? AND ' . $this->companyScopeSql('p') . '
+            ORDER BY d.created_at DESC, d.id DESC
+        ', array_merge([$processId], $scopedParams));
+
+        $legacyDocuments = $this->db->fetchAll('
+            SELECT d.id, COALESCE(d.process_id, a.process_id) AS process_id,
+                   COALESCE(d.candidate_user_id, a.candidate_user_id) AS candidate_user_id, d.document_type, d.original_name,
+                   d.mime_type, d.file_size, d.processing_status, d.processing_error,
+                   d.created_at, u.name AS candidate_name
+            FROM interview_documents d
+            JOIN interview_appointments a ON a.id = d.appointment_id
+            JOIN interview_processes p ON p.id = a.process_id
+            LEFT JOIN ' . $this->coreSchema . '.users u ON u.id = a.candidate_user_id
+            WHERE d.process_id IS NULL AND a.process_id = ? AND ' . $this->companyScopeSql('p') . '
+            ORDER BY d.created_at DESC, d.id DESC
+        ', array_merge([$processId], $scopedParams));
+
+        $documents = array_merge($processDocuments, $legacyDocuments);
+        usort($documents, static fn(array $left, array $right): int => strcmp((string) ($right['created_at'] ?? ''), (string) ($left['created_at'] ?? '')) ?: ((int) ($right['id'] ?? 0) <=> (int) ($left['id'] ?? 0)));
+        return $documents;
     }
 
     public function document(int $documentId): ?array
     {
-        return $this->db->fetch('SELECT * FROM interview_documents WHERE id = ? LIMIT 1', [$documentId]);
+        return $this->db->fetch('
+            SELECT d.*, p.company_id, p.id AS scoped_process_id
+            FROM interview_documents d
+            LEFT JOIN interview_appointments a ON a.id = d.appointment_id
+            LEFT JOIN interview_processes p ON p.id = COALESCE(d.process_id, a.process_id)
+            WHERE d.id = ? AND ' . $this->companyScopeSql('p') . '
+            LIMIT 1
+        ', array_merge([$documentId], $this->companyScopeParams()));
     }
 
-    public function addDocument(int $appointmentId, array $document, int $uploadedBy): int
+    public function deleteDocument(int $documentId): array
     {
+        $document = $this->document($documentId);
+        if (!$document) {
+            throw new RuntimeException('Documento no encontrado.');
+        }
+
+        $this->db->execute('DELETE FROM interview_documents WHERE id = ?', [$documentId]);
+
+        $storagePath = ltrim((string) ($document['storage_path'] ?? ''), '/');
+        if (str_starts_with($storagePath, 'storage/interviews/')) {
+            $absolutePath = BASE_PATH . '/' . $storagePath;
+            if (is_file($absolutePath) && !unlink($absolutePath)) {
+                throw new RuntimeException('El registro fue eliminado, pero no se pudo retirar el archivo físico.');
+            }
+        }
+
+        return $document;
+    }
+
+    public function addDocument(?int $appointmentId, array $document, int $uploadedBy): int
+    {
+        $processId = (int) ($document['process_id'] ?? 0);
+        $candidateUserId = (int) ($document['candidate_user_id'] ?? 0);
+        if ($appointmentId !== null) {
+            $appointment = $this->findAppointment($appointmentId);
+            if (!$appointment) {
+                throw new RuntimeException('Entrevista no encontrada.');
+            }
+            $processId = (int) $appointment['process_id'];
+            $candidateUserId = (int) $appointment['candidate_user_id'];
+        } elseif ($processId <= 0 || !$this->find($processId)) {
+            throw new RuntimeException('Proceso de entrevistas no encontrado.');
+        }
+
         return (int) $this->db->insert('
             INSERT INTO interview_documents
-                (appointment_id, document_type, original_name, stored_name, storage_path, mime_type, file_size, sha256, extracted_text, processing_status, processing_error, uploaded_by)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (process_id, candidate_user_id, appointment_id, document_type, original_name, stored_name, storage_path, mime_type, file_size, sha256, extracted_text, processing_status, processing_error, uploaded_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ', [
-            $appointmentId, $document['document_type'], $document['original_name'], $document['stored_name'],
+            $processId ?: null, $candidateUserId ?: null, $appointmentId, $document['document_type'], $document['original_name'], $document['stored_name'],
             $document['storage_path'], $document['mime_type'], $document['file_size'], $document['sha256'],
             $document['extracted_text'] ?: null, $document['processing_status'], $document['processing_error'] ?: null,
             $uploadedBy ?: null,
         ]);
     }
 
+    public function evaluationFor(int $appointmentId, int $evaluatorUserId): ?array
+    {
+        $this->assertScopedAppointment($appointmentId);
+        return $this->db->fetch('
+            SELECT * FROM interview_evaluations
+            WHERE appointment_id = ? AND evaluator_user_id = ?
+            LIMIT 1
+        ', [$appointmentId, $evaluatorUserId]);
+    }
+
+    public function evaluations(int $appointmentId): array
+    {
+        $this->assertScopedAppointment($appointmentId);
+        return $this->db->fetchAll('
+            SELECT e.*, u.name AS evaluator_name
+            FROM interview_evaluations e
+            LEFT JOIN ' . $this->coreSchema . '.users u ON u.id = e.evaluator_user_id
+            WHERE e.appointment_id = ?
+            ORDER BY e.updated_at DESC, e.id DESC
+        ', [$appointmentId]);
+    }
+
+    public function saveEvaluation(int $appointmentId, int $evaluatorUserId, array $data): void
+    {
+        $this->assertScopedAppointment($appointmentId);
+        $status = ($data['status'] ?? 'draft') === 'submitted' ? 'submitted' : 'draft';
+        $recommendation = in_array(($data['recommendation'] ?? 'pending'), ['pending', 'recommended', 'not_recommended', 'hold'], true)
+            ? (string) $data['recommendation'] : 'pending';
+        $submittedAt = $status === 'submitted' ? date('Y-m-d H:i:s') : null;
+
+        $this->db->execute('
+            INSERT INTO interview_evaluations
+                (appointment_id, evaluator_user_id, status, technical_score, behavioral_score, overall_score, recommendation, strengths, risks, comments, criteria_json, submitted_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+                status = VALUES(status), technical_score = VALUES(technical_score),
+                behavioral_score = VALUES(behavioral_score), overall_score = VALUES(overall_score),
+                recommendation = VALUES(recommendation), strengths = VALUES(strengths),
+                risks = VALUES(risks), comments = VALUES(comments), criteria_json = VALUES(criteria_json),
+                submitted_at = VALUES(submitted_at), updated_at = CURRENT_TIMESTAMP
+        ', [
+            $appointmentId, $evaluatorUserId, $status,
+            $this->score($data['technical_score'] ?? null),
+            $this->score($data['behavioral_score'] ?? null),
+            $this->score($data['overall_score'] ?? null),
+            $recommendation,
+            trim((string) ($data['strengths'] ?? '')) ?: null,
+            trim((string) ($data['risks'] ?? '')) ?: null,
+            trim((string) ($data['comments'] ?? '')) ?: null,
+            json_encode($data['criteria'] ?? [], JSON_UNESCAPED_UNICODE),
+            $submittedAt,
+        ]);
+    }
+
     public function saveNotes(int $appointmentId, int $userId, string $notes): void
     {
+        $this->assertScopedAppointment($appointmentId);
         $this->db->execute('
             INSERT INTO interview_notes (appointment_id, author_user_id, notes)
             VALUES (?, ?, ?)
@@ -310,6 +648,7 @@ final class InterviewProcessModel
 
     public function recordTranscriptionEvent(int $appointmentId, int $userId, string $action, string $status, string $transcript, string $message = ''): void
     {
+        $this->assertScopedAppointment($appointmentId);
         $allowedActions = ['start', 'snapshot', 'stop', 'failed'];
         $allowedStatuses = ['idle', 'recording', 'processing', 'available', 'failed'];
         if (!in_array($action, $allowedActions, true) || !in_array($status, $allowedStatuses, true)) {
@@ -334,6 +673,7 @@ final class InterviewProcessModel
 
     public function markMeetingStarted(int $appointmentId, string $roomName, string $roomUrl): void
     {
+        $this->assertScopedAppointment($appointmentId);
         $this->db->execute('
             UPDATE interview_appointments
             SET meeting_status = "in_progress", daily_room_name = ?, daily_room_url = ?
@@ -343,6 +683,7 @@ final class InterviewProcessModel
 
     public function finishAppointment(int $appointmentId): void
     {
+        $this->assertScopedAppointment($appointmentId);
         $this->db->execute('
             UPDATE interview_appointments
             SET meeting_status = "finished", finished_at = COALESCE(finished_at, NOW()), final_report_status = "pending"
@@ -353,6 +694,7 @@ final class InterviewProcessModel
 
     public function queueJob(int $appointmentId, string $type): void
     {
+        $this->assertScopedAppointment($appointmentId);
         $existing = $this->db->fetch('
             SELECT id
             FROM interview_report_jobs
@@ -366,6 +708,16 @@ final class InterviewProcessModel
         $this->db->insert('
             INSERT INTO interview_report_jobs (appointment_id, job_type, status)
             VALUES (?, ?, "pending")
+        ', [$appointmentId, $type]);
+    }
+
+    public function retryJob(int $appointmentId, string $type): void
+    {
+        $this->assertScopedAppointment($appointmentId);
+        $this->db->execute('
+            UPDATE interview_report_jobs
+            SET status = "pending", attempts = 0, locked_at = NULL, last_error = NULL
+            WHERE appointment_id = ? AND job_type = ? AND status IN ("pending", "failed")
         ', [$appointmentId, $type]);
     }
 
@@ -422,6 +774,7 @@ final class InterviewProcessModel
 
     public function completeBrief(int $appointmentId, int $jobId, array $brief): void
     {
+        $this->assertScopedAppointment($appointmentId);
         $this->db->execute('
             UPDATE interview_appointments
             SET moderator_brief_status = "ready", moderator_brief_json = ?, moderator_brief_error = NULL
@@ -432,6 +785,7 @@ final class InterviewProcessModel
 
     public function failBrief(int $appointmentId, int $jobId, string $error, bool $pending): void
     {
+        $this->assertScopedAppointment($appointmentId);
         $this->db->execute('
             UPDATE interview_appointments
             SET moderator_brief_status = ?, moderator_brief_error = ?
@@ -442,6 +796,7 @@ final class InterviewProcessModel
 
     public function completeFinalReport(int $appointmentId, int $jobId, array $report, string $html): void
     {
+        $this->assertScopedAppointment($appointmentId);
         $this->db->execute('
             UPDATE interview_appointments
             SET final_report_status = "ready", final_report_json = ?, final_report_html = ?, final_report_error = NULL, final_report_generated_at = NOW()
@@ -452,6 +807,7 @@ final class InterviewProcessModel
 
     public function failFinalReport(int $appointmentId, int $jobId, string $error, bool $pending): void
     {
+        $this->assertScopedAppointment($appointmentId);
         $this->db->execute('
             UPDATE interview_appointments
             SET final_report_status = ?, final_report_error = ?
@@ -466,12 +822,8 @@ final class InterviewProcessModel
             SELECT notes FROM interview_notes WHERE appointment_id = ? ORDER BY updated_at DESC LIMIT 1
         ', [(int) $appointment['id']]);
 
-        $documents = $this->db->fetchAll('
-            SELECT id, document_type, original_name, mime_type, file_size, processing_status, extracted_text, created_at
-            FROM interview_documents
-            WHERE appointment_id = ?
-            ORDER BY created_at ASC, id ASC
-        ', [(int) $appointment['id']]);
+        $jobProfile = $this->jobProfile((int) ($appointment['process_id'] ?? 0));
+        $documents = $this->documents((int) $appointment['id']);
 
         $documentContext = [];
         foreach ($documents as $document) {
@@ -496,12 +848,54 @@ final class InterviewProcessModel
                 'name' => $appointment['process_name'] ?? '',
                 'interview_date' => $appointment['interview_date'] ?? '',
                 'test_process' => $appointment['test_process_name'] ?? '',
+                'job_profile' => $jobProfile ? [
+                    'title' => (string) ($jobProfile['title'] ?? ''),
+                    'description' => (string) ($jobProfile['description'] ?? ''),
+                    'technical_requirements' => (string) ($jobProfile['technical_requirements'] ?? ''),
+                    'behavioral_requirements' => (string) ($jobProfile['behavioral_requirements'] ?? ''),
+                    'evaluation_criteria' => json_decode((string) ($jobProfile['evaluation_criteria_json'] ?? '[]'), true) ?: [],
+                ] : [],
             ],
             'report' => $this->candidateReportSummary($appointment),
             'transcript' => (string) ($appointment['transcript_text'] ?? ''),
             'notes' => (string) ($note['notes'] ?? ''),
             'documents' => $documentContext,
+            'evaluations' => array_map(static function (array $evaluation): array {
+                return [
+                    'evaluator' => (string) ($evaluation['evaluator_name'] ?? ''),
+                    'status' => (string) ($evaluation['status'] ?? ''),
+                    'technical_score' => $evaluation['technical_score'] === null ? null : (int) $evaluation['technical_score'],
+                    'behavioral_score' => $evaluation['behavioral_score'] === null ? null : (int) $evaluation['behavioral_score'],
+                    'overall_score' => $evaluation['overall_score'] === null ? null : (int) $evaluation['overall_score'],
+                    'recommendation' => (string) ($evaluation['recommendation'] ?? ''),
+                    'strengths' => (string) ($evaluation['strengths'] ?? ''),
+                    'risks' => (string) ($evaluation['risks'] ?? ''),
+                    'comments' => (string) ($evaluation['comments'] ?? ''),
+                ];
+            }, $this->evaluations((int) $appointment['id'])),
         ];
+    }
+
+    /**
+     * Identifies the inputs used to build the moderator brief without
+     * including interview-only data such as notes, transcript, or scores.
+     * This lets callers reuse a ready brief when an edit did not change its
+     * source material.
+     */
+    public function moderatorBriefSourceFingerprint(array $appointment): string
+    {
+        $context = $this->reportContext($appointment);
+        $source = [
+            'candidate_id' => (int) ($appointment['candidate_user_id'] ?? 0),
+            'test_process_id' => (int) ($appointment['test_process_id'] ?? 0),
+            'test_session_id' => (int) ($appointment['test_session_id'] ?? 0),
+            'process_name' => (string) ($context['process']['name'] ?? $appointment['process_name'] ?? ''),
+            'job_profile' => $context['process']['job_profile'] ?? [],
+            'report' => $context['report'] ?? [],
+            'documents' => $context['documents'] ?? [],
+        ];
+
+        return hash('sha256', (string) json_encode($source, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
     }
 
     public function moderatorPreflight(array $appointment): array
@@ -609,6 +1003,7 @@ final class InterviewProcessModel
     private function syncAppointments(int $processId, array $data, array $candidateIds, int $userId): void
     {
         $candidateIds = array_values(array_unique(array_filter(array_map('intval', $candidateIds))));
+        $this->assertAssignableUsers((int) $data['moderator_user_id'], $candidateIds);
         $existing = $this->appointments($processId);
         $existingByCandidate = [];
         foreach ($existing as $row) {
@@ -824,6 +1219,55 @@ final class InterviewProcessModel
         $this->db->execute('UPDATE interview_report_jobs SET status = "failed", last_error = ? WHERE id = ?', [$error, $jobId]);
     }
 
+    private function assertAssignableUsers(int $moderatorId, array $candidateIds): void
+    {
+        $userScope = $this->companyScopeSql('u');
+        $scopeParams = $this->companyScopeParams();
+        $moderator = $this->db->fetch('
+            SELECT u.id FROM ' . $this->coreSchema . '.users u
+            WHERE u.id = ? AND u.is_active = 1 AND ' . $userScope . '
+            LIMIT 1
+        ', array_merge([$moderatorId], $scopeParams));
+        if (!$moderator) {
+            throw new RuntimeException('El moderador no pertenece al alcance de la empresa activa.');
+        }
+
+        if (!$candidateIds) {
+            return;
+        }
+
+        $placeholders = implode(',', array_fill(0, count($candidateIds), '?'));
+        $rows = $this->db->fetchAll('
+            SELECT u.id FROM ' . $this->coreSchema . '.users u
+            LEFT JOIN ' . $this->coreSchema . '.role_profiles rp ON rp.id = u.profile_id
+            WHERE u.is_active = 1 AND u.id IN (' . $placeholders . ')
+              AND COALESCE(rp.role_key, u.role) = "usuario"
+              AND ' . $userScope . '
+        ', array_merge($candidateIds, $scopeParams));
+        if (count($rows) !== count($candidateIds)) {
+            throw new RuntimeException('Uno o más postulantes no pertenecen al alcance de la empresa activa.');
+        }
+    }
+
+    private function score($value): ?int
+    {
+        if ($value === null || trim((string) $value) === '') {
+            return null;
+        }
+
+        return max(0, min(100, (int) $value));
+    }
+
+    private function assertScopedAppointment(int $appointmentId): array
+    {
+        $appointment = $this->findAppointment($appointmentId);
+        if (!$appointment) {
+            throw new RuntimeException('Entrevista no encontrada.');
+        }
+
+        return $appointment;
+    }
+
     private function companyScopeSql(string $alias): string
     {
         $user = current_user();
@@ -831,7 +1275,7 @@ final class InterviewProcessModel
             return '1 = 1';
         }
 
-        if (has_permission('manage_company_interviews') && (int) ($user['company_id'] ?? 0) > 0) {
+        if ((has_permission('manage_company_interviews') || is_company_admin_user($user)) && (int) ($user['company_id'] ?? 0) > 0) {
             return $alias . '.company_id = ?';
         }
 
@@ -841,7 +1285,7 @@ final class InterviewProcessModel
     private function companyScopeParams(): array
     {
         $user = current_user();
-        if ($user && !has_permission('manage_interview_processes') && has_permission('manage_company_interviews') && (int) ($user['company_id'] ?? 0) > 0) {
+        if ($user && !has_permission('manage_interview_processes') && (has_permission('manage_company_interviews') || is_company_admin_user($user)) && (int) ($user['company_id'] ?? 0) > 0) {
             return [(int) $user['company_id']];
         }
 
@@ -851,7 +1295,7 @@ final class InterviewProcessModel
     private function currentCompanyId(): ?int
     {
         $user = current_user();
-        if ($user && has_permission('manage_company_interviews') && !has_permission('manage_interview_processes')) {
+        if ($user && (has_permission('manage_company_interviews') || is_company_admin_user($user)) && !has_permission('manage_interview_processes')) {
             $companyId = (int) ($user['company_id'] ?? 0);
             return $companyId > 0 ? $companyId : null;
         }

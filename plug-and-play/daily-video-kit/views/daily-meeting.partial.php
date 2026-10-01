@@ -33,7 +33,7 @@ $dailyEscape = static fn(string $value): string => htmlspecialchars($value, ENT_
             data-transcription-snapshot-interval="<?= (int) ($meeting['transcription_snapshot_interval_seconds'] ?? 20) ?>"
             data-csrf-token="<?= $dailyEscape((string) ($meeting['csrf_token'] ?? '')) ?>"
             data-daily-title="Videollamada"
-            data-daily-min-height="640px"
+            data-daily-min-height="0px"
             hidden>
             <div class="daily-kit-state">
                 <div class="daily-kit-icon" aria-hidden="true">...</div>
@@ -43,12 +43,18 @@ $dailyEscape = static fn(string $value): string => htmlspecialchars($value, ENT_
         </div>
 
         <?php if (!empty($meeting['transcription_enabled'])): ?>
-            <div class="daily-kit-transcription" data-daily-transcription-panel hidden>
-                <span data-transcription-status>Transcripcion disponible</span>
-                <div class="daily-kit-transcription-actions">
-                    <button class="daily-kit-button daily-kit-button-secondary" type="button" data-transcription-start>Iniciar transcripcion</button>
-                    <button class="daily-kit-button daily-kit-button-secondary" type="button" data-transcription-stop hidden>Detener transcripcion</button>
+            <div class="daily-kit-transcription" data-daily-transcription-panel>
+                <div class="daily-kit-transcription-head">
+                    <div class="daily-kit-transcription-copy">
+                        <strong>Transcripción de la entrevista</strong>
+                        <span data-transcription-status>Disponible al ingresar a la videollamada</span>
+                    </div>
+                    <div class="daily-kit-transcription-actions">
+                        <button class="daily-kit-button daily-kit-button-secondary" type="button" data-transcription-start disabled>Iniciar transcripcion</button>
+                        <button class="daily-kit-button daily-kit-button-secondary" type="button" data-transcription-stop hidden>Detener transcripcion</button>
+                    </div>
                 </div>
+                <div class="daily-kit-transcription-feed" data-transcription-feed aria-live="polite" hidden></div>
             </div>
         <?php endif; ?>
 
