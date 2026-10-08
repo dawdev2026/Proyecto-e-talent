@@ -269,6 +269,11 @@ final class DailyMeetingService
             'enable_prejoin_ui' => false,
             'enable_live_captions_ui' => true,
             'enable_transcription_storage' => true,
+            'auto_transcription_settings' => [
+                'language' => $this->lang(),
+                'model' => 'nova-2',
+                'punctuate' => true,
+            ],
             'start_audio_off' => true,
             'start_video_off' => false,
             'lang' => $this->lang(),
