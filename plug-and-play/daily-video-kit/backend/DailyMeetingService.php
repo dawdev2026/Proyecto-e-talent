@@ -139,7 +139,9 @@ final class DailyMeetingService
                 'enable_screenshare' => true,
                 'enable_live_captions_ui' => true,
                 'enable_recording_ui' => $owner,
-                'auto_start_transcription' => $owner && $autoStartTranscription,
+                // The browser starts transcription explicitly with the configured language.
+                // Daily's token/room auto-start falls back to English in this integration.
+                'auto_start_transcription' => false,
                 'start_audio_off' => true,
                 'start_video_off' => false,
                 'eject_at_token_exp' => true,
@@ -264,11 +266,6 @@ final class DailyMeetingService
             'enable_prejoin_ui' => false,
             'enable_live_captions_ui' => true,
             'enable_transcription_storage' => true,
-            'auto_transcription_settings' => [
-                'language' => $this->lang(),
-                'model' => 'nova-2',
-                'punctuate' => true,
-            ],
             'start_audio_off' => true,
             'start_video_off' => false,
             'lang' => $this->lang(),
