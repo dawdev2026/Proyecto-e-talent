@@ -111,7 +111,9 @@
                                     || has_permission('manage_interview_processes')
                                     || has_permission('manage_company_interviews');
                             ?>
-                            <?php if ($canGenerateReport && $reportStatus !== 'ready' && (string) ($appointment['meeting_status'] ?? '') === 'finished'): ?>
+                            <?php $canRequestManualReport = (string) ($appointment['meeting_status'] ?? '') === 'finished'
+                                || in_array($reportStatus, ['pending', 'processing', 'failed'], true); ?>
+                            <?php if ($canGenerateReport && $reportStatus !== 'ready' && $canRequestManualReport): ?>
                                 <?php $reportAction = route_url('interviews.process-job') . '?sid=' . rawurlencode(secure_url_token((int) $appointment['id'], 'interview_appointment')); ?>
                                 <?php if (in_array($reportStatus, ['pending', 'processing'], true)): ?>
                                     <span class="badge text-bg-warning d-block mt-2">Informe en proceso</span>
