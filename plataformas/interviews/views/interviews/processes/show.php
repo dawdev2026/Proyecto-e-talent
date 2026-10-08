@@ -104,6 +104,23 @@
                             <?php if ($canEnterRoom && (string) $appointment['final_report_status'] === 'ready'): ?>
                                 <a class="btn btn-sm btn-outline-secondary" href="<?= e(route_url('interview-appointment.report', (int) $appointment['id'])) ?>"><i class="bi bi-filetype-pdf me-1"></i> PDF</a>
                             <?php endif; ?>
+                            <?php
+                                $reportStatus = (string) ($appointment['final_report_status'] ?? 'not_started');
+                                $canGenerateReport = is_company_admin_user()
+                                    || has_permission('view_interview_reports')
+                                    || has_permission('manage_interview_processes')
+                                    || has_permission('manage_company_interviews');
+                            ?>
+                            <?php if ($canGenerateReport && $reportStatus !== 'ready' && (string) ($appointment['meeting_status'] ?? '') === 'finished'): ?>
+                                <?php $reportAction = route_url('interviews.process-job') . '?sid=' . rawurlencode(secure_url_token((int) $appointment['id'], 'interview_appointment')); ?>
+                                <?php if (in_array($reportStatus, ['pending', 'processing'], true)): ?>
+                                    <span class="badge text-bg-warning d-block mt-2">Informe en proceso</span>
+                                <?php endif; ?>
+                                <form method="post" class="mt-2" action="<?= e($reportAction) ?>">
+                                    <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
+                                    <button class="btn btn-sm btn-outline-primary w-100" type="submit"><i class="bi bi-file-earmark-text me-1"></i><?= $reportStatus === 'failed' ? 'Reintentar informe' : 'Generar informe ahora' ?></button>
+                                </form>
+                            <?php endif; ?>
                             <?php if (is_company_admin_user() || has_permission('manage_interview_processes') || has_permission('manage_company_interviews')): ?>
                                 <details class="mt-2 text-start">
                                     <summary class="btn btn-sm btn-outline-secondary">Ajustar horario</summary>

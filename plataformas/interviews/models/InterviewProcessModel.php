@@ -735,7 +735,7 @@ final class InterviewProcessModel
         ', [$type]);
     }
 
-    public function claimPendingJob(string $type, int $maxAttempts = 3): ?array
+    public function claimPendingJob(string $type, int $maxAttempts = 3, ?int $appointmentId = null): ?array
     {
         $this->db->execute('
             UPDATE interview_report_jobs
@@ -743,12 +743,18 @@ final class InterviewProcessModel
             WHERE status = "processing" AND locked_at < DATE_SUB(NOW(), INTERVAL 15 MINUTE)
         ');
 
+        $appointmentSql = $appointmentId !== null ? ' AND appointment_id = ?' : '';
+        $jobParams = [$type];
+        if ($appointmentId !== null) {
+            $jobParams[] = $appointmentId;
+        }
+        $jobParams[] = $maxAttempts;
         $job = $this->db->fetch('
             SELECT * FROM interview_report_jobs
-            WHERE job_type = ? AND status = "pending" AND attempts < ?
+            WHERE job_type = ? AND status = "pending"' . $appointmentSql . ' AND attempts < ?
             ORDER BY created_at ASC, id ASC
             LIMIT 1
-        ', [$type, $maxAttempts]);
+        ', $jobParams);
         if (!$job) {
             return null;
         }
