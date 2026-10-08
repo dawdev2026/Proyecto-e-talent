@@ -585,7 +585,10 @@ final class InterviewProcessModel
 
     public function evaluationFor(int $appointmentId, int $evaluatorUserId): ?array
     {
-        $this->assertScopedAppointment($appointmentId);
+        // La sala permite acceder al participante mediante su vínculo seguro.
+        // Mantener ese mismo alcance al cargar su evaluación evita que la
+        // segunda consulta rechace la cita y convierta la sala en un 500.
+        $this->assertScopedAppointment($appointmentId, true);
         return $this->db->fetch('
             SELECT * FROM interview_evaluations
             WHERE appointment_id = ? AND evaluator_user_id = ?
@@ -1294,9 +1297,9 @@ final class InterviewProcessModel
         return max(0, min(100, (int) $value));
     }
 
-    private function assertScopedAppointment(int $appointmentId): array
+    private function assertScopedAppointment(int $appointmentId, bool $includeParticipant = false): array
     {
-        $appointment = $this->findAppointment($appointmentId);
+        $appointment = $this->findAppointment($appointmentId, $includeParticipant);
         if (!$appointment) {
             throw new RuntimeException('Entrevista no encontrada.');
         }
