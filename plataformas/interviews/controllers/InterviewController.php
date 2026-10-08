@@ -624,10 +624,19 @@ final class InterviewController extends Controller
 
     public function downloadReport(): void
     {
-        require_permission('view_interview_reports');
-
+        require_auth();
         $id = request_secure_id('interview_appointment');
-        $appointment = $this->interviews->findAppointment($id);
+        $appointment = $this->interviews->findAppointment($id, true);
+        $canViewReport = is_company_admin_user()
+            || has_permission('view_interview_reports')
+            || has_permission('manage_interview_processes')
+            || has_permission('manage_company_interviews');
+        if (!$appointment) {
+            platform_error(404, 'Reporte final no disponible.');
+        }
+        if (!$canViewReport) {
+            platform_error(403, 'No tienes permisos para acceder al informe de esta entrevista.');
+        }
         if (!$appointment || (string) ($appointment['final_report_status'] ?? '') !== 'ready') {
             platform_error(404, 'Reporte final no disponible.');
         }
