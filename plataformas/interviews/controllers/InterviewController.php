@@ -528,14 +528,28 @@ final class InterviewController extends Controller
 
     public function transcription(): void
     {
-        require_permission('conduct_selection_interviews');
-        verify_csrf();
+        require_auth();
 
         $id = request_secure_id('interview_appointment');
+        $appointment = $this->interviews->findAppointment($id, true);
+        $userId = (int) (current_user()['id'] ?? 0);
+        $isAssignedModerator = $appointment
+            && $userId > 0
+            && $userId === (int) ($appointment['moderator_user_id'] ?? 0);
+        if (!$isAssignedModerator && !has_permission('conduct_selection_interviews')) {
+            platform_error(403, 'No tienes permisos para registrar la transcripcion.', [
+                'detailRows' => [
+                    'Permiso requerido' => 'ser entrevistador asignado o tener conduct_selection_interviews',
+                ],
+            ]);
+        }
+
+        verify_csrf();
+
         try {
             $this->interviews->recordTranscriptionEvent(
                 $id,
-                (int) (current_user()['id'] ?? 0),
+                $userId,
                 (string) ($_POST['transcription_action'] ?? ''),
                 (string) ($_POST['transcription_status'] ?? 'recording'),
                 (string) ($_POST['transcript_text'] ?? ''),
