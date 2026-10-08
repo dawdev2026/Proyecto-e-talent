@@ -1,3 +1,12 @@
+<?php $reportFormMessages = flashes(); ?>
+
+<?php foreach ($reportFormMessages as $message): ?>
+    <div class="alert alert-<?= e(($message['type'] ?? 'danger') === 'success' ? 'success' : 'danger') ?> d-flex align-items-start gap-2" role="alert">
+        <i class="bi bi-exclamation-triangle mt-1" aria-hidden="true"></i>
+        <div><?= e((string) ($message['message'] ?? 'No se pudo procesar el formulario.')) ?></div>
+    </div>
+<?php endforeach; ?>
+
 <section class="page-header">
     <div>
         <p class="text-uppercase text-primary fw-bold small mb-1">Informes</p>

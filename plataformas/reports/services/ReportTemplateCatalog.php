@@ -26,6 +26,12 @@ final class ReportTemplateCatalog
             'renderer' => 'plain',
             'label' => 'Plantilla de texto heredada',
         ],
+        'colaboral_interview_v1' => [
+            'key' => 'colaboral_interview_v1',
+            'version' => 1,
+            'renderer' => 'interview',
+            'label' => 'Plantilla Colaboral para entrevista',
+        ],
     ];
 
     public function resolve(?string $key): array

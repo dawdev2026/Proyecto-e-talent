@@ -979,6 +979,25 @@ final class PostulantSimplePdf
         $this->current .= sprintf("%.2F w %.3F %.3F %.3F RG %.2F %.2F m %.2F %.2F l S\n", $lineWidth, $color[0] / 255, $color[1] / 255, $color[2] / 255, $x1, self::HEIGHT - $y1, $x2, self::HEIGHT - $y2);
     }
 
+    public function curve(float $x1, float $y1, float $control1X, float $control1Y, float $control2X, float $control2Y, float $x2, float $y2, array $color, float $lineWidth = 1): void
+    {
+        $this->current .= sprintf(
+            "1 J 1 j %.2F w %.3F %.3F %.3F RG %.2F %.2F m %.2F %.2F %.2F %.2F %.2F %.2F c S\n",
+            $lineWidth,
+            $color[0] / 255,
+            $color[1] / 255,
+            $color[2] / 255,
+            $x1,
+            self::HEIGHT - $y1,
+            $control1X,
+            self::HEIGHT - $control1Y,
+            $control2X,
+            self::HEIGHT - $control2Y,
+            $x2,
+            self::HEIGHT - $y2
+        );
+    }
+
     public function circle(float $x, float $y, float $r, array $stroke): void
     {
         $c = 0.5522847498 * $r;
