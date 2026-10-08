@@ -249,7 +249,8 @@ final class ReportDefinitionModel
         }
 
         return $this->db->fetchAll(
-            "SELECT DISTINCT r.id, r.name, r.slug, r.version, r.markdown_content, r.source_filename
+            "SELECT DISTINCT r.id, r.name, r.slug, r.version, r.markdown_content, r.source_filename,
+                    r.design_markdown_content, r.design_source_filename
              FROM report_definitions r
              INNER JOIN report_company_assignments ca
                ON ca.report_id = r.id AND ca.company_id = ? AND ca.removed_at IS NULL

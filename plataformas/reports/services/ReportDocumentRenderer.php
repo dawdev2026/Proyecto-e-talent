@@ -498,7 +498,15 @@ final class ReportDocumentRenderer
         if (is_bool($value)) {
             return $value ? 'Sí' : 'No';
         }
-        return is_scalar($value) ? (string) $value : 'Sin dato';
+        if (is_scalar($value)) {
+            return (string) $value;
+        }
+        if (is_array($value)) {
+            $encoded = json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            return is_string($encoded) && $encoded !== '' ? $encoded : 'Sin dato';
+        }
+
+        return 'Sin dato';
     }
 
     private function wrappedLines(string $text, int $width): array

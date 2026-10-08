@@ -35,8 +35,12 @@ final class ReportController extends Controller
         }
 
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-            $this->save($id, $report);
-            return;
+            try {
+                $this->save($id, $report);
+            } catch (Throwable $exception) {
+                error_log('Report definition form error: ' . $exception->getMessage());
+                flash('danger', 'No se pudo validar o guardar el informe. Revisa el archivo y vuelve a intentarlo.');
+            }
         }
 
         $this->render('reports/form', [

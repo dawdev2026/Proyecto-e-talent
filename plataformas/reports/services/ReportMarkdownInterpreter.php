@@ -29,6 +29,10 @@ final class ReportMarkdownInterpreter
             'provider' => 'TestSessionModel',
             'method' => 'summaryForSession',
         ],
+        'source.interview' => [
+            'provider' => 'InterviewProcessModel',
+            'method' => 'reportContext',
+        ],
     ];
 
     private const ALLOWED_FORMULAS = [
@@ -84,20 +88,55 @@ final class ReportMarkdownInterpreter
      * Obtiene el payload real que ya utiliza la plataforma para informes
      * psicométricos. La ejecución queda limitada al proceso y empresa dados.
      */
-    public function execute(string $markdown, int $processId, int $userId, int $companyId): array
+    public function execute(string $markdown, int $processId, int $userId, int $companyId, ?array $interviewContext = null): array
     {
-        if ($processId <= 0 || $userId <= 0 || $companyId <= 0) {
-            throw new InvalidArgumentException('El contexto del informe requiere proceso, usuario y empresa.');
+        if ($companyId <= 0) {
+            throw new InvalidArgumentException('El contexto del informe requiere empresa.');
         }
 
         $spec = $this->parse($markdown);
-        $data = (new PostulantReportDataService())->payloadForProcessUser($processId, $userId);
-        $candidateCompanyId = (int) ($data['candidate']['company_id'] ?? 0);
-        $processCompanyId = (int) ($data['process']['company_id'] ?? 0);
-        if (!$data['available'] || $candidateCompanyId !== $companyId || ($processCompanyId > 0 && $processCompanyId !== $companyId)) {
+        $data = [];
+        if (isset($spec['sources']['source.process_user'])) {
+            if ($processId <= 0 || $userId <= 0) {
+                throw new InvalidArgumentException('El informe psicométrico requiere proceso y usuario.');
+            }
+            $data = (new PostulantReportDataService())->payloadForProcessUser($processId, $userId);
+            $candidateCompanyId = (int) ($data['candidate']['company_id'] ?? 0);
+            $processCompanyId = (int) ($data['process']['company_id'] ?? 0);
+            if (!$data['available'] || $candidateCompanyId !== $companyId || ($processCompanyId > 0 && $processCompanyId !== $companyId)) {
+                return [
+                    'available' => false,
+                    'message' => 'El informe no está disponible para la empresa indicada.',
+                    'spec' => $spec,
+                ];
+            }
+        }
+
+        if (isset($spec['sources']['source.interview'])) {
+            if (!is_array($interviewContext) || !$this->interviewContextBelongsToCompany($interviewContext, $companyId)) {
+                return [
+                    'available' => false,
+                    'message' => 'El contexto de la entrevista no está disponible para la empresa indicada.',
+                    'spec' => $spec,
+                ];
+            }
+            $data['interview'] = $interviewContext;
+            $data['interview']['source_metadata'] = array_merge([
+                'origin' => 'registered_interview',
+                'is_simulated' => false,
+            ], is_array($data['interview']['source_metadata'] ?? null) ? $data['interview']['source_metadata'] : []);
+            if (!isset($data['candidate']) && isset($interviewContext['candidate'])) {
+                $data['candidate'] = $interviewContext['candidate'];
+            }
+            if (!isset($data['process']) && isset($interviewContext['process'])) {
+                $data['process'] = $interviewContext['process'];
+            }
+        }
+
+        if (!$data) {
             return [
                 'available' => false,
-                'message' => 'El informe no está disponible para la empresa indicada.',
+                'message' => 'El informe no declara una fuente de datos ejecutable.',
                 'spec' => $spec,
             ];
         }
@@ -172,19 +211,48 @@ final class ReportMarkdownInterpreter
 
     private function validateTemplateReferences(array $spec): void
     {
-        $availablePaths = ['candidate', 'process', 'sessions', 'ranking', 'ipip', 'instrument_summaries', 'structured_summary', 'resolved_at'];
+        $availablePaths = ['candidate', 'process', 'sessions', 'ranking', 'ipip', 'instrument_summaries', 'structured_summary', 'interview', 'resolved_at'];
         foreach (array_keys($spec['transformations']) as $transformationName) {
             $availablePaths[] = preg_replace('/^transform\./', '', (string) $transformationName) ?: (string) $transformationName;
         }
         foreach ($spec['sections'] as $section) {
-            preg_match_all('/\{\{\s*(?:#each\s+)?([a-z0-9_.-]+)/i', (string) $section['markdown'], $matches);
+            $markdown = (string) $section['markdown'];
+            preg_match_all('/\{\{#each\s+([^}]+)\}\}(.*?)\{\{\/each\}\}/s', $markdown, $eachMatches, PREG_SET_ORDER);
+            foreach ($eachMatches as $eachMatch) {
+                $this->assertAllowedReference(trim((string) $eachMatch[1]), $availablePaths, $section['heading']);
+                preg_match_all('~\{\{\s*([^#/{][^}]*)\s*\}\}~', (string) $eachMatch[2], $itemMatches);
+                foreach ($itemMatches[1] ?? [] as $itemPath) {
+                    $itemPath = trim((string) $itemPath);
+                    if ($itemPath !== 'this' && strpos($itemPath, '.') !== false) {
+                        throw new InvalidArgumentException('Variable de elemento no permitida en la sección "' . $section['heading'] . '": ' . $itemPath . '.');
+                    }
+                }
+                $markdown = str_replace($eachMatch[0], '', $markdown);
+            }
+
+            preg_match_all('~\{\{\s*([^#/{][^}]*)\s*\}\}~', $markdown, $matches);
             foreach ($matches[1] ?? [] as $path) {
-                $root = explode('.', (string) $path, 2)[0];
+                $path = trim((string) $path);
+                $root = explode('.', $path, 2)[0];
                 if (!in_array($root, $availablePaths, true)) {
                     throw new InvalidArgumentException('Variable no permitida en la sección "' . $section['heading'] . '": ' . $path . '.');
                 }
             }
         }
+    }
+
+    private function assertAllowedReference(string $path, array $availablePaths, string $heading): void
+    {
+        $root = explode('.', $path, 2)[0];
+        if (!in_array($root, $availablePaths, true)) {
+            throw new InvalidArgumentException('Variable no permitida en la sección "' . $heading . '": ' . $path . '.');
+        }
+    }
+
+    private function interviewContextBelongsToCompany(array $context, int $companyId): bool
+    {
+        $contextCompanyId = (int) ($context['process']['company_id'] ?? $context['appointment']['company_id'] ?? 0);
+        return $contextCompanyId > 0 && $contextCompanyId === $companyId;
     }
 
     private function extractFrontMatter(string $markdown): array

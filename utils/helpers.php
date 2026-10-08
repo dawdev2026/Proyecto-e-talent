@@ -750,6 +750,7 @@ function platform_error(int $statusCode, string $rawMessage, array $options = []
     $data['requestedPath'] = $data['requestedPath'] ?? (parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/');
     $data['occurredAt'] = $data['occurredAt'] ?? date('d/m/Y H:i');
     $data['supportReference'] = $data['supportReference'] ?? '';
+    $data['publicError'] = !empty($data['publicError']);
 
     if ($statusCode >= 500 || !empty($options['log'])) {
         $data['supportReference'] = $data['supportReference'] ?: platform_error_reference($statusCode);

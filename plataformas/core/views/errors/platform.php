@@ -8,9 +8,35 @@ $requestedPath = $requestedPath ?? (parse_url($_SERVER['REQUEST_URI'] ?? '/', PH
 $occurredAt = $occurredAt ?? date('d/m/Y H:i');
 $detailRows = $detailRows ?? [];
 $actions = $actions ?? [];
+$publicError = !empty($publicError);
 ?>
 
-<section class="platform-error-shell content-panel">
+<section class="platform-error-shell content-panel <?= $publicError ? 'platform-error-shell-public' : '' ?>">
+    <?php if ($publicError): ?>
+        <section class="platform-error-public-card" aria-labelledby="public-error-heading">
+            <div class="platform-error-public-illustration" aria-hidden="true">
+                <i class="bi bi-door-open"></i>
+                <span class="platform-error-public-illustration-mark"><i class="bi bi-slash-circle"></i></span>
+            </div>
+            <div class="platform-error-copy">
+                <p class="text-uppercase text-primary fw-bold small mb-3"><?= e($eyebrow) ?></p>
+                <h1 id="public-error-heading" class="mb-3"><?= e($pageHeading ?? $heading) ?></h1>
+                <p class="platform-error-public-message mb-0"><?= e($message) ?></p>
+                <div class="platform-error-actions">
+                    <?php foreach ($actions as $action): ?>
+                        <a class="btn <?= !empty($action['primary']) ? 'btn-primary' : 'btn-outline-secondary' ?>" href="<?= e((string) $action['url']) ?>">
+                            <?php if (!empty($action['icon'])): ?><i class="bi <?= e((string) $action['icon']) ?> me-1"></i><?php endif; ?>
+                            <?= e((string) $action['label']) ?>
+                        </a>
+                    <?php endforeach; ?>
+                </div>
+                <div class="platform-error-public-note">
+                    <i class="bi bi-shield-check" aria-hidden="true"></i>
+                    <span>No se ha iniciado ninguna sesión.</span>
+                </div>
+            </div>
+        </section>
+    <?php else: ?>
     <div class="platform-error-header">
         <div>
             <p class="text-uppercase text-primary fw-bold small mb-2"><?= e($eyebrow) ?></p>
@@ -75,4 +101,5 @@ $actions = $actions ?? [];
             </div>
         </aside>
     </div>
+    <?php endif; ?>
 </section>

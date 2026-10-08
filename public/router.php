@@ -181,6 +181,28 @@ require_once dirname(__DIR__) . '/sistema/bootstrap.php';
 $companyContext = company_url_context_for_path($path);
 set_company_url_context($companyContext);
 remember_navigation();
+
+$firstPathSegment = strtolower((string) (array_values(array_filter(explode('/', trim($path, '/'))))[0] ?? ''));
+if (!$companyContext && !current_user() && $firstPathSegment !== '' && !in_array($firstPathSegment, company_reserved_url_prefixes(), true)) {
+    platform_error(404, 'Acceso no disponible.', [
+        'publicError' => true,
+        'eyebrow' => 'Acceso no disponible',
+        'pageHeading' => 'No encontramos un acceso válido',
+        'pageLead' => 'Verifica que estés utilizando el enlace correcto o solicita uno nuevo a tu encargado.',
+        'heading' => 'No encontramos un acceso válido',
+        'message' => 'Verifica que estés utilizando el enlace correcto o solicita uno nuevo a tu encargado.',
+        'chips' => [],
+        'actions' => [
+            [
+                'label' => 'Volver al inicio',
+                'url' => route_url('login'),
+                'icon' => 'bi-house-door',
+                'primary' => true,
+            ],
+        ],
+    ]);
+}
+
 if ($companyContext) {
     $prefix = trim((string) ($companyContext['url_prefix'] ?? ''), '/');
     $prefixPath = '/' . $prefix;
