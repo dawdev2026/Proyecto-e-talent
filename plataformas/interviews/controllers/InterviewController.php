@@ -7,14 +7,22 @@ final class InterviewController extends Controller
     private InterviewAiService $ai;
     private InterviewFinalReportPdfService $pdf;
     private InterviewDailyPoolService $dailyPool;
+    private ReportDefinitionModel $reports;
+    private ReportMarkdownInterpreter $reportInterpreter;
+    private ReportDocumentRenderer $reportRenderer;
+    private ReportDesignInterpreter $reportDesignInterpreter;
 
-    public function __construct(?Template $view = null, ?InterviewProcessModel $interviews = null, ?InterviewAiService $ai = null, ?InterviewFinalReportPdfService $pdf = null, ?InterviewDailyPoolService $dailyPool = null)
+    public function __construct(?Template $view = null, ?InterviewProcessModel $interviews = null, ?InterviewAiService $ai = null, ?InterviewFinalReportPdfService $pdf = null, ?InterviewDailyPoolService $dailyPool = null, ?ReportDefinitionModel $reports = null, ?ReportMarkdownInterpreter $reportInterpreter = null, ?ReportDocumentRenderer $reportRenderer = null)
     {
         parent::__construct($view);
         $this->interviews = $interviews ?: new InterviewProcessModel();
         $this->ai = $ai ?: new InterviewAiService();
         $this->pdf = $pdf ?: new InterviewFinalReportPdfService();
         $this->dailyPool = $dailyPool ?: new InterviewDailyPoolService($this->interviews);
+        $this->reports = $reports ?: new ReportDefinitionModel();
+        $this->reportInterpreter = $reportInterpreter ?: new ReportMarkdownInterpreter();
+        $this->reportRenderer = $reportRenderer ?: new ReportDocumentRenderer();
+        $this->reportDesignInterpreter = new ReportDesignInterpreter();
     }
 
     public function index(): void
@@ -571,7 +579,12 @@ final class InterviewController extends Controller
             platform_error(404, 'Reporte final no disponible.');
         }
 
-        $pdf = $this->pdf->render($appointment, $this->displayFinalReportHtml($appointment));
+        $pdf = $this->pdf->render(
+            $appointment,
+            $this->displayFinalReportHtml($appointment),
+            $this->finalReportDesign($appointment),
+            $this->finalReportExecution($appointment)
+        );
         $filename = $this->pdf->filename($appointment);
         $disposition = (string) ($_GET['view'] ?? '') === '1' ? 'inline' : 'attachment';
 
@@ -1043,15 +1056,139 @@ final class InterviewController extends Controller
             return true;
         }
 
-        $result = $this->ai->finalReport($context);
+        $configuredReport = $this->interviewReportFor($appointment);
+        if ($configuredReport) {
+            $result = $this->configuredInterviewReport($configuredReport, $appointment, $context);
+        } else {
+            $result = $this->ai->finalReport($context);
+        }
+
         if (!empty($result['ok'])) {
-            $html = $this->finalReportHtml($result['data']);
+            $html = (string) ($result['html'] ?? $this->finalReportHtml($result['data']));
             $this->interviews->completeFinalReport((int) $appointment['id'], (int) $job['id'], $result['data'], $html);
         } else {
             $this->interviews->failFinalReport((int) $appointment['id'], (int) $job['id'], (string) $result['error'], !empty($result['pending']));
         }
 
         return true;
+    }
+
+    private function interviewReportFor(array $appointment): ?array
+    {
+        $companyId = (int) ($appointment['interview_company_id'] ?? 0);
+        if ($companyId <= 0) {
+            return null;
+        }
+
+        $reports = $this->reports->publishedAssignmentsForCompanyAndFunctionality($companyId, 'interviews');
+
+        return $reports[0] ?? null;
+    }
+
+    private function configuredInterviewReport(array $report, array $appointment, array $interviewContext): array
+    {
+        $processId = (int) ($appointment['test_process_id'] ?? 0);
+        $userId = (int) ($appointment['candidate_user_id'] ?? 0);
+        $companyId = (int) ($appointment['interview_company_id'] ?? 0);
+
+        try {
+            $execution = $this->reportInterpreter->execute(
+                (string) ($report['markdown_content'] ?? ''),
+                $processId,
+                $userId,
+                $companyId,
+                $interviewContext
+            );
+
+            $design = $this->reportDesign($report);
+            if ($design !== null) {
+                $execution['design'] = $design;
+            }
+
+            if (empty($execution['available'])) {
+                return [
+                    'ok' => false,
+                    'pending' => false,
+                    'error' => (string) ($execution['message'] ?? 'El informe configurado no está disponible para esta entrevista.'),
+                ];
+            }
+
+            $specMetadata = $execution['spec']['metadata'] ?? [];
+            $title = trim((string) ($specMetadata['title'] ?? $report['name'] ?? 'Informe final de entrevista'));
+
+            return [
+                'ok' => true,
+                'data' => [
+                    'source' => 'configured_report',
+                    'title' => $title,
+                'report_definition_id' => (int) ($report['id'] ?? 0),
+                'report_version' => (int) ($report['version'] ?? 0),
+                'design_template_key' => (string) ($design['template_key'] ?? ''),
+                ],
+                'html' => $this->reportRenderer->renderHtml($execution),
+            ];
+        } catch (Throwable $exception) {
+            return [
+                'ok' => false,
+                'pending' => false,
+                'error' => 'No fue posible ejecutar el informe configurado: ' . $exception->getMessage(),
+            ];
+        }
+    }
+
+    private function reportDesign(array $report): ?array
+    {
+        $content = trim((string) ($report['design_markdown_content'] ?? ''));
+        if ($content === '') {
+            return null;
+        }
+
+        try {
+            $design = $this->reportDesignInterpreter->parse($content, false);
+            return !empty($design['valid']) ? $design : null;
+        } catch (Throwable $exception) {
+            error_log('Interview report design load error: ' . $exception->getMessage());
+            return null;
+        }
+    }
+
+    private function finalReportDesign(array $appointment): ?array
+    {
+        $report = json_decode((string) ($appointment['final_report_json'] ?? ''), true);
+        $reportId = (int) ($report['report_definition_id'] ?? 0);
+        if ($reportId <= 0) {
+            return null;
+        }
+
+        $definition = $this->reports->find($reportId);
+        return $definition ? $this->reportDesign($definition) : null;
+    }
+
+    private function finalReportExecution(array $appointment): ?array
+    {
+        $stored = json_decode((string) ($appointment['final_report_json'] ?? ''), true);
+        $reportId = (int) ($stored['report_definition_id'] ?? 0);
+        if (($stored['source'] ?? '') !== 'configured_report' || $reportId <= 0) {
+            return null;
+        }
+
+        $definition = $this->reports->find($reportId);
+        if (!$definition) {
+            return null;
+        }
+
+        try {
+            return $this->reportInterpreter->execute(
+                (string) ($definition['markdown_content'] ?? ''),
+                (int) ($appointment['test_process_id'] ?? 0),
+                (int) ($appointment['candidate_user_id'] ?? 0),
+                (int) ($appointment['interview_company_id'] ?? 0),
+                $this->interviews->reportContext($appointment)
+            );
+        } catch (Throwable $exception) {
+            error_log('Interview report execution reload error: ' . $exception->getMessage());
+            return null;
+        }
     }
 
     private function finalReportHtml(array $report): string
@@ -1074,6 +1211,10 @@ final class InterviewController extends Controller
 
         $report = json_decode((string) ($appointment['final_report_json'] ?? ''), true);
         if (is_array($report)) {
+            if (($report['source'] ?? '') === 'configured_report') {
+                return (string) ($appointment['final_report_html'] ?? '');
+            }
+
             return $this->finalReportHtml($report);
         }
 

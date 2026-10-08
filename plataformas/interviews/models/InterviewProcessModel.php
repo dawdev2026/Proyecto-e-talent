@@ -135,6 +135,7 @@ final class InterviewProcessModel
         return $this->db->fetch("
             SELECT a.*,
                    p.name AS process_name,
+                   p.company_id AS interview_company_id,
                    p.interview_date,
                    candidate.name AS candidate_name,
                    candidate.email AS candidate_email,
@@ -819,7 +820,10 @@ final class InterviewProcessModel
     public function reportContext(array $appointment): array
     {
         $note = $this->db->fetch('
-            SELECT notes FROM interview_notes WHERE appointment_id = ? ORDER BY updated_at DESC LIMIT 1
+            SELECT n.notes, n.author_user_id, n.created_at, n.updated_at, u.name AS author_name
+            FROM interview_notes n
+            LEFT JOIN ' . $this->coreSchema . '.users u ON u.id = n.author_user_id
+            WHERE n.appointment_id = ? ORDER BY n.updated_at DESC LIMIT 1
         ', [(int) $appointment['id']]);
 
         $jobProfile = $this->jobProfile((int) ($appointment['process_id'] ?? 0));
@@ -840,11 +844,14 @@ final class InterviewProcessModel
 
         return [
             'candidate' => [
+                'id' => (int) ($appointment['candidate_user_id'] ?? 0),
                 'name' => $appointment['candidate_name'] ?? '',
                 'email' => $appointment['candidate_email'] ?? '',
                 'rut' => $appointment['candidate_rut'] ?? '',
             ],
             'process' => [
+                'id' => (int) ($appointment['process_id'] ?? 0),
+                'company_id' => (int) ($appointment['interview_company_id'] ?? 0),
                 'name' => $appointment['process_name'] ?? '',
                 'interview_date' => $appointment['interview_date'] ?? '',
                 'test_process' => $appointment['test_process_name'] ?? '',
@@ -856,12 +863,34 @@ final class InterviewProcessModel
                     'evaluation_criteria' => json_decode((string) ($jobProfile['evaluation_criteria_json'] ?? '[]'), true) ?: [],
                 ] : [],
             ],
+            'appointment' => [
+                'id' => (int) ($appointment['id'] ?? 0),
+                'process_id' => (int) ($appointment['process_id'] ?? 0),
+                'scheduled_start_at' => (string) ($appointment['scheduled_start_at'] ?? ''),
+                'scheduled_end_at' => (string) ($appointment['scheduled_end_at'] ?? ''),
+                'meeting_status' => (string) ($appointment['meeting_status'] ?? ''),
+                'transcript_status' => (string) ($appointment['transcript_status'] ?? ''),
+                'final_report_status' => (string) ($appointment['final_report_status'] ?? ''),
+                'finished_at' => (string) ($appointment['finished_at'] ?? ''),
+            ],
             'report' => $this->candidateReportSummary($appointment),
             'transcript' => (string) ($appointment['transcript_text'] ?? ''),
+            'transcript_metadata' => [
+                'status' => (string) ($appointment['transcript_status'] ?? ''),
+                'last_snapshot_at' => (string) ($appointment['transcript_last_snapshot_at'] ?? ''),
+            ],
             'notes' => (string) ($note['notes'] ?? ''),
+            'note_metadata' => [
+                'author_user_id' => (int) ($note['author_user_id'] ?? 0),
+                'author_name' => (string) ($note['author_name'] ?? ''),
+                'created_at' => (string) ($note['created_at'] ?? ''),
+                'updated_at' => (string) ($note['updated_at'] ?? ''),
+            ],
             'documents' => $documentContext,
             'evaluations' => array_map(static function (array $evaluation): array {
                 return [
+                    'id' => (int) ($evaluation['id'] ?? 0),
+                    'evaluator_user_id' => (int) ($evaluation['evaluator_user_id'] ?? 0),
                     'evaluator' => (string) ($evaluation['evaluator_name'] ?? ''),
                     'status' => (string) ($evaluation['status'] ?? ''),
                     'technical_score' => $evaluation['technical_score'] === null ? null : (int) $evaluation['technical_score'],
@@ -871,8 +900,15 @@ final class InterviewProcessModel
                     'strengths' => (string) ($evaluation['strengths'] ?? ''),
                     'risks' => (string) ($evaluation['risks'] ?? ''),
                     'comments' => (string) ($evaluation['comments'] ?? ''),
+                    'criteria' => json_decode((string) ($evaluation['criteria_json'] ?? '[]'), true) ?: [],
+                    'submitted_at' => (string) ($evaluation['submitted_at'] ?? ''),
+                    'updated_at' => (string) ($evaluation['updated_at'] ?? ''),
                 ];
             }, $this->evaluations((int) $appointment['id'])),
+            'source_metadata' => [
+                'origin' => 'registered_interview',
+                'is_simulated' => false,
+            ],
         ];
     }
 
