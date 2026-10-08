@@ -140,6 +140,11 @@ final class DailyMeetingService
                 'enable_live_captions_ui' => true,
                 'enable_recording_ui' => $owner,
                 'auto_start_transcription' => $owner && $autoStartTranscription,
+                'auto_transcription_settings' => [
+                    'language' => $this->lang(),
+                    'model' => 'nova-2',
+                    'punctuate' => true,
+                ],
                 'start_audio_off' => true,
                 'start_video_off' => false,
                 'eject_at_token_exp' => true,
