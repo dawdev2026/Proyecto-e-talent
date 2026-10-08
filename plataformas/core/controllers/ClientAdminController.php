@@ -41,6 +41,7 @@ final class ClientAdminController extends Controller
         $this->render('client_admin/progress', [
             'title' => 'Avance de tests | e-talent', 'currentPage' => 'client-admin.test-progress',
             'heading' => 'Dashboard de avance Test', 'kind' => 'Tests psicolaborales',
+            'peopleMetrics' => true,
             'rows' => $this->insights->testProgress($companyId),
         ]);
     }
