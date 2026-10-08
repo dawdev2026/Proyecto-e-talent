@@ -491,39 +491,37 @@ final class InterviewController extends Controller
 
     public function saveNotes(): void
     {
-        require_permission('conduct_selection_interviews');
-        verify_csrf();
+        [$id, $userId] = $this->requireInterviewModeratorAccess();
 
-        $id = request_secure_id('interview_appointment');
-        $this->interviews->saveNotes($id, (int) (current_user()['id'] ?? 0), trim((string) ($_POST['notes'] ?? '')));
-        $this->jsonResponse(['ok' => true, 'message' => 'Apuntes guardados.']);
+        try {
+            $this->interviews->saveNotes($id, $userId, trim((string) ($_POST['notes'] ?? '')));
+            $this->jsonResponse(['ok' => true, 'message' => 'Apuntes guardados.']);
+        } catch (Throwable $exception) {
+            $this->jsonResponse(['ok' => false, 'message' => $exception->getMessage()], 422);
+        }
     }
 
     public function saveEvaluation(): void
     {
-        require_permission('conduct_selection_interviews');
-        verify_csrf();
+        [$id, $userId, $appointment] = $this->requireInterviewModeratorAccess();
 
-        $id = request_secure_id('interview_appointment');
-        $userId = (int) (current_user()['id'] ?? 0);
-        $appointment = $this->interviews->findAppointment($id);
-        if (!$appointment) {
-            $this->jsonResponse(['ok' => false, 'message' => 'Entrevista no encontrada.'], 404);
-            return;
+        try {
+            $profile = $this->interviews->jobProfile((int) $appointment['process_id']);
+            $this->interviews->saveEvaluation($id, $userId, [
+                'status' => $_POST['status'] ?? 'draft',
+                'technical_score' => $_POST['technical_score'] ?? null,
+                'behavioral_score' => $_POST['behavioral_score'] ?? null,
+                'overall_score' => $_POST['overall_score'] ?? null,
+                'recommendation' => $_POST['recommendation'] ?? 'pending',
+                'strengths' => $_POST['strengths'] ?? '',
+                'risks' => $_POST['risks'] ?? '',
+                'comments' => $_POST['comments'] ?? '',
+                'criteria' => json_decode((string) ($profile['evaluation_criteria_json'] ?? '[]'), true) ?: [],
+            ]);
+            $this->jsonResponse(['ok' => true, 'message' => 'Evaluación guardada.']);
+        } catch (Throwable $exception) {
+            $this->jsonResponse(['ok' => false, 'message' => $exception->getMessage()], 422);
         }
-        $profile = $this->interviews->jobProfile((int) $appointment['process_id']);
-        $this->interviews->saveEvaluation($id, $userId, [
-            'status' => $_POST['status'] ?? 'draft',
-            'technical_score' => $_POST['technical_score'] ?? null,
-            'behavioral_score' => $_POST['behavioral_score'] ?? null,
-            'overall_score' => $_POST['overall_score'] ?? null,
-            'recommendation' => $_POST['recommendation'] ?? 'pending',
-            'strengths' => $_POST['strengths'] ?? '',
-            'risks' => $_POST['risks'] ?? '',
-            'comments' => $_POST['comments'] ?? '',
-            'criteria' => json_decode((string) ($profile['evaluation_criteria_json'] ?? '[]'), true) ?: [],
-        ]);
-        $this->jsonResponse(['ok' => true, 'message' => 'Evaluación guardada.']);
     }
 
     public function transcription(): void
@@ -563,21 +561,62 @@ final class InterviewController extends Controller
 
     public function finish(): void
     {
-        require_permission('conduct_selection_interviews');
-        verify_csrf();
+        [$id] = $this->requireInterviewModeratorAccess();
 
-        $id = request_secure_id('interview_appointment');
-        $this->interviews->finishAppointment($id);
-        $this->processOneJob('final_report');
-
-        $this->jsonResponse(['ok' => true, 'message' => 'Entrevista finalizada. El reporte quedo en proceso.']);
+        try {
+            $this->interviews->finishAppointment($id);
+            $this->jsonResponse(['ok' => true, 'message' => 'Entrevista finalizada. El reporte quedó en proceso.']);
+        } catch (Throwable $exception) {
+            $this->jsonResponse(['ok' => false, 'message' => $exception->getMessage()], 422);
+        }
     }
 
     public function processJob(): void
     {
+        $id = request_secure_id('interview_appointment');
+        if ($id > 0) {
+            require_auth();
+            verify_csrf();
+
+            $appointment = $this->interviews->findAppointment($id, true);
+            $canGenerate = $appointment
+                && (is_company_admin_user()
+                    || has_permission('view_interview_reports')
+                    || has_permission('manage_interview_processes')
+                    || has_permission('manage_company_interviews'));
+            if (!$appointment) {
+                platform_error(404, 'Entrevista no encontrada.');
+            }
+            if (!$canGenerate) {
+                platform_error(403, 'No tienes permisos para generar el informe de esta entrevista.');
+            }
+
+            try {
+                $this->interviews->retryJob($id, 'final_report');
+                $this->interviews->queueJob($id, 'final_report');
+                $processed = $this->processOneJob('final_report', $id);
+                $message = $processed
+                    ? 'Generación del informe ejecutada. Revisa el estado en la agenda.'
+                    : 'La generación del informe quedó encolada.';
+                if (navigation_request_is_async()) {
+                    $this->jsonResponse(['ok' => true, 'message' => $message]);
+                    return;
+                }
+                flash('success', $message);
+            } catch (Throwable $exception) {
+                if (navigation_request_is_async()) {
+                    $this->jsonResponse(['ok' => false, 'message' => $exception->getMessage()], 422);
+                    return;
+                }
+                flash('danger', 'No se pudo generar el informe: ' . $exception->getMessage());
+            }
+
+            redirect(route_url('interview-process.show', (int) $appointment['process_id']));
+            return;
+        }
+
         require_permission('view_interview_reports');
         verify_csrf();
-
         $type = (string) ($_POST['job_type'] ?? 'final_report');
         $this->processOneJob($type === 'moderator_brief' ? 'moderator_brief' : 'final_report');
         $this->jsonResponse(['ok' => true, 'message' => 'Proceso de generacion revisado.']);
@@ -1040,9 +1079,9 @@ final class InterviewController extends Controller
         return array_values($normalized);
     }
 
-    public function processOneJob(string $type): bool
+    public function processOneJob(string $type, ?int $appointmentId = null): bool
     {
-        $job = $this->interviews->claimPendingJob($type);
+        $job = $this->interviews->claimPendingJob($type, 3, $appointmentId);
         if (!$job) {
             return false;
         }
@@ -1452,6 +1491,32 @@ final class InterviewController extends Controller
         http_response_code($statusCode);
         header('Content-Type: application/json; charset=utf-8');
         echo json_encode($payload, JSON_UNESCAPED_UNICODE);
+    }
+
+    private function requireInterviewModeratorAccess(): array
+    {
+        require_auth();
+        $id = request_secure_id('interview_appointment');
+        $appointment = $this->interviews->findAppointment($id, true);
+        $userId = (int) (current_user()['id'] ?? 0);
+        $isAssignedModerator = $appointment
+            && $userId > 0
+            && $userId === (int) ($appointment['moderator_user_id'] ?? 0);
+
+        if (!$appointment) {
+            platform_error(404, 'Entrevista no encontrada.');
+        }
+        if (!$isAssignedModerator && !has_permission('conduct_selection_interviews')) {
+            platform_error(403, 'No tienes permisos para operar esta entrevista.', [
+                'detailRows' => [
+                    'Permiso requerido' => 'ser entrevistador asignado o tener conduct_selection_interviews',
+                ],
+            ]);
+        }
+
+        verify_csrf();
+
+        return [$id, $userId, $appointment];
     }
 
     private function requireAnyPermission(array $permissions): void
