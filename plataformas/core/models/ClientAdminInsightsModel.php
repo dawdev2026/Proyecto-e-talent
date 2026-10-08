@@ -50,24 +50,28 @@ final class ClientAdminInsightsModel
     public function testProgress(int $companyId): array
     {
         return $this->tests->fetchAll('
-            SELECT p.id AS process_id, p.name AS process_name, p.code AS process_code,
-                   COUNT(s.id) AS assigned,
-                   SUM(s.status = "in_progress") AS in_progress,
-                   SUM(COALESCE(answer_stats.answers_count, 0) > 0) AS answered,
-                   SUM(s.status = "completed") AS finished,
-                   SUM(s.status = "expired") AS expired,
-                   SUM(s.status = "assigned") AS pending
-            FROM ' . $this->testsSchema . '.test_processes p
-            JOIN ' . $this->testsSchema . '.test_sessions s ON s.process_id = p.id AND s.status <> "cancelled"
-            LEFT JOIN (
-                SELECT session_id, SUM(CASE WHEN answer_value IS NOT NULL AND TRIM(answer_value) <> "" THEN 1 ELSE 0 END) AS answers_count
-                FROM ' . $this->testsSchema . '.test_answers
-                GROUP BY session_id
-            ) answer_stats ON answer_stats.session_id = s.id
-            JOIN ' . $this->coreSchema() . '.users u ON u.id = s.user_id AND u.company_id = p.company_id
-            WHERE p.company_id = ?
-            GROUP BY p.id, p.name, p.code
-            ORDER BY p.name ASC
+            SELECT people.process_id, people.process_name, people.process_code,
+                   COUNT(*) AS assigned,
+                   SUM(CASE WHEN people.finalized_activities = 0 AND people.started_activities = 0 THEN 1 ELSE 0 END) AS pending,
+                   SUM(CASE WHEN people.finalized_activities < people.total_activities
+                                  AND NOT (people.finalized_activities = 0 AND people.started_activities = 0)
+                            THEN 1 ELSE 0 END) AS in_progress,
+                   SUM(CASE WHEN people.finalized_activities = people.total_activities THEN 1 ELSE 0 END) AS finished,
+                   ROUND(SUM(CASE WHEN people.finalized_activities = people.total_activities THEN 1 ELSE 0 END) * 100 / COUNT(*)) AS progress_percent
+            FROM (
+                SELECT p.id AS process_id, p.name AS process_name, p.code AS process_code,
+                       s.user_id,
+                       COUNT(*) AS total_activities,
+                       SUM(CASE WHEN s.status IN ("completed", "expired") THEN 1 ELSE 0 END) AS finalized_activities,
+                       SUM(CASE WHEN s.status <> "assigned" THEN 1 ELSE 0 END) AS started_activities
+                FROM ' . $this->testsSchema . '.test_processes p
+                JOIN ' . $this->testsSchema . '.test_sessions s ON s.process_id = p.id AND s.status <> "cancelled"
+                JOIN ' . $this->coreSchema() . '.users u ON u.id = s.user_id AND u.company_id = p.company_id
+                WHERE p.company_id = ?
+                GROUP BY p.id, p.name, p.code, s.user_id
+            ) people
+            GROUP BY people.process_id, people.process_name, people.process_code
+            ORDER BY people.process_name ASC
             LIMIT 500
         ', [$companyId]);
     }
