@@ -17,7 +17,12 @@ $dashboardAvailableProcesses = is_array($dashboardAvailableProcesses ?? null) ? 
 $dashboardCompanyId = (int) ($dashboardCompanyId ?? 0);
 $dashboardSelectedProcessIds = array_values(array_filter(array_map('intval', is_array($dashboardSelectedProcessIds ?? null) ? $dashboardSelectedProcessIds : [])));
 $dashboardInitialFieldOptions = array_values(array_filter(array_map('strval', is_array($dashboardInitialFieldOptions ?? null) ? $dashboardInitialFieldOptions : [])));
-$dashboardInitialTramo = is_array($_GET['fields'] ?? null) ? trim((string) ($_GET['fields']['tramo'] ?? '')) : '';
+$dashboardInitialTramos = [];
+if (is_array($_GET['fields'] ?? null)) {
+    $dashboardInitialTramoValue = $_GET['fields']['tramo'] ?? [];
+    $dashboardInitialTramos = is_array($dashboardInitialTramoValue) ? $dashboardInitialTramoValue : [$dashboardInitialTramoValue];
+    $dashboardInitialTramos = array_values(array_unique(array_filter(array_map('strval', $dashboardInitialTramos), static fn(string $value): bool => trim($value) !== '')));
+}
 $duplicateAssignments = is_array($duplicateAssignments ?? null) ? $duplicateAssignments : ['total' => 0, 'examples' => []];
 $duplicateAssignmentsTotal = (int) ($duplicateAssignments['total'] ?? 0);
 $duplicateAssignmentExamples = is_array($duplicateAssignments['examples'] ?? null) ? $duplicateAssignments['examples'] : [];
@@ -150,7 +155,7 @@ if (!function_exists('process_dashboard_help_label')) {
         </div>
         <span class="badge text-bg-warning">Matriz ajustada</span>
     </div>
-    <form class="row g-3 align-items-end" method="get" action="<?= e(route_url('test-process.dashboard')) ?>" data-dashboard-filter-form>
+    <form class="row g-3 align-items-end process-dashboard-filter-form" method="get" action="<?= e(route_url('test-process.dashboard')) ?>" data-dashboard-filter-form>
         <?php if ($dashboardIsGlobalAdmin): ?>
             <div class="col-12 col-lg-4">
                 <label class="form-label" for="dashboard_company_id">Empresa</label>
@@ -165,24 +170,24 @@ if (!function_exists('process_dashboard_help_label')) {
         <?php else: ?>
             <input type="hidden" name="company_id" value="<?= $dashboardCompanyId ?>">
         <?php endif; ?>
-        <div class="col-12 col-lg-4">
+        <div class="col-12 col-xl-5">
             <label class="form-label" for="dashboard_process_picker">Procesos</label>
             <div class="input-group">
                 <button id="dashboard_process_picker" class="form-select text-start" type="button" data-dashboard-process-picker data-dashboard-process-total="<?= count($dashboardAvailableProcesses) ?>" <?= $dashboardIsGlobalAdmin && $dashboardCompanyId <= 0 ? 'disabled' : '' ?>>Todos los procesos</button>
                 <span class="input-group-text" data-dashboard-process-count>Todos</span>
             </div>
         </div>
-        <div class="col-12 col-lg-3">
+        <div class="col-12 col-xl-4">
             <label class="form-label" for="dashboard_tramo">Tramo</label>
-            <select id="dashboard_tramo" class="form-select" name="fields[tramo]">
+            <select id="dashboard_tramo" class="form-select process-dashboard-tramo-select" name="fields[tramo][]" multiple size="3" aria-describedby="dashboard_tramo_help">
                 <option value="">Todos</option>
                 <?php foreach ($dashboardInitialFieldOptions as $tramo): ?>
-                    <option value="<?= e($tramo) ?>" <?= $dashboardInitialTramo === $tramo ? 'selected' : '' ?>><?= e($tramo) ?></option>
+                    <option value="<?= e($tramo) ?>" <?= in_array($tramo, $dashboardInitialTramos, true) ? 'selected' : '' ?>><?= e($tramo) ?></option>
                 <?php endforeach; ?>
             </select>
-            <div class="small text-muted mt-1">Todos los tramos</div>
+            <div id="dashboard_tramo_help" class="small text-muted mt-1">Puedes seleccionar uno o varios tramos. Si no seleccionas ninguno, se consideran todos.</div>
         </div>
-        <div class="col-12 col-lg-4 d-flex gap-2">
+        <div class="col-12 col-xl-3 d-flex gap-2 process-dashboard-filter-actions">
             <button class="btn btn-warning flex-fill" type="submit" data-dashboard-apply><i class="bi bi-funnel me-1"></i> Aplicar</button>
             <a class="btn btn-outline-secondary" href="<?= e(route_url('test-process.dashboard')) ?>" aria-label="Limpiar filtros"><i class="bi bi-eraser"></i></a>
         </div>
@@ -288,7 +293,8 @@ if (!function_exists('process_dashboard_help_label')) {
                 if ($fieldKey === '') {
                     continue;
                 }
-                $fieldValue = (string) ($dashboardFieldFilters[$fieldKey] ?? '');
+                $fieldValue = $dashboardFieldFilters[$fieldKey] ?? '';
+                $fieldValues = is_array($fieldValue) ? array_map('strval', $fieldValue) : [(string) $fieldValue];
                 $fieldOptions = $dashboardFieldOptions[$fieldKey] ?? [];
                 if (!$fieldOptions) {
                     continue;
@@ -299,7 +305,7 @@ if (!function_exists('process_dashboard_help_label')) {
                 <select id="process_dashboard_field_<?= e($fieldKey) ?>" class="form-select" name="fields[<?= e($fieldKey) ?>]">
                     <option value="">Todos</option>
                     <?php foreach ($fieldOptions as $option): ?>
-                        <option value="<?= e((string) $option) ?>" <?= $fieldValue === (string) $option ? 'selected' : '' ?>><?= e((string) $option) ?></option>
+                        <option value="<?= e((string) $option) ?>" <?= in_array((string) $option, $fieldValues, true) ? 'selected' : '' ?>><?= e((string) $option) ?></option>
                     <?php endforeach; ?>
                 </select>
             </div>

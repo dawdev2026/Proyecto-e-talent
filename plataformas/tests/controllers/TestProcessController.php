@@ -142,7 +142,7 @@ final class TestProcessController extends Controller
             $this->processes->userFields(),
             static fn(array $field): bool => (string) ($field['field_key'] ?? '') !== 'edad'
         ));
-        $fieldFilters = is_array($_GET['fields'] ?? null) ? $_GET['fields'] : [];
+        $fieldFilters = $this->normalizeDashboardFieldFilters($_GET['fields'] ?? []);
         $processes = $dashboardFilters['processes'];
         $dashboardProcesses = [];
         $visibleProcesses = [];
@@ -2756,9 +2756,13 @@ final class TestProcessController extends Controller
     {
         $cleanFilters = [];
         foreach ($fieldFilters as $key => $value) {
-            $fieldValue = trim((string) $value);
-            if ($fieldValue !== '') {
-                $cleanFilters[(string) $key] = $fieldValue;
+            $fieldValues = is_array($value) ? $value : [$value];
+            $fieldValues = array_values(array_unique(array_filter(array_map(
+                static fn($item): string => trim((string) $item),
+                $fieldValues
+            ), static fn(string $item): bool => $item !== '')));
+            if ($fieldValues) {
+                $cleanFilters[(string) $key] = $fieldValues;
             }
         }
 
@@ -2768,13 +2772,38 @@ final class TestProcessController extends Controller
 
         return array_values(array_filter($users, static function (array $user) use ($cleanFilters): bool {
             $dynamicFields = $user['dynamic_fields'] ?? [];
-            foreach ($cleanFilters as $key => $value) {
-                if (trim((string) ($dynamicFields[$key] ?? '')) !== $value) {
+            foreach ($cleanFilters as $key => $values) {
+                if (!in_array(trim((string) ($dynamicFields[$key] ?? '')), $values, true)) {
                     return false;
                 }
             }
 
             return true;
         }));
+    }
+
+    private function normalizeDashboardFieldFilters($fields): array
+    {
+        if (!is_array($fields)) {
+            return [];
+        }
+
+        $normalized = [];
+        foreach ($fields as $key => $value) {
+            $key = trim((string) $key);
+            if ($key === '') {
+                continue;
+            }
+            $values = is_array($value) ? $value : [$value];
+            $values = array_values(array_unique(array_filter(array_map(
+                static fn($item): string => trim((string) $item),
+                $values
+            ), static fn(string $item): bool => $item !== '')));
+            if ($values) {
+                $normalized[$key] = count($values) === 1 ? $values[0] : $values;
+            }
+        }
+
+        return $normalized;
     }
 }

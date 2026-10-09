@@ -1816,6 +1816,35 @@ video[src*="media/evidence"] {
     opacity: 1;
 }
 
+.process-dashboard-filter-form {
+    align-items: stretch !important;
+}
+
+.process-dashboard-filter-form > [class*="col-"] {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+}
+
+.process-dashboard-filter-form .form-label {
+    min-height: 1.5rem;
+    margin-bottom: .45rem;
+}
+
+.process-dashboard-tramo-select {
+    min-height: 7.2rem;
+    padding-block: .45rem;
+}
+
+.process-dashboard-filter-actions {
+    flex-direction: row !important;
+    align-items: flex-end;
+}
+
+.process-dashboard-filter-actions .btn {
+    min-height: 2.65rem;
+}
+
 .process-dashboard-kpis {
     display: grid;
     grid-template-columns: repeat(5, minmax(0, 1fr));
