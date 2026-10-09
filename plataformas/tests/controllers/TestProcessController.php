@@ -68,7 +68,7 @@ final class TestProcessController extends Controller
     public function dashboard(): void
     {
         require_auth();
-        require_permission('view_test_process_dashboard');
+        $this->requireProcessDashboardPermission();
         $this->requireAnyProcessDashboardAccess();
         session_write_close();
 
@@ -90,7 +90,7 @@ final class TestProcessController extends Controller
     public function dashboardData(): void
     {
         require_auth();
-        require_permission('view_test_process_dashboard');
+        $this->requireProcessDashboardPermission();
         $this->requireAnyProcessDashboardAccess();
         session_write_close();
 
@@ -118,7 +118,7 @@ final class TestProcessController extends Controller
     public function dashboardWarnings(): void
     {
         require_auth();
-        require_permission('view_test_process_dashboard');
+        $this->requireProcessDashboardPermission();
         $this->requireAnyProcessDashboardAccess();
         session_write_close();
 
@@ -1754,7 +1754,11 @@ final class TestProcessController extends Controller
 
     private function requireAnyProcessDashboardAccess(): void
     {
-        if ($this->isCompanyAdminOrSupervisor()) {
+        if ($this->isCompanyAdmin()) {
+            if ($this->processes->allForUser(current_user() ?: [])) {
+                return;
+            }
+
             platform_error(403, 'No tienes permisos para acceder al Dashboard Avance.', [
                 'chips' => ['Procesos', 'Dashboard'],
             ]);
@@ -1782,6 +1786,22 @@ final class TestProcessController extends Controller
                 'Permiso requerido' => 'view_process_dashboard',
             ],
         ]);
+    }
+
+    private function requireProcessDashboardPermission(): void
+    {
+        if ($this->isCompanyAdmin()) {
+            return;
+        }
+
+        require_permission('view_test_process_dashboard');
+    }
+
+    private function isCompanyAdmin(): bool
+    {
+        $user = current_user() ?: [];
+        return (string) ($user['role'] ?? '') === 'company_admin'
+            || (string) ($user['profile_key'] ?? '') === 'company_admin';
     }
 
     private function isCompanyAdminOrSupervisor(): bool
