@@ -3169,6 +3169,7 @@ final class TestProcessModel
 
     private function processListSql(): string
     {
+        $summaryJoinsSql = '';
         $sessionCountsSql = '0 AS completed_sessions, 0 AS answered_sessions, 0 AS in_progress_sessions, 0 AS expired_sessions, 0 AS sessions_count';
         $onlineUsersSql = '0 AS online_users_count';
         $onlineSurveySql = '';
@@ -3185,11 +3186,29 @@ final class TestProcessModel
 
         if ($this->hasSessionProcessColumn()) {
             $sessionCountsSql = '
-                (SELECT COUNT(*) FROM test_sessions ts WHERE ts.process_id = p.id AND ts.status = "completed") AS completed_sessions,
-                (SELECT COUNT(DISTINCT ts.id) FROM test_sessions ts JOIN test_answers ta ON ta.session_id = ts.id AND ta.answer_value IS NOT NULL AND TRIM(ta.answer_value) <> "" WHERE ts.process_id = p.id AND ts.status <> "cancelled") AS answered_sessions,
-                (SELECT COUNT(*) FROM test_sessions ts WHERE ts.process_id = p.id AND ts.status = "in_progress") AS in_progress_sessions,
-                (SELECT COUNT(*) FROM test_sessions ts WHERE ts.process_id = p.id AND ts.status = "expired") AS expired_sessions,
-                (SELECT COUNT(*) FROM test_sessions ts WHERE ts.process_id = p.id AND ts.status <> "cancelled") AS sessions_count
+                COALESCE(session_summary.completed_sessions, 0) AS completed_sessions,
+                COALESCE(session_summary.answered_sessions, 0) AS answered_sessions,
+                COALESCE(session_summary.in_progress_sessions, 0) AS in_progress_sessions,
+                COALESCE(session_summary.expired_sessions, 0) AS expired_sessions,
+                COALESCE(session_summary.sessions_count, 0) AS sessions_count
+            ';
+            $summaryJoinsSql .= '
+                LEFT JOIN (
+                    SELECT ts.process_id,
+                           SUM(CASE WHEN ts.status = "completed" THEN 1 ELSE 0 END) AS completed_sessions,
+                           COUNT(DISTINCT CASE WHEN ta.session_id IS NOT NULL THEN ts.id END) AS answered_sessions,
+                           SUM(CASE WHEN ts.status = "in_progress" THEN 1 ELSE 0 END) AS in_progress_sessions,
+                           SUM(CASE WHEN ts.status = "expired" THEN 1 ELSE 0 END) AS expired_sessions,
+                           COUNT(*) AS sessions_count
+                    FROM test_sessions ts
+                    LEFT JOIN (
+                        SELECT DISTINCT session_id
+                        FROM test_answers
+                        WHERE answer_value IS NOT NULL AND TRIM(answer_value) <> ""
+                    ) ta ON ta.session_id = ts.id
+                    WHERE ts.status <> "cancelled"
+                    GROUP BY ts.process_id
+                ) session_summary ON session_summary.process_id = p.id
             ';
 
             if ($this->tableExists('test_process_evaluation_forms') && $this->tableExists('test_process_evaluation_assignments')) {
@@ -3248,38 +3267,57 @@ final class TestProcessModel
 
             if ($this->hasSessionPresenceColumn()) {
                 $onlineUsersSql = '
-                    (
-                        SELECT COUNT(DISTINCT pu.user_id)
-                        FROM test_process_users pu
-                        WHERE pu.process_id = p.id
-                          AND pu.status <> "cancelled"
-                          AND (
-                                EXISTS (
-                                    SELECT 1
-                                    FROM test_sessions ts
-                                    JOIN test_process_instruments pi ON pi.instrument_id = ts.instrument_id
-                                    WHERE ts.user_id = pu.user_id
-                                      AND ts.status = "in_progress"
-                                      AND pi.process_id = p.id
-                                      AND (ts.process_id = p.id OR ts.process_id IS NULL)
-                                      AND ts.last_seen_at >= DATE_SUB(NOW(), INTERVAL 90 SECOND)
-                                )
-                                ' . $onlineSurveySql . '
-                          )
-                    ) AS online_users_count
+                    COALESCE(online_summary.online_users_count, 0) AS online_users_count
+                ';
+                $onlineSourcesSql = '
+                    SELECT ts.process_id, ts.user_id
+                    FROM test_sessions ts
+                    WHERE ts.status = "in_progress"
+                      AND ts.last_seen_at >= DATE_SUB(NOW(), INTERVAL 90 SECOND)
+                ';
+                if ($onlineSurveySql !== '') {
+                    $onlineSourcesSql .= '
+                    UNION ALL
+                    SELECT ea.process_id, ea.user_id
+                    FROM ' . $evaluationSchema . '.evaluation_survey_attempts ea
+                    WHERE ea.status = "in_progress"
+                      AND ea.last_seen_at >= DATE_SUB(NOW(), INTERVAL 90 SECOND)
+                    ';
+                }
+                $summaryJoinsSql .= '
+                LEFT JOIN (
+                    SELECT online_sources.process_id, COUNT(DISTINCT online_sources.user_id) AS online_users_count
+                    FROM (' . $onlineSourcesSql . ') online_sources
+                    GROUP BY online_sources.process_id
+                ) online_summary ON online_summary.process_id = p.id
                 ';
             }
         }
 
+        $summaryJoinsSql .= '
+            LEFT JOIN (
+                SELECT process_id, COUNT(*) AS users_count
+                FROM test_process_users
+                WHERE status <> "cancelled"
+                GROUP BY process_id
+            ) user_summary ON user_summary.process_id = p.id
+            LEFT JOIN (
+                SELECT process_id, COUNT(*) AS instruments_count
+                FROM test_process_instruments
+                GROUP BY process_id
+            ) instrument_summary ON instrument_summary.process_id = p.id
+        ';
+
         return '
             SELECT p.*,
-                (SELECT COUNT(*) FROM test_process_users pu WHERE pu.process_id = p.id AND pu.status <> "cancelled") AS users_count,
-                (SELECT COUNT(*) FROM test_process_instruments pi WHERE pi.process_id = p.id) AS instruments_count,
+                COALESCE(user_summary.users_count, 0) AS users_count,
+                COALESCE(instrument_summary.instruments_count, 0) AS instruments_count,
                 ' . $evaluationsCountSql . ' AS evaluations_count,
                 ' . $sessionCountsSql . ',
                 ' . $evaluationCountsSql . ',
                 ' . $onlineUsersSql . '
             FROM test_processes p
+            ' . $summaryJoinsSql . '
             ' . $evaluationProgressJoinSql . '
         ';
     }

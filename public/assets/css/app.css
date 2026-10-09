@@ -1823,7 +1823,7 @@ video[src*="media/evidence"] {
 .process-dashboard-filter-form > [class*="col-"] {
     display: flex;
     flex-direction: column;
-    justify-content: flex-end;
+    justify-content: flex-start;
 }
 
 .process-dashboard-filter-form .form-label {
@@ -1832,17 +1832,68 @@ video[src*="media/evidence"] {
 }
 
 .process-dashboard-tramo-select {
-    min-height: 7.2rem;
-    padding-block: .45rem;
+    min-height: 2.65rem;
+}
+
+.process-dashboard-filter-form .select2-container {
+    width: 100% !important;
+}
+
+.process-dashboard-filter-form .select2-container--default .select2-selection--multiple {
+    min-height: 2.65rem;
+    padding: .18rem .4rem;
+    border: 1px solid var(--app-border-soft);
+    border-radius: var(--bs-border-radius, .375rem);
+    background: var(--card-content-bg, var(--app-surface));
+}
+
+.process-dashboard-filter-form .select2-container--default.select2-container--focus .select2-selection--multiple,
+.process-dashboard-filter-form .select2-container--default.select2-container--open .select2-selection--multiple {
+    border-color: var(--app-primary);
+    box-shadow: 0 0 0 .2rem color-mix(in srgb, var(--app-primary) 18%, transparent);
+}
+
+.process-dashboard-filter-form .select2-container--default .select2-selection--multiple .select2-selection__choice {
+    margin-top: .22rem;
+    margin-bottom: .08rem;
+    padding: .12rem .4rem;
+    border-color: color-mix(in srgb, var(--app-primary) 35%, var(--app-border-soft));
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--app-primary) 10%, var(--card-content-bg, var(--app-surface)));
+    color: var(--app-text);
+}
+
+.process-dashboard-filter-form .select2-container--default .select2-selection--multiple .select2-selection__choice__remove {
+    margin-right: .28rem;
+    color: var(--app-primary);
+}
+
+.process-dashboard-filter-form .select2-container--default .select2-selection--multiple .dashboard-select2-hidden-count {
+    display: inline-block;
+    margin-top: .22rem;
+    margin-bottom: .08rem;
+    padding: .12rem .4rem;
+    border: 1px solid var(--app-border-soft);
+    border-radius: 999px;
+    background: var(--app-surface-2, #f2f4f7);
+    color: var(--app-muted);
+    font-size: .8rem;
+    font-weight: 600;
 }
 
 .process-dashboard-filter-actions {
     flex-direction: row !important;
-    align-items: flex-end;
+    align-items: flex-start;
 }
 
 .process-dashboard-filter-actions .btn {
     min-height: 2.65rem;
+}
+
+@media (min-width: 1200px) {
+    .process-dashboard-filter-actions {
+        padding-top: 1.95rem;
+    }
 }
 
 .process-dashboard-kpis {

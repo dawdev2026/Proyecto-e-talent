@@ -70,11 +70,6 @@
                                 <i class="bi bi-clipboard2-check" aria-hidden="true"></i>
                             </button>
                         </li>
-                        <li class="nav-item" role="presentation">
-                            <button class="nav-link" id="interview-final-report-tab" data-bs-toggle="tab" data-bs-target="#interview-final-report-pane" type="button" role="tab" aria-controls="interview-final-report-pane" aria-label="Reporte final" title="Reporte final">
-                                <i class="bi bi-file-earmark-text" aria-hidden="true"></i>
-                            </button>
-                        </li>
                     </ul>
                 </div>
 
@@ -197,27 +192,6 @@
                         </form>
                     </div>
 
-                    <div class="tab-pane fade" id="interview-final-report-pane" role="tabpanel" aria-labelledby="interview-final-report-tab" tabindex="0">
-                        <h2 class="h5 fw-bold mb-2">Reporte final</h2>
-                        <p class="text-muted mb-3">Estado: <?= e(labelize((string) $appointment['final_report_status'])) ?></p>
-                        <?php if ((string) $appointment['final_report_status'] === 'ready'): ?>
-                            <div class="interview-report-preview mb-3"><?= $finalReportHtml ?></div>
-                            <div class="d-grid gap-2">
-                                <button
-                                    class="btn btn-outline-primary"
-                                    type="button"
-                                    data-interview-document-open
-                                    data-title="Reporte final de entrevista"
-                                    data-view-url="<?= e($finalReportViewUrl) ?>"
-                                    data-download-url="<?= e($finalReportUrl) ?>">
-                                    <i class="bi bi-eye me-1"></i> Ver PDF reporte final
-                                </button>
-                                <a class="btn btn-outline-primary" href="<?= e($finalReportUrl) ?>"><i class="bi bi-download me-1"></i> Descargar PDF</a>
-                            </div>
-                        <?php elseif (!empty($appointment['final_report_error'])): ?>
-                            <p class="text-muted mb-0"><?= e($appointment['final_report_error']) ?></p>
-                        <?php endif; ?>
-                    </div>
                 </div>
             </section>
         </aside>

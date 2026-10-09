@@ -150,8 +150,8 @@ if (!function_exists('process_dashboard_help_label')) {
 <section class="content-panel process-dashboard-filters mb-4" data-dashboard-selection-panel>
     <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-3">
         <div>
-            <h2 class="h5 fw-bold mb-1">Filtros y cálculo del ranking</h2>
-            <p class="text-muted mb-0">Cambia la muestra y simula criterios para recalcular los resultados visibles.</p>
+            <h2 class="h5 fw-bold mb-1">Selecciona lo que quieres procesar</h2>
+            <p class="text-muted mb-0">Selecciona los procesos y tramos; luego presiona Aplicar para calcular el avance y el ranking.</p>
         </div>
         <span class="badge text-bg-warning">Matriz ajustada</span>
     </div>
@@ -179,8 +179,7 @@ if (!function_exists('process_dashboard_help_label')) {
         </div>
         <div class="col-12 col-xl-4">
             <label class="form-label" for="dashboard_tramo">Tramo</label>
-            <select id="dashboard_tramo" class="form-select process-dashboard-tramo-select" name="fields[tramo][]" multiple size="3" aria-describedby="dashboard_tramo_help">
-                <option value="">Todos</option>
+            <select id="dashboard_tramo" class="form-select process-dashboard-tramo-select" name="fields[tramo][]" multiple data-placeholder="Todos los tramos" aria-describedby="dashboard_tramo_help">
                 <?php foreach ($dashboardInitialFieldOptions as $tramo): ?>
                     <option value="<?= e($tramo) ?>" <?= in_array($tramo, $dashboardInitialTramos, true) ? 'selected' : '' ?>><?= e($tramo) ?></option>
                 <?php endforeach; ?>
@@ -199,7 +198,7 @@ if (!function_exists('process_dashboard_help_label')) {
     </form>
 </section>
 
-<section class="content-panel process-dashboard-filters mb-4">
+<section class="content-panel process-dashboard-filters mb-4" data-dashboard-selection-help>
     <h2 class="h5 fw-bold mb-1">Selecciona el alcance de la información</h2>
     <p class="text-muted mb-0">Elige uno o varios procesos y tramos, o deja ambos en Todos, y presiona Aplicar para cargar los resultados.</p>
 </section>
@@ -258,7 +257,7 @@ if (!function_exists('process_dashboard_help_label')) {
 
 <?php if ($canConfigureRanking): ?>
 <section class="content-panel process-dashboard-filters mb-4">
-    <form method="get" action="<?= e(route_url('test-process.dashboard')) ?>" class="row g-3 align-items-end">
+    <form method="get" action="<?= e(route_url('test-process.dashboard')) ?>" class="row g-3 align-items-end process-dashboard-filter-form">
         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>" disabled data-ranking-preset-post-field>
         <input type="hidden" name="redirect_to" value="<?= e($rankingPresetRedirectTo) ?>" disabled data-ranking-preset-post-field>
         <div class="col-12 d-flex flex-wrap align-items-start justify-content-between gap-2">
@@ -276,15 +275,20 @@ if (!function_exists('process_dashboard_help_label')) {
             </div>
         </div>
 
-        <div class="col-12 col-md-4 col-xl-3">
-            <label class="form-label" for="process_id">Proceso</label>
-            <select id="process_id" class="form-select" name="process_id">
-                <option value="0">Todos</option>
+        <?php
+            $requestedProcessIds = $_GET['process_ids'] ?? [];
+            $requestedProcessIds = is_array($requestedProcessIds) ? $requestedProcessIds : [$requestedProcessIds];
+            $selectedProcessIds = array_values(array_filter(array_map('intval', $requestedProcessIds), static fn(int $id): bool => $id > 0));
+        ?>
+        <div class="col-12 col-md-6 col-xl-5">
+            <label class="form-label" for="process_id">Procesos</label>
+            <select id="process_id" class="form-select js-process-dashboard-select2" name="process_ids[]" multiple data-placeholder="Todos los procesos" aria-describedby="process_dashboard_process_help">
                 <?php foreach ($processes as $process): ?>
                     <?php $processId = (int) ($process['id'] ?? 0); ?>
-                    <option value="<?= $processId ?>" <?= (int) ($filters['process_id'] ?? 0) === $processId ? 'selected' : '' ?>><?= e((string) ($process['name'] ?? 'Proceso')) ?></option>
+                    <option value="<?= $processId ?>" <?= in_array($processId, $selectedProcessIds, true) ? 'selected' : '' ?>><?= e((string) ($process['name'] ?? 'Proceso')) ?></option>
                 <?php endforeach; ?>
             </select>
+            <div id="process_dashboard_process_help" class="small text-muted mt-1">Puedes seleccionar uno o varios procesos. Si no seleccionas ninguno, se consideran todos.</div>
         </div>
 
         <?php foreach ($dashboardFields as $field): ?>
@@ -300,10 +304,9 @@ if (!function_exists('process_dashboard_help_label')) {
                     continue;
                 }
             ?>
-            <div class="col-12 col-md-4 col-xl-3">
+            <div class="col-12 col-md-6 col-xl-5">
                 <label class="form-label" for="process_dashboard_field_<?= e($fieldKey) ?>"><?= e((string) ($field['label'] ?? $fieldKey)) ?></label>
-                <select id="process_dashboard_field_<?= e($fieldKey) ?>" class="form-select" name="fields[<?= e($fieldKey) ?>]">
-                    <option value="">Todos</option>
+                <select id="process_dashboard_field_<?= e($fieldKey) ?>" class="form-select js-process-dashboard-select2" name="fields[<?= e($fieldKey) ?>][]" multiple data-placeholder="Todos los valores de <?= e(strtolower((string) ($field['label'] ?? $fieldKey))) ?>">
                     <?php foreach ($fieldOptions as $option): ?>
                         <option value="<?= e((string) $option) ?>" <?= in_array((string) $option, $fieldValues, true) ? 'selected' : '' ?>><?= e((string) $option) ?></option>
                     <?php endforeach; ?>
@@ -311,7 +314,7 @@ if (!function_exists('process_dashboard_help_label')) {
             </div>
         <?php endforeach; ?>
 
-        <div class="col-12 col-xl-3 d-flex gap-2">
+        <div class="col-12 col-xl-2 d-flex gap-2 process-dashboard-filter-actions">
             <button class="btn btn-primary flex-fill" type="submit"><i class="bi bi-funnel me-1"></i> Aplicar</button>
             <a class="btn btn-outline-secondary" href="<?= e(route_url('test-process.dashboard')) ?>" aria-label="Limpiar filtros"><i class="bi bi-eraser"></i></a>
         </div>
@@ -1028,6 +1031,48 @@ if (!function_exists('process_dashboard_help_label')) {
         error.classList.add('d-none');
     }
 
+    function initDashboardSelect2(root) {
+        if (!window.jQuery || !window.jQuery.fn || !window.jQuery.fn.select2) {
+            return;
+        }
+
+        var scope = root ? window.jQuery(root) : window.jQuery(document);
+        scope.find('.js-process-dashboard-select2').addBack('.js-process-dashboard-select2').each(function () {
+            var select = this;
+            var $select = window.jQuery(select);
+            if ($select.hasClass('select2-hidden-accessible')) {
+                return;
+            }
+
+            $select.select2({
+                width: '100%',
+                closeOnSelect: false,
+                allowClear: true,
+                placeholder: function () { return $select.data('placeholder') || 'Todos'; },
+                language: {
+                    noResults: function () { return 'No se encontraron opciones'; },
+                    searching: function () { return 'Buscando…'; }
+                }
+            });
+
+            function compactSelection() {
+                var $container = $select.next('.select2-container');
+                var $rendered = $container.find('.select2-selection__rendered');
+                var $choices = $rendered.children('.select2-selection__choice');
+                var visibleLimit = 2;
+                $choices.show();
+                $rendered.children('.dashboard-select2-hidden-count').remove();
+                if ($choices.length > visibleLimit) {
+                    $choices.slice(visibleLimit).hide();
+                    $rendered.append('<li class="dashboard-select2-hidden-count">+' + ($choices.length - visibleLimit) + ' más</li>');
+                }
+            }
+
+            $select.on('select2:select select2:unselect', compactSelection);
+            compactSelection();
+        });
+    }
+
     function loadDashboardData() {
         var content = document.querySelector('[data-process-dashboard-content]');
         if (!content || !dashboardDataUrl) {
@@ -1065,6 +1110,10 @@ if (!function_exists('process_dashboard_help_label')) {
             })
             .then(function (payload) {
                 content.innerHTML = payload.html || '';
+                initDashboardSelect2(content);
+                document.querySelectorAll('[data-dashboard-selection-panel], [data-dashboard-selection-help]').forEach(function (panel) {
+                    panel.classList.add('d-none');
+                });
                 setDashboardLoading(false);
                 window.renderProcessDashboardCharts(payload.chartData || {});
             })
@@ -1200,6 +1249,9 @@ if (!function_exists('process_dashboard_help_label')) {
         if (filterForm) filterForm.addEventListener('submit', function () {
             syncProcessSelection();
         });
+
+        initDashboardSelect2(document);
+
         filterPickerRows(false);
 
         document.querySelectorAll('[data-process-dashboard-refresh]').forEach(function (button) {

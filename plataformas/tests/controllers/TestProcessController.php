@@ -86,6 +86,7 @@ final class TestProcessController extends Controller
             'dashboardCompanyId' => $dashboardFilters['company_id'],
             'dashboardSelectedProcessIds' => $dashboardFilters['process_ids'],
             'dashboardInitialFieldOptions' => $dashboardInitialFieldOptions,
+            'useSelect2' => true,
         ]);
     }
 
@@ -135,7 +136,8 @@ final class TestProcessController extends Controller
 
     private function dashboardViewData(): array
     {
-        $canConfigureRanking = has_permission('manage_ranking_presets');
+        $canManageRankingPresets = has_permission('manage_ranking_presets');
+        $canConfigureRanking = $this->canConfigureCompanyRanking() || $canManageRankingPresets;
         $dashboardFilters = $this->dashboardFilterOptions();
         $processFilter = $canConfigureRanking ? max(0, (int) ($_GET['process_id'] ?? 0)) : 0;
         $dashboardFields = array_values(array_filter(
@@ -163,7 +165,12 @@ final class TestProcessController extends Controller
 
         $activeInstruments = $this->processes->activeInstruments();
         $officialRankingConfig = $this->progressRankingSummary->officialConfig();
-        $storedRankingConfig = $this->progressRankingSummary->activeConfig($this->settings->rankingConfig());
+        $storedRankingConfig = $canManageRankingPresets
+            ? $this->progressRankingSummary->activeConfig($this->settings->rankingConfig())
+            : $this->progressRankingSummary->activeConfig($this->settings->rankingConfigForCompany(
+                (int) (current_user()['company_id'] ?? 0),
+                $officialRankingConfig
+            ));
         $rankingPresets = $canConfigureRanking ? $this->settings->rankingPresetOptions($officialRankingConfig) : [];
         $selectedRankingPreset = $canConfigureRanking ? $this->rankingPresetFromRequest($officialRankingConfig) : null;
         $rankingConfig = $canConfigureRanking
@@ -278,7 +285,7 @@ final class TestProcessController extends Controller
             'rankingIsPreviewConfig' => $this->dashboardRankingHasPreview(),
             'rankingPresets' => $rankingPresets,
             'rankingSelectedPresetId' => (int) ($selectedRankingPreset['id'] ?? -1),
-            'canManageRankingPresets' => $canConfigureRanking,
+            'canManageRankingPresets' => $canManageRankingPresets,
             'canConfigureRanking' => $canConfigureRanking,
             'rankingCompanyAssignment' => $canConfigureRanking ? null : $this->settings->rankingCompanyAssignment((int) (current_user()['company_id'] ?? 0)),
             'rankingPresetsStorageReady' => $this->settings->hasRankingPresetsStorage(),
@@ -387,10 +394,16 @@ final class TestProcessController extends Controller
             ]);
         }
 
-        $canConfigureRanking = has_permission('manage_ranking_presets');
+        $canManageRankingPresets = has_permission('manage_ranking_presets');
+        $canConfigureRanking = $this->canConfigureCompanyRanking() || $canManageRankingPresets;
         $fieldFilters = $canConfigureRanking && is_array($_GET['fields'] ?? null) ? $_GET['fields'] : [];
         $officialRankingConfig = $this->progressRankingSummary->officialConfig();
-        $storedRankingConfig = $this->progressRankingSummary->activeConfig($this->settings->rankingConfig());
+        $storedRankingConfig = $canManageRankingPresets
+            ? $this->progressRankingSummary->activeConfig($this->settings->rankingConfig())
+            : $this->progressRankingSummary->activeConfig($this->settings->rankingConfigForCompany(
+                (int) (current_user()['company_id'] ?? 0),
+                $officialRankingConfig
+            ));
         $rankingPresets = $canConfigureRanking ? $this->settings->rankingPresetOptions($officialRankingConfig) : [];
         $selectedRankingPreset = $canConfigureRanking ? $this->rankingPresetFromRequest($officialRankingConfig) : null;
         $rankingConfig = $canConfigureRanking
@@ -418,7 +431,7 @@ final class TestProcessController extends Controller
             'rankingUsesOfficialConfig' => $this->progressRankingSummary->isOfficialConfig($rankingConfig),
             'rankingPresets' => $rankingPresets,
             'rankingSelectedPresetId' => (int) ($selectedRankingPreset['id'] ?? -1),
-            'canManageRankingPresets' => $canConfigureRanking,
+            'canManageRankingPresets' => $canManageRankingPresets,
             'canConfigureRanking' => $canConfigureRanking,
             'rankingCompanyAssignment' => $canConfigureRanking ? null : $this->settings->rankingCompanyAssignment((int) (current_user()['company_id'] ?? 0)),
             'rankingPresetsStorageReady' => $this->settings->hasRankingPresetsStorage(),
@@ -476,7 +489,7 @@ final class TestProcessController extends Controller
 
     private function dashboardRankingHasPreview(): bool
     {
-        if (!has_permission('manage_ranking_presets')) {
+        if (!$this->canConfigureCompanyRanking() && !has_permission('manage_ranking_presets')) {
             return false;
         }
 
@@ -497,6 +510,11 @@ final class TestProcessController extends Controller
         return (string) ($_GET['ranking_scope'] ?? 'filtered') === 'process'
             ? 'process'
             : 'filtered';
+    }
+
+    private function canConfigureCompanyRanking(): bool
+    {
+        return has_permission('manage_company_processes');
     }
 
     public function reviewAssignment(): void

@@ -51,6 +51,8 @@ final class ClientAdminInsightsModel
     {
         return $this->tests->fetchAll('
             SELECT people.process_id, people.process_name, people.process_code,
+                   people.process_starts_at, people.process_ends_at,
+                   MAX(people.online_users_count) AS online_users_count,
                    COUNT(*) AS assigned,
                    SUM(CASE WHEN people.finalized_activities = 0 AND people.started_activities = 0 THEN 1 ELSE 0 END) AS pending,
                    SUM(CASE WHEN people.finalized_activities < people.total_activities
@@ -60,6 +62,8 @@ final class ClientAdminInsightsModel
                    ROUND(SUM(CASE WHEN people.finalized_activities = people.total_activities THEN 1 ELSE 0 END) * 100 / COUNT(*)) AS progress_percent
             FROM (
                 SELECT p.id AS process_id, p.name AS process_name, p.code AS process_code,
+                       p.starts_at AS process_starts_at, p.ends_at AS process_ends_at,
+                       COALESCE(online.online_users_count, 0) AS online_users_count,
                        s.user_id,
                        COUNT(*) AS total_activities,
                        SUM(CASE WHEN s.status IN ("completed", "expired") THEN 1 ELSE 0 END) AS finalized_activities,
@@ -67,10 +71,17 @@ final class ClientAdminInsightsModel
                 FROM ' . $this->testsSchema . '.test_processes p
                 JOIN ' . $this->testsSchema . '.test_sessions s ON s.process_id = p.id AND s.status <> "cancelled"
                 JOIN ' . $this->coreSchema() . '.users u ON u.id = s.user_id AND u.company_id = p.company_id
+                LEFT JOIN (
+                    SELECT process_id, COUNT(DISTINCT user_id) AS online_users_count
+                    FROM ' . $this->testsSchema . '.test_sessions
+                    WHERE status = "in_progress"
+                      AND last_seen_at >= DATE_SUB(NOW(), INTERVAL 90 SECOND)
+                    GROUP BY process_id
+                ) online ON online.process_id = p.id
                 WHERE p.company_id = ?
-                GROUP BY p.id, p.name, p.code, s.user_id
+                GROUP BY p.id, p.name, p.code, p.starts_at, p.ends_at, online.online_users_count, s.user_id
             ) people
-            GROUP BY people.process_id, people.process_name, people.process_code
+            GROUP BY people.process_id, people.process_name, people.process_code, people.process_starts_at, people.process_ends_at
             ORDER BY people.process_name ASC
             LIMIT 500
         ', [$companyId]);
