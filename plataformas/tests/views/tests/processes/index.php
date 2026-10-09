@@ -77,12 +77,12 @@ $selectedGroup = $selectedDateGroup !== '' ? ($dateGroups[$selectedDateGroup] ??
                         <th>Estado</th>
                         <th>Evaluaciones</th>
                         <th>Usuarios</th>
-                        <th>Online rindiendo</th>
+                        <th>Usuarios conectados</th>
                         <th>
                             Avance sesiones
                             <?= status_help_button('Avance de sesiones', 'El porcentaje usa asignaciones con al menos una respuesta guardada sobre el total de asignaciones no canceladas. Las entregas completadas y las expiradas se muestran por separado; abrir una actividad no cuenta como avance.') ?>
                         </th>
-                        <th>Fechas</th>
+                        <th>Fechas del proceso</th>
                         <th class="no-sort no-export">Acciones</th>
                     </tr>
                 </thead>
