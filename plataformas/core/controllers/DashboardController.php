@@ -33,7 +33,7 @@ final class DashboardController extends Controller
         require_auth();
 
         $user = current_user() ?: [];
-        $processes = $this->testProcesses->allForUser($user);
+        $processes = $this->testProcesses->dashboardProcessesForUser($user);
         $today = date('Y-m-d');
         $now = time();
         $agenda = [];
@@ -105,8 +105,8 @@ final class DashboardController extends Controller
 
         usort($agenda, static fn(array $left, array $right): int => strcmp((string) $left['start_at'], (string) $right['start_at']));
 
-        $macro = $this->testProcesses->dashboardMacroForUser($user);
-        $processOverview = $this->testProcesses->dashboardProcessOverviewForUser($user);
+        $macro = $this->testProcesses->dashboardMacroForUser($user, $processes);
+        $processOverview = $this->testProcesses->dashboardProcessOverviewForUser($user, $processes);
         $evaluationsTotal = (int) ($macro['evaluations_total'] ?? 0);
         $evaluationsAnswered = (int) ($macro['evaluations_answered'] ?? 0);
         $peopleAssigned = (int) ($processOverview['completed_assigned_people'] ?? 0);

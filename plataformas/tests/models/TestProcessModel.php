@@ -96,9 +96,102 @@ final class TestProcessModel
         );
     }
 
-    public function dashboardMacroForUser(array $user): array
+    /**
+     * Lightweight process catalog used by the landing dashboards. The full
+     * process list includes cross-table aggregates that are unnecessary here.
+     */
+    public function dashboardProcessesForUser(array $user): array
     {
-        $processes = $this->allForUser($user);
+        if ((string) ($user['role'] ?? '') === 'company_admin' && (int) ($user['company_id'] ?? 0) <= 0) {
+            return [];
+        }
+
+        $sql = '
+            SELECT p.id, p.company_id, p.code, p.name, p.status,
+                   p.starts_at, p.ends_at, p.created_at
+            FROM test_processes p
+        ';
+        if ($this->isGlobalProcessAdmin()) {
+            return $this->db->fetchAll($sql . ' ORDER BY p.created_at DESC, p.id DESC');
+        }
+
+        if ($this->hasProcessCompanyColumn()
+            && (int) ($user['company_id'] ?? 0) > 0
+            && has_permission('manage_company_processes')) {
+            return $this->db->fetchAll(
+                $sql . ' WHERE p.company_id = ? ORDER BY p.created_at DESC, p.id DESC',
+                [(int) $user['company_id']]
+            );
+        }
+
+        $profileId = (int) ($user['profile_id'] ?? 0);
+        $userId = (int) ($user['id'] ?? 0);
+        if ($profileId <= 0 && $userId <= 0) {
+            return [];
+        }
+
+        $conditions = [];
+        $params = [];
+        $modeSql = $this->hasProcessAdminModeColumn() ? "COALESCE(p.admin_assignment_mode, 'user')" : "'profile'";
+        if ($profileId > 0) {
+            $conditions[] = 'EXISTS (
+                SELECT 1 FROM test_process_profile_admins pa
+                WHERE pa.process_id = p.id AND pa.profile_id = ?
+            ) AND ' . $modeSql . " = 'profile'";
+            $params[] = $profileId;
+        }
+        if ($userId > 0 && $this->tableExists('test_process_user_admins')) {
+            $conditions[] = 'EXISTS (
+                SELECT 1 FROM test_process_user_admins ua
+                WHERE ua.process_id = p.id AND ua.user_id = ?
+            ) AND ' . $modeSql . " = 'user'";
+            $params[] = $userId;
+        }
+        if (!$conditions) {
+            return [];
+        }
+
+        return $this->db->fetchAll(
+            $sql . ' WHERE ' . implode(' OR ', $conditions) . ' ORDER BY p.created_at DESC, p.id DESC',
+            $params
+        );
+    }
+
+    public function dashboardMacroForUser(array $user, ?array $processes = null): array
+    {
+        $processes = $processes ?? $this->dashboardProcessesForUser($user);
+        $ids = array_values(array_filter(array_map(static fn(array $process): int => (int) ($process['id'] ?? 0), $processes)));
+        if (!$ids) {
+            return ['processes_total' => 0, 'processes_completed' => 0, 'evaluations_answered' => 0, 'evaluations_total' => 0];
+        }
+
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $row = $this->db->fetch(
+            'SELECT
+                COUNT(DISTINCT CASE WHEN p.status = "closed" THEN p.id END) AS processes_completed,
+                COUNT(DISTINCT CASE WHEN EXISTS (
+                    SELECT 1 FROM test_answers a
+                    WHERE a.session_id = s.id
+                      AND a.answer_value IS NOT NULL AND TRIM(a.answer_value) <> ""
+                ) THEN s.id END) AS evaluations_answered,
+                COUNT(DISTINCT s.id) AS evaluations_total
+             FROM test_processes p
+             LEFT JOIN test_sessions s ON s.process_id = p.id AND s.status <> "cancelled"
+             WHERE p.id IN (' . $placeholders . ')',
+            $ids
+        ) ?: [];
+
+        return [
+            'processes_total' => count($processes),
+            'processes_completed' => (int) ($row['processes_completed'] ?? 0),
+            'evaluations_answered' => (int) ($row['evaluations_answered'] ?? 0),
+            'evaluations_total' => (int) ($row['evaluations_total'] ?? 0),
+        ];
+    }
+
+    private function dashboardMacroForUserLegacy(array $user, ?array $processes = null): array
+    {
+        $processes = $processes ?? $this->dashboardProcessesForUser($user);
         $ids = array_values(array_filter(array_map(static fn(array $process): int => (int) ($process['id'] ?? 0), $processes)));
         if (!$ids) {
             return ['processes_total' => 0, 'processes_completed' => 0, 'evaluations_answered' => 0, 'evaluations_total' => 0];
@@ -115,9 +208,81 @@ final class TestProcessModel
         ];
     }
 
-    public function dashboardProcessOverviewForUser(array $user): array
+    public function dashboardProcessOverviewForUser(array $user, ?array $processes = null): array
     {
-        $processes = $this->allForUser($user);
+        $processes = $processes ?? $this->dashboardProcessesForUser($user);
+        $ids = array_values(array_filter(array_map(static fn(array $process): int => (int) ($process['id'] ?? 0), $processes)));
+        if (!$ids) {
+            return [
+                'today_processes' => 0, 'today_assigned_people' => 0,
+                'completed_processes' => 0, 'completed_assigned_people' => 0,
+                'completed_finished_people' => 0, 'completed_not_started_people' => 0,
+            ];
+        }
+
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $dayStart = date('Y-m-d 00:00:00');
+        $dayEnd = date('Y-m-d 00:00:00', strtotime('+1 day'));
+        $row = $this->db->fetch(
+            'SELECT
+                COALESCE(SUM(CASE WHEN overview.starts_at IS NOT NULL AND overview.ends_at IS NOT NULL
+                    AND overview.starts_at < ? AND overview.ends_at >= ?
+                    AND overview.status NOT IN ("cancelled", "closed") THEN 1 ELSE 0 END), 0) AS today_processes,
+                COALESCE(SUM(CASE WHEN overview.starts_at IS NOT NULL AND overview.ends_at IS NOT NULL
+                    AND overview.starts_at < ? AND overview.ends_at >= ?
+                    AND overview.status NOT IN ("cancelled", "closed") THEN overview.assigned_people ELSE 0 END), 0) AS today_assigned_people,
+                COALESCE(SUM(CASE WHEN overview.status IN ("active", "closed")
+                    AND (overview.status = "closed" OR (overview.ends_at IS NOT NULL AND overview.ends_at < NOW())) THEN 1 ELSE 0 END), 0) AS completed_processes,
+                COALESCE(SUM(CASE WHEN overview.status IN ("active", "closed")
+                    AND (overview.status = "closed" OR (overview.ends_at IS NOT NULL AND overview.ends_at < NOW())) THEN overview.assigned_people ELSE 0 END), 0) AS completed_assigned_people,
+                COALESCE(SUM(CASE WHEN overview.status IN ("active", "closed")
+                    AND (overview.status = "closed" OR (overview.ends_at IS NOT NULL AND overview.ends_at < NOW())) THEN overview.finished_people ELSE 0 END), 0) AS completed_finished_people,
+                COALESCE(SUM(CASE WHEN overview.status IN ("active", "closed")
+                    AND (overview.status = "closed" OR (overview.ends_at IS NOT NULL AND overview.ends_at < NOW())) THEN overview.not_started_people ELSE 0 END), 0) AS completed_not_started_people
+             FROM (
+                SELECT p.id, p.status, p.starts_at, p.ends_at,
+                       COUNT(DISTINCT pu.user_id) AS assigned_people,
+                       COUNT(DISTINCT CASE WHEN pi.instruments_total > 0
+                           AND COALESCE(progress.finished_instruments, 0) >= pi.instruments_total THEN pu.user_id END) AS finished_people,
+                       COUNT(DISTINCT CASE WHEN COALESCE(progress.started_instruments, 0) = 0 THEN pu.user_id END) AS not_started_people
+                FROM test_processes p
+                LEFT JOIN test_process_users pu ON pu.process_id = p.id AND pu.status <> "cancelled"
+                LEFT JOIN (
+                    SELECT process_id, COUNT(*) AS instruments_total
+                    FROM test_process_instruments
+                    WHERE process_id IN (' . $placeholders . ')
+                    GROUP BY process_id
+                ) pi ON pi.process_id = p.id
+                LEFT JOIN (
+                    SELECT ts.process_id, ts.user_id,
+                           COUNT(DISTINCT CASE WHEN ts.status = "completed" THEN ts.instrument_id END) AS finished_instruments,
+                           COUNT(DISTINCT CASE WHEN ts.status = "completed"
+                               OR EXISTS (SELECT 1 FROM test_answers a WHERE a.session_id = ts.id
+                                          AND a.answer_value IS NOT NULL AND TRIM(a.answer_value) <> "")
+                               THEN ts.instrument_id END) AS started_instruments
+                    FROM test_sessions ts
+                    WHERE ts.status <> "cancelled" AND ts.process_id IN (' . $placeholders . ')
+                    GROUP BY ts.process_id, ts.user_id
+                ) progress ON progress.process_id = p.id AND progress.user_id = pu.user_id
+                WHERE p.id IN (' . $placeholders . ')
+                GROUP BY p.id, p.status, p.starts_at, p.ends_at
+             ) overview',
+            array_merge([$dayEnd, $dayStart, $dayEnd, $dayStart], $ids, $ids, $ids)
+        ) ?: [];
+
+        return [
+            'today_processes' => (int) ($row['today_processes'] ?? 0),
+            'today_assigned_people' => (int) ($row['today_assigned_people'] ?? 0),
+            'completed_processes' => (int) ($row['completed_processes'] ?? 0),
+            'completed_assigned_people' => (int) ($row['completed_assigned_people'] ?? 0),
+            'completed_finished_people' => (int) ($row['completed_finished_people'] ?? 0),
+            'completed_not_started_people' => (int) ($row['completed_not_started_people'] ?? 0),
+        ];
+    }
+
+    private function dashboardProcessOverviewForUserLegacy(array $user, ?array $processes = null): array
+    {
+        $processes = $processes ?? $this->dashboardProcessesForUser($user);
         $ids = array_values(array_filter(array_map(static fn(array $process): int => (int) ($process['id'] ?? 0), $processes)));
         if (!$ids) {
             return [
