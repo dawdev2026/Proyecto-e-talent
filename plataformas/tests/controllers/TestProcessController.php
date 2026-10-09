@@ -73,6 +73,7 @@ final class TestProcessController extends Controller
         session_write_close();
 
         $dashboardFilters = $this->dashboardFilterOptions();
+        $dashboardInitialFieldOptions = $this->dashboardInitialFieldOptions();
 
         $this->render('tests/processes/dashboard', [
             'title' => 'Dashboard Avance | e-talent',
@@ -84,6 +85,7 @@ final class TestProcessController extends Controller
             'dashboardAvailableProcesses' => $dashboardFilters['processes'],
             'dashboardCompanyId' => $dashboardFilters['company_id'],
             'dashboardSelectedProcessIds' => $dashboardFilters['process_ids'],
+            'dashboardInitialFieldOptions' => $dashboardInitialFieldOptions,
         ]);
     }
 
@@ -140,7 +142,7 @@ final class TestProcessController extends Controller
             $this->processes->userFields(),
             static fn(array $field): bool => (string) ($field['field_key'] ?? '') !== 'edad'
         ));
-        $fieldFilters = $canConfigureRanking && is_array($_GET['fields'] ?? null) ? $_GET['fields'] : [];
+        $fieldFilters = is_array($_GET['fields'] ?? null) ? $_GET['fields'] : [];
         $processes = $dashboardFilters['processes'];
         $dashboardProcesses = [];
         $visibleProcesses = [];
@@ -326,6 +328,43 @@ final class TestProcessController extends Controller
             'company_id' => $companyId,
             'process_ids' => $processIds,
         ];
+    }
+
+    private function dashboardInitialFieldOptions(): array
+    {
+        $options = [];
+        foreach ($this->processes->userFields() as $field) {
+            $fieldKey = strtolower(trim((string) ($field['field_key'] ?? '')));
+            $label = strtolower(trim((string) ($field['label'] ?? '')));
+            if ($fieldKey !== 'tramo' && $label !== 'tramo') {
+                continue;
+            }
+
+            $raw = trim((string) ($field['options'] ?? ''));
+            if ($raw === '') {
+                break;
+            }
+
+            $decoded = json_decode($raw, true);
+            if (is_array($decoded)) {
+                $rawOptions = $decoded;
+            } else {
+                $rawOptions = preg_split('/[,;\r\n]+/', $raw) ?: [];
+            }
+            foreach ($rawOptions as $value) {
+                if (is_array($value)) {
+                    $value = $value['label'] ?? $value['value'] ?? '';
+                }
+                $value = trim((string) $value);
+                if ($value !== '') {
+                    $options[$value] = $value;
+                }
+            }
+            break;
+        }
+
+        ksort($options);
+        return array_values($options);
     }
 
     public function rankingAll(): void

@@ -16,6 +16,8 @@ $dashboardCompanies = is_array($dashboardCompanies ?? null) ? $dashboardCompanie
 $dashboardAvailableProcesses = is_array($dashboardAvailableProcesses ?? null) ? $dashboardAvailableProcesses : [];
 $dashboardCompanyId = (int) ($dashboardCompanyId ?? 0);
 $dashboardSelectedProcessIds = array_values(array_filter(array_map('intval', is_array($dashboardSelectedProcessIds ?? null) ? $dashboardSelectedProcessIds : [])));
+$dashboardInitialFieldOptions = array_values(array_filter(array_map('strval', is_array($dashboardInitialFieldOptions ?? null) ? $dashboardInitialFieldOptions : [])));
+$dashboardInitialTramo = is_array($_GET['fields'] ?? null) ? trim((string) ($_GET['fields']['tramo'] ?? '')) : '';
 $duplicateAssignments = is_array($duplicateAssignments ?? null) ? $duplicateAssignments : ['total' => 0, 'examples' => []];
 $duplicateAssignmentsTotal = (int) ($duplicateAssignments['total'] ?? 0);
 $duplicateAssignmentExamples = is_array($duplicateAssignments['examples'] ?? null) ? $duplicateAssignments['examples'] : [];
@@ -126,6 +128,7 @@ if (!function_exists('process_dashboard_help_label')) {
         <p class="text-muted mb-0">Seguimiento general y por proceso de evaluaciones.</p>
     </div>
     <div class="d-flex flex-wrap gap-2">
+        <a class="btn btn-outline-secondary" href="<?= e(route_url('client-admin.test-progress')) ?>"><i class="bi bi-arrow-left me-1"></i> Volver</a>
         <a class="btn btn-outline-secondary" href="<?= e(route_url('test-processes')) ?>"><i class="bi bi-kanban me-1"></i> Procesos</a>
         <button class="btn btn-primary" type="button" data-process-dashboard-refresh><i class="bi bi-arrow-clockwise me-1"></i> Actualizar</button>
     </div>
@@ -144,10 +147,10 @@ if (!function_exists('process_dashboard_help_label')) {
 <section class="content-panel process-dashboard-filters mb-4" data-dashboard-selection-panel>
     <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-3">
         <div>
-            <h2 class="h5 fw-bold mb-1">Selecciona qué quieres visualizar</h2>
-            <p class="text-muted mb-0">Primero elige una empresa y uno o más procesos para cargar el dashboard.</p>
+            <h2 class="h5 fw-bold mb-1">Filtros y cálculo del ranking</h2>
+            <p class="text-muted mb-0">Cambia la muestra y simula criterios para recalcular los resultados visibles.</p>
         </div>
-        <span class="badge text-bg-light border" data-dashboard-selection-summary>Sin selección</span>
+        <span class="badge text-bg-warning">Matriz ajustada</span>
     </div>
     <form class="row g-3 align-items-end" method="get" action="<?= e(route_url('test-process.dashboard')) ?>" data-dashboard-filter-form>
         <?php if ($dashboardIsGlobalAdmin): ?>
@@ -164,16 +167,26 @@ if (!function_exists('process_dashboard_help_label')) {
         <?php else: ?>
             <input type="hidden" name="company_id" value="<?= $dashboardCompanyId ?>">
         <?php endif; ?>
-        <div class="col-12 col-lg-6">
+        <div class="col-12 col-lg-4">
             <label class="form-label" for="dashboard_process_picker">Procesos</label>
             <div class="input-group">
-                <button id="dashboard_process_picker" class="form-select text-start" type="button" data-dashboard-process-picker <?= $dashboardIsGlobalAdmin && $dashboardCompanyId <= 0 ? 'disabled' : '' ?>>Seleccionar procesos</button>
-                <span class="input-group-text" data-dashboard-process-count>0 seleccionados</span>
+                <button id="dashboard_process_picker" class="form-select text-start" type="button" data-dashboard-process-picker data-dashboard-process-total="<?= count($dashboardAvailableProcesses) ?>" <?= $dashboardIsGlobalAdmin && $dashboardCompanyId <= 0 ? 'disabled' : '' ?>>Todos los procesos</button>
+                <span class="input-group-text" data-dashboard-process-count>Todos</span>
             </div>
-            <div class="small text-muted mt-1">Puedes seleccionar varios procesos en la grilla.</div>
         </div>
-        <div class="col-12 col-lg-2">
-            <button class="btn btn-primary w-100" type="submit" data-dashboard-apply>Aplicar</button>
+        <div class="col-12 col-lg-3">
+            <label class="form-label" for="dashboard_tramo">Tramo</label>
+            <select id="dashboard_tramo" class="form-select" name="fields[tramo]">
+                <option value="">Todos</option>
+                <?php foreach ($dashboardInitialFieldOptions as $tramo): ?>
+                    <option value="<?= e($tramo) ?>" <?= $dashboardInitialTramo === $tramo ? 'selected' : '' ?>><?= e($tramo) ?></option>
+                <?php endforeach; ?>
+            </select>
+            <div class="small text-muted mt-1">Todos los tramos</div>
+        </div>
+        <div class="col-12 col-lg-4 d-flex gap-2">
+            <button class="btn btn-warning flex-fill" type="submit" data-dashboard-apply><i class="bi bi-funnel me-1"></i> Aplicar</button>
+            <a class="btn btn-outline-secondary" href="<?= e(route_url('test-process.dashboard')) ?>" aria-label="Limpiar filtros"><i class="bi bi-eraser"></i></a>
         </div>
         <div data-dashboard-process-inputs>
             <?php foreach ($dashboardSelectedProcessIds as $selectedProcessId): ?>
@@ -181,6 +194,11 @@ if (!function_exists('process_dashboard_help_label')) {
             <?php endforeach; ?>
         </div>
     </form>
+</section>
+
+<section class="content-panel process-dashboard-filters mb-4">
+    <h2 class="h5 fw-bold mb-1">Selecciona el alcance de la información</h2>
+    <p class="text-muted mb-0">Elige uno o varios procesos y tramos, o deja ambos en Todos, y presiona Aplicar para cargar los resultados.</p>
 </section>
 
 <template id="dashboardProcessPickerTemplate">
@@ -1063,12 +1081,16 @@ if (!function_exists('process_dashboard_help_label')) {
 
         function syncProcessSelection() {
             if (!processInputs) return;
+            var totalProcesses = pickerButton ? Number(pickerButton.getAttribute('data-dashboard-process-total') || 0) : 0;
+            function updateProcessCaption(count) {
+                var allSelected = totalProcesses > 0 && count === totalProcesses;
+                if (processCount) processCount.textContent = allSelected ? 'Todos' : count + ' seleccionado' + (count === 1 ? '' : 's');
+                if (pickerButton) pickerButton.textContent = allSelected ? 'Todos los procesos' : (count ? 'Modificar selección' : 'Seleccionar procesos');
+            }
             var checked = document.querySelectorAll('#appDrawerBody [data-dashboard-process-checkbox]:checked');
             if (!checked.length && !document.querySelector('#appDrawerBody [data-dashboard-process-checkbox]')) {
                 var existing = document.querySelectorAll('[data-dashboard-process-inputs] input[name="process_ids[]"]');
-                if (processCount) processCount.textContent = existing.length + ' seleccionado' + (existing.length === 1 ? '' : 's');
-                if (processSummary) processSummary.textContent = existing.length ? existing.length + ' proceso' + (existing.length === 1 ? '' : 's') : 'Sin selección';
-                if (pickerButton) pickerButton.textContent = existing.length ? 'Modificar selección' : 'Seleccionar procesos';
+                updateProcessCaption(existing.length);
                 return;
             }
             var selectedSet = {};
@@ -1096,9 +1118,7 @@ if (!function_exists('process_dashboard_help_label')) {
                 processInputs.appendChild(input);
             });
             var count = Object.keys(selectedSet).length;
-            if (processCount) processCount.textContent = count + ' seleccionado' + (count === 1 ? '' : 's');
-            if (processSummary) processSummary.textContent = count ? count + ' proceso' + (count === 1 ? '' : 's') : 'Sin selección';
-            if (pickerButton) pickerButton.textContent = count ? 'Modificar selección' : 'Seleccionar procesos';
+            updateProcessCaption(count);
         }
 
         function filterPickerRows(clearSelection) {
