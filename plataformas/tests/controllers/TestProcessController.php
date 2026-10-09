@@ -73,7 +73,7 @@ final class TestProcessController extends Controller
         session_write_close();
 
         $dashboardFilters = $this->dashboardFilterOptions();
-        $dashboardInitialFieldOptions = $this->dashboardInitialFieldOptions();
+        $dashboardInitialFieldOptions = $this->dashboardInitialFieldOptions($dashboardFilters['processes']);
 
         $this->render('tests/processes/dashboard', [
             'title' => 'Dashboard Avance | e-talent',
@@ -330,37 +330,43 @@ final class TestProcessController extends Controller
         ];
     }
 
-    private function dashboardInitialFieldOptions(): array
+    private function dashboardInitialFieldOptions(array $processes): array
     {
         $options = [];
+        $tramoKeys = ['tramo'];
         foreach ($this->processes->userFields() as $field) {
             $fieldKey = strtolower(trim((string) ($field['field_key'] ?? '')));
             $label = strtolower(trim((string) ($field['label'] ?? '')));
-            if ($fieldKey !== 'tramo' && $label !== 'tramo') {
-                continue;
-            }
-
-            $raw = trim((string) ($field['options'] ?? ''));
-            if ($raw === '') {
-                break;
-            }
-
-            $decoded = json_decode($raw, true);
-            if (is_array($decoded)) {
-                $rawOptions = $decoded;
-            } else {
-                $rawOptions = preg_split('/[,;\r\n]+/', $raw) ?: [];
-            }
-            foreach ($rawOptions as $value) {
-                if (is_array($value)) {
-                    $value = $value['label'] ?? $value['value'] ?? '';
-                }
-                $value = trim((string) $value);
-                if ($value !== '') {
-                    $options[$value] = $value;
+            if ($fieldKey !== '' && ($fieldKey === 'tramo' || $label === 'tramo' || strpos($label, 'tramo') !== false)) {
+                $tramoKeys[] = $fieldKey;
+                $raw = trim((string) ($field['options'] ?? ''));
+                $decoded = $raw !== '' ? json_decode($raw, true) : null;
+                $rawOptions = is_array($decoded) ? $decoded : (preg_split('/[,;\r\n]+/', $raw) ?: []);
+                foreach ($rawOptions as $value) {
+                    if (is_array($value)) {
+                        $value = $value['label'] ?? $value['value'] ?? '';
+                    }
+                    $value = trim((string) $value);
+                    if ($value !== '') {
+                        $options[$value] = $value;
+                    }
                 }
             }
-            break;
+        }
+
+        foreach ($processes as $process) {
+            foreach ($this->processes->processUsers((int) ($process['id'] ?? 0)) as $user) {
+                foreach (($user['dynamic_fields'] ?? []) as $key => $value) {
+                    $normalizedKey = strtolower(trim((string) $key));
+                    if (!in_array($normalizedKey, $tramoKeys, true) && strpos($normalizedKey, 'tramo') === false) {
+                        continue;
+                    }
+                    $value = trim((string) $value);
+                    if ($value !== '') {
+                        $options[$value] = $value;
+                    }
+                }
+            }
         }
 
         ksort($options);

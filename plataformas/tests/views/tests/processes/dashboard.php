@@ -128,13 +128,11 @@ if (!function_exists('process_dashboard_help_label')) {
         <p class="text-muted mb-0">Seguimiento general y por proceso de evaluaciones.</p>
     </div>
     <div class="d-flex flex-wrap gap-2">
-        <a class="btn btn-outline-secondary" href="<?= e(route_url('client-admin.test-progress')) ?>"><i class="bi bi-arrow-left me-1"></i> Volver</a>
-        <a class="btn btn-outline-secondary" href="<?= e(route_url('test-processes')) ?>"><i class="bi bi-kanban me-1"></i> Procesos</a>
         <button class="btn btn-primary" type="button" data-process-dashboard-refresh><i class="bi bi-arrow-clockwise me-1"></i> Actualizar</button>
     </div>
 </section>
 
-<section class="content-panel mb-4" data-process-dashboard-loading>
+<section class="content-panel mb-4 d-none" data-process-dashboard-loading>
     <div class="d-flex align-items-start gap-3">
         <div class="spinner-border text-primary flex-shrink-0" role="status" aria-hidden="true"></div>
         <div>
@@ -1203,7 +1201,13 @@ if (!function_exists('process_dashboard_help_label')) {
         });
 
         if (isAsyncShell) {
-            loadDashboardData();
+            var query = window.location.search;
+            var hasSelectedScope = query.indexOf('process_ids') !== -1 || query.indexOf('fields%5B') !== -1 || query.indexOf('fields[') !== -1;
+            if (hasSelectedScope) {
+                loadDashboardData();
+            } else {
+                setDashboardLoading(false);
+            }
             return;
         }
 
