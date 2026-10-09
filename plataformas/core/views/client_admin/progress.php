@@ -3,7 +3,7 @@ $rows = is_array($rows ?? null) ? $rows : [];
 $kind = (string) ($kind ?? 'Avance');
 $peopleMetrics = !empty($peopleMetrics);
 ?>
-<section class="page-header"><div><p class="dashboard-kicker mb-1">Avance</p><h1 class="fw-bold mb-1"><?= e((string) ($heading ?? 'Avance por proceso')) ?></h1><p class="text-muted mb-0">Estado de <?= e($kind) ?> en los procesos de tu empresa.</p></div></section>
+<section class="page-header"><div><p class="dashboard-kicker mb-1">Avance</p><h1 class="fw-bold mb-1"><?= e((string) ($heading ?? 'Avance por proceso')) ?></h1><p class="text-muted mb-0">Estado de <?= e($kind) ?> en los procesos de tu empresa.</p></div><?php if ($peopleMetrics): ?><div><a class="btn btn-outline-primary" href="<?= e(route_url('test-process.dashboard')) ?>"><i class="bi bi-diagram-3 me-1"></i>Matriz de decisión</a></div><?php endif; ?></section>
 <section class="card content-panel">
     <?php if (!$rows): ?><div class="alert alert-info mb-0">No hay procesos con asignaciones disponibles para esta empresa.</div><?php else: ?>
     <?php if ($peopleMetrics): ?>
