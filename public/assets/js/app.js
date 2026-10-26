@@ -2177,7 +2177,11 @@ $(function () {
                 }).then(function (response) {
                     if (options.requireActivityJson !== true && expectJson !== true) return {ok: response.ok};
                     return response.json().then(function (payload) {
-                        return {ok: response.ok && payload && payload.ok === true, payload: payload};
+                        return {
+                            ok: response.ok && payload && payload.ok === true,
+                            payload: payload,
+                            message: payload && payload.message ? String(payload.message) : ''
+                        };
                     });
                 }).catch(function () { return {ok: false}; });
             },
@@ -3329,7 +3333,8 @@ $(function () {
                 $form.on('click.assessmentStart', '[data-assessment-begin]', function () {
                     var $button = $(this).prop('disabled', true);
                     assessmentFlow.sendActivity('supervised_started', {remaining_seconds: remainingSeconds()}, false, true).then(function (result) {
-                        if (!result || result.ok !== true) throw new Error('No se pudo activar la sesión.');
+                        if (!result || result.ok !== true) throw new Error((result && result.message) || 'No se pudo activar la sesión.');
+                        $form.find('[data-assessment-preparation-chrome]').remove();
                         $form.removeClass('is-supervised-locked').addClass('is-supervised-active');
                         $form.closest('.test-taking-shell').removeClass('is-assessment-preparing');
                         $form.data('evaluation-countdown-started', true).trigger('evaluation:activated');
@@ -3474,7 +3479,8 @@ $(function () {
                     evidence_id: audioVisualMode ? String($form.attr('data-media-evidence-id') || '') : ''
                 }, false, true);
             }).then(function (result) {
-                if (!result || result.ok !== true) throw new Error('No se pudo activar la sesión.');
+                if (!result || result.ok !== true) throw new Error((result && result.message) || 'No se pudo activar la sesión.');
+                $form.find('[data-assessment-preparation-chrome]').remove();
                 if (audioVisualMode) {
                     sendActivity('audio_visual_recording_started', {source: 'supervised_preflight'});
                     var screen = $form.data('audio-visual-screen');
@@ -5338,6 +5344,34 @@ $(function () {
         close: closeDrawer
     };
 
+    $(document).on('click', '[data-drawer-partial-url]', function (event) {
+        event.preventDefault();
+
+        var $trigger = $(this);
+        var targetId = $trigger.data('drawer-partial-target');
+        var $target = targetId ? $('#' + String(targetId).replace(/^#/, '')) : $();
+        if (!$target.length || $trigger.hasClass('disabled')) return;
+
+        var originalHtml = $trigger.html();
+        $trigger.addClass('disabled').attr({'aria-disabled': 'true', 'aria-busy': 'true'}).html('<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>Cargando...');
+        $target.attr('aria-busy', 'true').addClass('drawer-partial-loading');
+
+        $.ajax({
+            url: drawerUrl($trigger.data('drawer-partial-url')),
+            method: 'GET',
+            dataType: 'html',
+            headers: {'X-Requested-With': 'XMLHttpRequest'}
+        }).done(function (html) {
+            $target.html(html);
+            initializeDrawerBody($target);
+        }).fail(function () {
+            showNotification('danger', 'No se pudo actualizar esta grilla.');
+        }).always(function () {
+            $target.attr('aria-busy', 'false').removeClass('drawer-partial-loading');
+            $trigger.removeClass('disabled').attr({'aria-disabled': 'false', 'aria-busy': 'false'}).html(originalHtml);
+        });
+    });
+
     $(document).on('click', '[data-drawer-url]', function (event) {
         event.preventDefault();
         openDrawer({
@@ -6135,12 +6169,18 @@ $(function () {
                 $form.on('click.evaluationPlainStart', '[data-assessment-begin]', function () {
                     var button = this; $(button).prop('disabled', true);
                     assessmentFlow.sendActivity('supervised_started', {}, false, true).then(function (result) {
-                        if (!result || result.ok !== true) throw new Error('start_failed');
+                        if (!result || result.ok !== true) throw new Error((result && result.message) || 'start_failed');
+                        $form.find('[data-assessment-preparation-chrome]').remove();
                         $form.removeClass('is-evaluation-supervised-locked').data('evaluation-supervised-active', true).data('evaluation-countdown-started', true).trigger('evaluation:activated');
                         $form.removeClass('is-assessment-preparing');
                         $plainContent.removeAttr('aria-hidden').prop('inert', false);
                         setAssessmentWizardStage($form, 'assessment');
-                    }).catch(function () { $(button).prop('disabled', false); showNotification('error', 'No se pudo iniciar. Verifica la conexión e inténtalo nuevamente.'); });
+                    }).catch(function (error) {
+                        $(button).prop('disabled', false);
+                        showNotification('error', error && error.message && error.message !== 'start_failed'
+                            ? error.message
+                            : 'No se pudo iniciar. Verifica la conexión e inténtalo nuevamente.');
+                    });
                 });
             }
             return;
@@ -6167,6 +6207,7 @@ $(function () {
             setAssessmentWizardStage($form, 'instructions');
         };
         var setActive = function (warning) {
+            $form.find('[data-assessment-preparation-chrome]').remove();
             $form.removeClass('is-evaluation-supervised-locked');
             $form.removeClass('is-assessment-preparing');
             $form.find('[data-evaluation-instrument-content]').removeAttr('aria-hidden').prop('inert', false);
@@ -6748,5 +6789,28 @@ $(function () {
     }
 
     initEvaluationFormControlSettings();
+
+    $(document).on('click', 'nav[aria-label="Paginación de casos prioritarios"] a', function (event) {
+        event.preventDefault();
+        var $link = $(this);
+        var $grid = $link.closest('section[aria-label="Casos prioritarios"]');
+        if (!$grid.length) { window.location.href = $link.attr('href'); return; }
+        var originalHtml = $link.html();
+        var url = new URL($link.attr('href'), window.location.href);
+        url.searchParams.set('priority_fragment', '1');
+        $link.prop('disabled', true).addClass('disabled').attr({'aria-busy': 'true'}).html('<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>Cargando...');
+        $grid.attr({'aria-busy': 'true'}).addClass('drawer-partial-loading');
+        $.ajax({url: url.toString(), method: 'GET', dataType: 'html', headers: {'X-Requested-With': 'XMLHttpRequest'}})
+            .done(function (html) {
+                var $replacement = $(html).filter('section[aria-label="Casos prioritarios"]');
+                if (!$replacement.length) { window.location.href = $link.attr('href'); return; }
+                $grid.replaceWith($replacement);
+                var cleanUrl = new URL($link.attr('href'), window.location.href);
+                window.history.replaceState({}, '', cleanUrl.toString());
+                if (window.jQuery && jQuery.fn.select2) jQuery('.js-integrity-select2').select2({width:'100%', closeOnSelect:false, allowClear:true});
+            })
+            .fail(function () { window.location.href = $link.attr('href'); })
+            .always(function () { $link.prop('disabled', false).removeClass('disabled').attr({'aria-busy': 'false'}).html(originalHtml); $grid.attr({'aria-busy': 'false'}).removeClass('drawer-partial-loading'); });
+    });
 
 });

@@ -52,17 +52,25 @@ final class ClientAdminController extends Controller
         $processIds = $this->requestPositiveIntList('process_id');
         $testIds = $this->requestPositiveIntList('test_id');
         $dateRange = $this->incidentDateRange();
-        $data = $this->evaluationDashboard->integrityReport($companyId, $processIds ?: null, null, $testIds ?: null, 'tests', $dateRange['from'], $dateRange['until']);
-        $this->render('evaluaciones_encuestas/dashboard_integrity', [
+        $priorityPage = max(1, (int) ($_GET['priority_page'] ?? 1));
+        $isPriorityFragment = (int) ($_GET['priority_fragment'] ?? 0) === 1;
+        $data = $this->evaluationDashboard->integrityTestsScreenFast($companyId, $processIds ?: null, $testIds ?: null, $dateRange['from'], $dateRange['until'], 25, ($priorityPage - 1) * 25, !$isPriorityFragment);
+        $viewData = [
             'title' => 'Incidencias de tests psicolaborales | e-talent',
             'currentPage' => 'client-admin.test-incidents',
             'reportDomain' => 'tests',
             'dateFrom' => $dateRange['from'], 'dateTo' => $dateRange['through'],
             'summary' => $data['summary'], 'rows' => $data['rows'],
+            'analysis' => $data['analysis'] ?? [],
             'processIds' => $processIds, 'formIds' => [], 'testIds' => $testIds,
             'filterOptions' => $this->evaluationDashboard->integrityFilterOptions($companyId, 'tests'),
             'isCompanyScope' => true, 'useSelect2' => true,
-        ]);
+        ];
+        if ($isPriorityFragment) {
+            $this->render('evaluaciones_encuestas/dashboard_integrity_priority', $viewData, null);
+            return;
+        }
+        $this->render('evaluaciones_encuestas/dashboard_integrity', $viewData);
     }
 
     public function userLookup(): void

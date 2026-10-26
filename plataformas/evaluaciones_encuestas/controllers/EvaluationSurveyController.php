@@ -39,6 +39,7 @@ final class EvaluationSurveyController extends Controller
             'currentPage' => 'evaluation-surveys.dashboard',
             'summary' => $data['summary'],
             'rows' => $data['rows'],
+            'analysis' => $data['analysis'] ?? [],
             'isCompanyScope' => $companyId !== null,
         ]);
     }
@@ -1380,16 +1381,23 @@ final class EvaluationSurveyController extends Controller
         }
         if ($eventType === 'supervised_started') {
             if ((string) ($attempt['status'] ?? '') === 'preparing') {
-                $proofKey = 'evaluation:' . (int) ($attempt['form_id'] ?? 0) . ':' . (int) ($attempt['process_id'] ?? 0);
-                $proof = $_SESSION['assessment_face_authorizations'][$proofKey] ?? null;
-                if (!is_array($proof) || (int) ($proof['user_id'] ?? 0) !== (int) current_user()['id']
-                    || (int) ($proof['company_id'] ?? 0) !== (int) (current_user()['company_id'] ?? 0)
-                    || (string) ($proof['activity_type'] ?? '') !== 'evaluation'
-                    || (int) ($proof['activity_id'] ?? 0) !== (int) ($attempt['form_id'] ?? 0)
-                    || (int) ($proof['process_id'] ?? 0) !== (int) ($attempt['process_id'] ?? 0)
-                    || (int) ($proof['issued_at'] ?? 0) > time()
-                    || (time() - (int) ($proof['issued_at'] ?? 0)) > 900) {
-                    $this->jsonResponse(['ok' => false, 'message' => 'Debes verificar tu identidad facial antes de iniciar.'], 403); return;
+                $prerequisiteSnapshot = [
+                    'component_validation_required' => (int) ($attempt['process_component_validation_required'] ?? 0),
+                    'require_facial_enrollment' => (int) ($attempt['process_facial_enrollment_required'] ?? 0),
+                ];
+                $requirements = ProcessPrerequisiteService::requirements($prerequisiteSnapshot);
+                if ($requirements['facial_required']) {
+                    $proofKey = 'evaluation:' . (int) ($attempt['form_id'] ?? 0) . ':' . (int) ($attempt['process_id'] ?? 0);
+                    $proof = $_SESSION['assessment_face_authorizations'][$proofKey] ?? null;
+                    if (!is_array($proof) || (int) ($proof['user_id'] ?? 0) !== (int) current_user()['id']
+                        || (int) ($proof['company_id'] ?? 0) !== (int) (current_user()['company_id'] ?? 0)
+                        || (string) ($proof['activity_type'] ?? '') !== 'evaluation'
+                        || (int) ($proof['activity_id'] ?? 0) !== (int) ($attempt['form_id'] ?? 0)
+                        || (int) ($proof['process_id'] ?? 0) !== (int) ($attempt['process_id'] ?? 0)
+                        || (int) ($proof['issued_at'] ?? 0) > time()
+                        || (time() - (int) ($proof['issued_at'] ?? 0)) > 900) {
+                        $this->jsonResponse(['ok' => false, 'message' => 'Debes verificar tu identidad facial antes de iniciar.'], 403); return;
+                    }
                 }
                 $processId = max(0, (int) ($attempt['process_id'] ?? 0));
                 if ($processId > 0) {
@@ -1402,12 +1410,13 @@ final class EvaluationSurveyController extends Controller
                 $companyId = (int) (current_user()['company_id'] ?? 0);
                 $componentReview = $companyId > 0 ? (new ComponentValidationModel())->latestForUser((int) current_user()['id'], $companyId) : null;
                 $facialStatus = $companyId > 0 ? (new FacialRecognitionModel())->enrollmentStatusForUser((int) current_user()['id'], $companyId) : null;
-                $prerequisiteSnapshot = [
-                    'component_validation_required' => (int) ($attempt['process_component_validation_required'] ?? 0),
-                    'require_facial_enrollment' => (int) ($attempt['process_facial_enrollment_required'] ?? 0),
-                ];
                 if (!ProcessPrerequisiteService::isReady($prerequisiteSnapshot, (string) ($componentReview['outcome'] ?? '') === 'passed', $facialStatus === 'active')) {
-                    $this->jsonResponse(['ok' => false, 'message' => 'No se cumplen los requisitos de componentes o enrolamiento del proceso.'], 409);
+                    $missing = ProcessPrerequisiteService::missingLabels(
+                        $prerequisiteSnapshot,
+                        (string) ($componentReview['outcome'] ?? '') === 'passed',
+                        $facialStatus === 'active'
+                    );
+                    $this->jsonResponse(['ok' => false, 'message' => 'Antes de iniciar debes ' . implode(' y ', $missing) . '.'], 409);
                     return;
                 }
                 if ((string) ($attempt['control_mode'] ?? '') === 'supervised_audio_visual') {
