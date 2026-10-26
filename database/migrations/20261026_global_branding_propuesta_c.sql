@@ -2,7 +2,7 @@
 -- Se aplica por separado en cada ambiente; no forma parte del rsync de aplicación.
 INSERT INTO platform_settings (setting_key, setting_value) VALUES
     ('login_title', 'Metricatest'),
-    ('login_subtitle', 'Evalúa el talento. Decide con evidencia.'),
+    ('login_subtitle', CONVERT(X'4576616CC3BA6120656C2074616C656E746F2E2044656369646520636F6E2065766964656E6369612E' USING utf8mb4)),
     ('login_logo_path', 'assets/img/branding/metricatest_logo_login_20260915.svg'),
     ('login_background_path', 'assets/img/branding/et-propuesta-c/login-background.png'),
     ('login_form_position', 'right'),
@@ -17,7 +17,7 @@ ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value);
 -- sobrescriben los globales; mantener ambos niveles alineados evita divergencias.
 INSERT INTO company_branding (company_id, setting_key, setting_value) VALUES
     (4, 'login_title', 'Metricatest'),
-    (4, 'login_subtitle', 'Evalúa el talento. Decide con evidencia.'),
+    (4, 'login_subtitle', CONVERT(X'4576616CC3BA6120656C2074616C656E746F2E2044656369646520636F6E2065766964656E6369612E' USING utf8mb4)),
     (4, 'login_logo_path', 'assets/img/branding/metricatest_logo_login_20260915.svg'),
     (4, 'login_background_path', 'assets/img/branding/et-propuesta-c/login-background.png'),
     (4, 'login_form_position', 'right'),
