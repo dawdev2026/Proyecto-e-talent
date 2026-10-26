@@ -3361,16 +3361,17 @@ final class TestProcessModel
                 LEFT JOIN (
                     SELECT ts.process_id,
                            SUM(CASE WHEN ts.status = "completed" THEN 1 ELSE 0 END) AS completed_sessions,
-                           COUNT(DISTINCT CASE WHEN ta.session_id IS NOT NULL THEN ts.id END) AS answered_sessions,
+                           COUNT(DISTINCT CASE WHEN EXISTS (
+                               SELECT 1
+                               FROM test_answers ta
+                               WHERE ta.session_id = ts.id
+                                 AND ta.answer_value IS NOT NULL
+                                 AND TRIM(ta.answer_value) <> ""
+                           ) THEN ts.id END) AS answered_sessions,
                            SUM(CASE WHEN ts.status = "in_progress" THEN 1 ELSE 0 END) AS in_progress_sessions,
                            SUM(CASE WHEN ts.status = "expired" THEN 1 ELSE 0 END) AS expired_sessions,
                            COUNT(*) AS sessions_count
                     FROM test_sessions ts
-                    LEFT JOIN (
-                        SELECT DISTINCT session_id
-                        FROM test_answers
-                        WHERE answer_value IS NOT NULL AND TRIM(answer_value) <> ""
-                    ) ta ON ta.session_id = ts.id
                     WHERE ts.status <> "cancelled"
                     GROUP BY ts.process_id
                 ) session_summary ON session_summary.process_id = p.id

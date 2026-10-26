@@ -254,7 +254,7 @@ final class EvaluationSurveyDashboardModel
         if (!$includeEvaluations) $eventScopeConditions[] = '1 = 0';
         $eventAttemptScopeSql = 'SELECT DISTINCT a_scope.id FROM evaluation_survey_attempts a_scope JOIN ' . $this->testsSchema . '.test_process_evaluation_assignments pea_scope ON pea_scope.form_id = a_scope.form_id AND pea_scope.user_id = a_scope.user_id AND (a_scope.process_id = pea_scope.process_id OR a_scope.process_id IS NULL) JOIN ' . $this->testsSchema . '.test_processes p_scope ON p_scope.id = pea_scope.process_id JOIN evaluation_survey_forms f_scope ON f_scope.id = pea_scope.form_id JOIN ' . $this->coreSchema . '.users u_scope ON u_scope.id = pea_scope.user_id WHERE ' . implode(' AND ', $eventScopeConditions);
 
-        $rows = $this->db->fetchAll(
+        $rows = $includeEvaluations ? $this->db->fetchAll(
             'SELECT pea.process_id, p.name AS process_name, p.code AS process_code,
                     pea.form_id, f.title AS form_title, pea.user_id, u.rut, u.name AS user_name,
                     u.email AS user_email, a.id AS attempt_id, a.status AS attempt_status,
@@ -280,14 +280,14 @@ final class EvaluationSurveyDashboardModel
                  SELECT attempt_id, COUNT(*) AS total_events,
                         SUM(event_type IN (' . $activityAttentionSql . ')) AS attention_events,
                         SUM(event_type IN (' . $activityRiskSql . ')) AS risk_events,
-                        GROUP_CONCAT(DISTINCT CASE WHEN event_type IN (' . $activityAttentionSql . ',' . $activityRiskSql . ') THEN event_type END ORDER BY event_type SEPARATOR ",") AS event_types
+                        GROUP_CONCAT(DISTINCT CASE WHEN event_type IN (' . $activityAttentionSql . ',' . $activityRiskSql . ') THEN event_type END SEPARATOR ",") AS event_types
                  FROM evaluation_survey_activity_events WHERE created_at >= ? AND created_at < ? AND attempt_id IN (' . $eventAttemptScopeSql . ') GROUP BY attempt_id
              ) act ON act.attempt_id = a.id
              LEFT JOIN (
                  SELECT attempt_id, COUNT(*) AS total_events,
                         SUM(CASE WHEN event_type IN ("multiple_voice_possible","audio_visual_risk","audio_visual_capture_failed","audio_visual_screen_failed","screen_capture_upload_failed","recording_upload_failed","audio_visual_recorder_failed","audio_visual_recorder_error","audio_visual_start_failed","permission_or_recording_failed","audio_visual_upload_failed","finalize_failed") AND severity = "attention" THEN 1 ELSE 0 END) AS attention_events,
                         SUM(CASE WHEN event_type IN ("multiple_voice_possible","audio_visual_risk","audio_visual_capture_failed","audio_visual_screen_failed","screen_capture_upload_failed","recording_upload_failed","audio_visual_recorder_failed","audio_visual_recorder_error","audio_visual_start_failed","permission_or_recording_failed","audio_visual_upload_failed","finalize_failed") AND severity = "risk" THEN 1 ELSE 0 END) AS risk_events,
-                        GROUP_CONCAT(DISTINCT CASE WHEN event_type IN ("multiple_voice_possible","audio_visual_risk","audio_visual_capture_failed","audio_visual_screen_failed","screen_capture_upload_failed","recording_upload_failed","audio_visual_recorder_failed","audio_visual_recorder_error","audio_visual_start_failed","permission_or_recording_failed","audio_visual_upload_failed","finalize_failed") THEN event_type END ORDER BY event_type SEPARATOR ",") AS risk_types
+                        GROUP_CONCAT(DISTINCT CASE WHEN event_type IN ("multiple_voice_possible","audio_visual_risk","audio_visual_capture_failed","audio_visual_screen_failed","screen_capture_upload_failed","recording_upload_failed","audio_visual_recorder_failed","audio_visual_recorder_error","audio_visual_start_failed","permission_or_recording_failed","audio_visual_upload_failed","finalize_failed") THEN event_type END SEPARATOR ",") AS risk_types
                  FROM evaluation_survey_media_risk_events WHERE created_at >= ? AND created_at < ? AND attempt_id IN (' . $eventAttemptScopeSql . ') GROUP BY attempt_id
              ) rsk ON rsk.attempt_id = a.id
              LEFT JOIN evaluation_survey_media_evidence e ON e.attempt_id = a.id
@@ -296,7 +296,7 @@ final class EvaluationSurveyDashboardModel
                       (COALESCE(act.attention_events, 0) + COALESCE(rsk.attention_events, 0)) DESC,
                       p.name ASC, u.name ASC',
             array_merge($dateParams, $eventScopeParams, $dateParams, $eventScopeParams, $params)
-        );
+        ) : [];
 
         // Los tests psicométricos no usan evaluation_survey_attempts: su unidad
         // de seguimiento es la sesión del test y sus eventos viven en tests.
@@ -327,9 +327,6 @@ final class EvaluationSurveyDashboardModel
             $testScopeParams[] = $companyId;
             $testScopeParams[] = $companyId;
         }
-        // La agregación de eventos usa el rango por fecha del evento. Mantener
-        // todas las sesiones del cliente permite contar eventos de sesiones
-        // iniciadas antes del rango.
         if ($processIds) {
             $testScopeConditions[] = 'ts0.process_id IN (' . implode(',', array_fill(0, count($processIds), '?')) . ')';
             array_push($testScopeParams, ...$processIds);
@@ -345,7 +342,7 @@ final class EvaluationSurveyDashboardModel
         $testMediaSignalSql = '"multiple_voice_possible","audio_visual_risk","audio_visual_capture_failed","audio_visual_screen_failed","screen_capture_upload_failed","recording_upload_failed","audio_visual_recorder_failed","audio_visual_recorder_error","audio_visual_start_failed","permission_or_recording_failed","audio_visual_upload_failed","finalize_failed"';
         $testRows = $this->db->fetchAll(
             'SELECT ts.process_id, p.name AS process_name, p.code AS process_code,
-                    0 AS form_id, i.name AS form_title, ts.user_id, u.rut,
+                    0 AS form_id, i.name AS form_title, ts.id AS session_id, ts.user_id, u.rut,
                     u.name AS user_name, u.email AS user_email, NULL AS attempt_id,
                     ts.status AS attempt_status, ts.started_at AS attempt_started_at,
                     NULL AS final_score, ts.completed_at, ts.updated_at,
@@ -365,20 +362,22 @@ final class EvaluationSurveyDashboardModel
                  SELECT session_id, COUNT(*) AS total_events,
                         SUM(event_type IN (' . $testActivityAttentionSql . ')) AS attention_events,
                         SUM(event_type IN (' . $testActivityRiskSql . ')) AS risk_events,
-                        GROUP_CONCAT(DISTINCT CASE WHEN event_type IN (' . $testActivityAttentionSql . ',' . $testActivityRiskSql . ') THEN event_type END ORDER BY event_type SEPARATOR ",") AS event_types
-                 FROM ' . $this->testsSchema . '.test_activity_events tae
+                        GROUP_CONCAT(DISTINCT CASE WHEN event_type IN (' . $testActivityAttentionSql . ',' . $testActivityRiskSql . ') THEN event_type END SEPARATOR ",") AS event_types
+                 FROM ' . $this->testsSchema . '.test_activity_events tae FORCE INDEX (idx_test_activity_session)
                  JOIN (' . $testSessionScopeSql . ') scoped_sessions ON scoped_sessions.id = tae.session_id
                  WHERE tae.created_at >= ? AND tae.created_at < ?
+                   AND tae.event_type IN (' . $testActivityAttentionSql . ',' . $testActivityRiskSql . ')
                  GROUP BY session_id
              ) act ON act.session_id = ts.id
              LEFT JOIN (
                  SELECT session_id, COUNT(*) AS total_events,
                         SUM(CASE WHEN event_type IN (' . $testMediaSignalSql . ') AND severity = "attention" THEN 1 ELSE 0 END) AS attention_events,
                         SUM(CASE WHEN event_type IN (' . $testMediaSignalSql . ') AND severity = "risk" THEN 1 ELSE 0 END) AS risk_events,
-                        GROUP_CONCAT(DISTINCT CASE WHEN event_type IN (' . $testMediaSignalSql . ') THEN event_type END ORDER BY event_type SEPARATOR ",") AS risk_types
-                 FROM ' . $this->testsSchema . '.test_audio_visual_risk_events tar
+                        GROUP_CONCAT(DISTINCT CASE WHEN event_type IN (' . $testMediaSignalSql . ') THEN event_type END SEPARATOR ",") AS risk_types
+                 FROM ' . $this->testsSchema . '.test_audio_visual_risk_events tar FORCE INDEX (idx_test_av_risk_session)
                  JOIN (' . $testSessionScopeSql . ') scoped_sessions ON scoped_sessions.id = tar.session_id
                  WHERE tar.created_at >= ? AND tar.created_at < ?
+                   AND tar.event_type IN (' . $testMediaSignalSql . ')
                  GROUP BY session_id
              ) rsk ON rsk.session_id = ts.id
              LEFT JOIN ' . $this->testsSchema . '.test_media_evidence ev
@@ -439,6 +438,207 @@ final class EvaluationSurveyDashboardModel
         unset($row);
         $analysis['person_levels'] = $analysis['person_levels'] ?? [];
         return ['summary' => $summary, 'rows' => $rows, 'analysis' => $analysis];
+    }
+
+    /**
+     * Fast screen payload for the tests report. It keeps the complete
+     * population in SQL aggregates and loads only the first priority page.
+     */
+    public function integrityTestsScreen(?int $companyId, ?array $processIds, ?array $testIds, string $dateFrom, string $dateUntil, int $limit = 25, int $offset = 0): array
+    {
+        return $this->integrityTestsScreenFast($companyId, $processIds, $testIds, $dateFrom, $dateUntil, $limit, $offset);
+        /* Legacy prototype retained below for traceability; the screen uses
+           the bounded query above and exports use integrityReport().
+        $processIds = $this->positiveIds($processIds);
+        $testIds = $this->positiveIds($testIds);
+        $scope = ['ts.process_id IS NOT NULL', 'ts.status <> "cancelled"'];
+        $params = [];
+        if ($companyId && $companyId > 0) {
+            $scope[] = 'p.company_id = ? AND u.company_id = ?';
+            array_push($params, $companyId, $companyId);
+        }
+        $scope[] = '(COALESCE(ts.started_at, ts.created_at) >= ? AND COALESCE(ts.started_at, ts.created_at) < ? OR EXISTS (SELECT 1 FROM ' . $this->testsSchema . '.test_activity_events tae WHERE tae.session_id = ts.id AND tae.created_at >= ? AND tae.created_at < ?) OR EXISTS (SELECT 1 FROM ' . $this->testsSchema . '.test_audio_visual_risk_events tar WHERE tar.session_id = ts.id AND tar.created_at >= ? AND tar.created_at < ?))';
+        array_push($params, $dateFrom, $dateUntil, $dateFrom, $dateUntil, $dateFrom, $dateUntil);
+        if ($processIds) { $scope[] = 'ts.process_id IN (' . implode(',', array_fill(0, count($processIds), '?')) . ')'; array_push($params, ...$processIds); }
+        if ($testIds) { $scope[] = 'ts.instrument_id IN (' . implode(',', array_fill(0, count($testIds), '?')) . ')'; array_push($params, ...$testIds); }
+        $base = implode(' AND ', $scope);
+        $activitySignals = '"tab_hidden","window_blurred","fullscreen_exited","fullscreen_failed","fullscreen_denied","fullscreen_unavailable","inactive_detected","copy_blocked","cut_blocked","paste_blocked","print_blocked","context_menu_blocked","drag_blocked","suspicious_key_printscreen","suspicious_key_print","suspicious_key_save","suspicious_key_copy","suspicious_key_devtools"';
+        $attentionSignals = '"tab_hidden","window_blurred","fullscreen_exited","fullscreen_failed","fullscreen_denied","fullscreen_unavailable","inactive_detected","copy_blocked","cut_blocked","paste_blocked","print_blocked","context_menu_blocked","drag_blocked"';
+        $riskSignals = '"suspicious_key_printscreen","suspicious_key_print","suspicious_key_save","suspicious_key_copy","suspicious_key_devtools"';
+        $mediaSignals = '"multiple_voice_possible","audio_visual_risk","audio_visual_capture_failed","audio_visual_screen_failed","screen_capture_upload_failed","recording_upload_failed","audio_visual_recorder_failed","audio_visual_recorder_error","audio_visual_start_failed","permission_or_recording_failed","audio_visual_upload_failed","finalize_failed"';
+        $scopedSessions = 'SELECT ts.id FROM ' . $this->testsSchema . '.test_sessions ts JOIN ' . $this->testsSchema . '.test_processes p ON p.id = ts.process_id JOIN ' . $this->coreSchema . '.users u ON u.id = ts.user_id WHERE ' . $base;
+        $activityParams = array_merge($params, [$dateFrom, $dateUntil]);
+        $mediaParams = array_merge($params, [$dateFrom, $dateUntil]);
+        $rows = $this->db->fetchAll(
+            'SELECT ts.process_id, p.name AS process_name, p.code AS process_code, 0 AS form_id,
+                    i.name AS form_title, ts.id AS session_id, ts.user_id, u.rut,
+                    u.name AS user_name, u.email AS user_email, NULL AS attempt_id,
+                    ts.status AS attempt_status, ts.started_at AS attempt_started_at,
+                    NULL AS final_score, ts.completed_at, ts.updated_at,
+                    COALESCE(act.total_events, 0) AS activity_events_total,
+                    COALESCE(act.attention_events, 0) AS activity_attention_total,
+                    COALESCE(act.risk_events, 0) AS activity_risk_total,
+                    act.event_types, COALESCE(rsk.total_events, 0) AS media_risk_events_total,
+                    COALESCE(rsk.attention_events, 0) AS media_attention_total,
+                    COALESCE(rsk.risk_events, 0) AS media_risk_total,
+                    rsk.risk_types, ev.status AS evidence_status,
+                    ev.failure_code AS evidence_failure_code
+             FROM ' . $this->testsSchema . '.test_sessions ts
+             JOIN ' . $this->testsSchema . '.test_processes p ON p.id = ts.process_id
+             JOIN ' . $this->testsSchema . '.test_instruments i ON i.id = ts.instrument_id
+             JOIN ' . $this->coreSchema . '.users u ON u.id = ts.user_id
+             LEFT JOIN (
+                 SELECT a.session_id, COUNT(*) AS total_events,
+                        SUM(a.event_type IN (' . $attentionSignals . ')) AS attention_events,
+                        SUM(a.event_type IN (' . $riskSignals . ')) AS risk_events,
+                        GROUP_CONCAT(DISTINCT a.event_type SEPARATOR ",") AS event_types
+                 FROM ' . $this->testsSchema . '.test_activity_events a FORCE INDEX (idx_test_activity_session)
+                 JOIN (' . $scopedSessions . ') scoped ON scoped.id = a.session_id
+                 WHERE a.created_at >= ? AND a.created_at < ?
+                   AND a.event_type IN (' . $activitySignals . ')
+                 GROUP BY a.session_id
+             ) act ON act.session_id = ts.id
+             LEFT JOIN (
+                 SELECT m.session_id, COUNT(*) AS total_events,
+                        SUM(m.severity = "attention") AS attention_events,
+                        SUM(m.severity = "risk") AS risk_events,
+                        GROUP_CONCAT(DISTINCT m.event_type SEPARATOR ",") AS risk_types
+                 FROM ' . $this->testsSchema . '.test_audio_visual_risk_events m FORCE INDEX (idx_test_av_risk_session)
+                 JOIN (' . $scopedSessions . ') scoped ON scoped.id = m.session_id
+                 WHERE m.created_at >= ? AND m.created_at < ?
+                   AND m.event_type IN (' . $mediaSignals . ')
+                 GROUP BY m.session_id
+             ) rsk ON rsk.session_id = ts.id
+             LEFT JOIN (
+                 SELECT ev0.session_id, MAX(ev0.id) AS latest_id
+                 FROM ' . $this->testsSchema . '.test_media_evidence ev0
+                 GROUP BY ev0.session_id
+             ) latest_ev ON latest_ev.session_id = ts.id
+             LEFT JOIN ' . $this->testsSchema . '.test_media_evidence ev ON ev.id = latest_ev.latest_id
+             WHERE ' . $base . '
+             ORDER BY (COALESCE(act.risk_events, 0) + COALESCE(rsk.risk_events, 0)) DESC,
+                      (COALESCE(act.attention_events, 0) + COALESCE(rsk.attention_events, 0)) DESC,
+                      p.name ASC, u.name ASC',
+            array_merge($activityParams, $mediaParams, $params)
+        );
+        $summary = ['assigned_people' => count($rows), 'distinct_assigned_people' => count(array_unique(array_filter(array_column($rows, 'user_id')))), 'attempted_people' => 0, 'finished_people' => 0, 'expired_people' => 0, 'people_with_incidents' => 0, 'review_cases' => 0, 'high_alert_cases' => 0, 'activity_events' => 0, 'media_events' => 0];
+        foreach ($rows as &$row) {
+            $activityRisk = (int) ($row['activity_risk_total'] ?? 0);
+            $mediaRisk = (int) ($row['media_risk_total'] ?? 0);
+            $attention = (int) ($row['activity_attention_total'] ?? 0) + (int) ($row['media_attention_total'] ?? 0);
+            $technicalFailure = in_array((string) ($row['evidence_status'] ?? ''), ['failed', 'partial', 'not_supported', 'not_consented'], true) || (string) ($row['evidence_failure_code'] ?? '') !== '';
+            $row['incident_total'] = (int) ($row['activity_events_total'] ?? 0) + (int) ($row['media_risk_events_total'] ?? 0) + ($technicalFailure ? 1 : 0);
+            $row['signal_types'] = array_values(array_unique(array_filter(array_merge(explode(',', (string) ($row['event_types'] ?? '')), explode(',', (string) ($row['risk_types'] ?? '')), $technicalFailure ? ['evidence_' . ($row['evidence_status'] ?: 'failure')] : []))));
+            $summary['attempted_people'] += in_array((string) ($row['attempt_status'] ?? ''), ['in_progress', 'completed', 'expired'], true) ? 1 : 0;
+            $summary['finished_people'] += (string) ($row['attempt_status'] ?? '') === 'completed' ? 1 : 0;
+            $summary['expired_people'] += (string) ($row['attempt_status'] ?? '') === 'expired' ? 1 : 0;
+            $summary['people_with_incidents'] += $row['incident_total'] > 0 ? 1 : 0;
+            $summary['activity_events'] += (int) ($row['activity_events_total'] ?? 0);
+            $summary['media_events'] += (int) ($row['media_risk_events_total'] ?? 0);
+            $row['alert_level'] = ($activityRisk + $mediaRisk) > 0 ? 'high' : (($attention > 0 || $technicalFailure) ? 'review' : 'none');
+        }
+        unset($row);
+        $analysis = $this->buildIntegrityAnalysis($rows, $summary);
+        $summary['review_cases'] = 0;
+        $summary['high_alert_cases'] = 0;
+        foreach ($rows as &$row) {
+            $personLevel = (string) ($analysis['person_levels'][(string) ($row['user_id'] ?? '')] ?? 'technical');
+            $row['alert_level'] = ($row['incident_total'] ?? 0) <= 0 ? 'none' : ($personLevel === 'high' ? 'high' : 'review');
+            $summary['review_cases'] += $row['alert_level'] === 'review' ? 1 : 0;
+            $summary['high_alert_cases'] += $row['alert_level'] === 'high' ? 1 : 0;
+        }
+        unset($row);
+        $analysis['person_levels'] = $analysis['person_levels'] ?? [];
+        */
+        return ['summary' => $summary, 'rows' => $rows, 'analysis' => $analysis];
+    }
+
+    /**
+     * Screen-only query: computes the complete session universe once, then
+     * loads only the visible priority page. Exports keep integrityReport().
+     */
+    public function integrityTestsScreenFast(?int $companyId, ?array $processIds, ?array $testIds, string $dateFrom, string $dateUntil, int $limit = 25, int $offset = 0, bool $includeTrend = true): array
+    {
+        $processIds = $this->positiveIds($processIds);
+        $testIds = $this->positiveIds($testIds);
+        $scope = ['ts.process_id IS NOT NULL', 'ts.status <> "cancelled"'];
+        $params = [];
+        if ($companyId && $companyId > 0) {
+            $scope[] = 'p.company_id = ? AND u.company_id = ?';
+            array_push($params, $companyId, $companyId);
+        }
+        $scope[] = '(COALESCE(ts.started_at, ts.created_at) >= ? AND COALESCE(ts.started_at, ts.created_at) < ? OR EXISTS (SELECT 1 FROM ' . $this->testsSchema . '.test_activity_events se_a WHERE se_a.session_id = ts.id AND se_a.created_at >= ? AND se_a.created_at < ?) OR EXISTS (SELECT 1 FROM ' . $this->testsSchema . '.test_audio_visual_risk_events se_m WHERE se_m.session_id = ts.id AND se_m.created_at >= ? AND se_m.created_at < ?))';
+        array_push($params, $dateFrom, $dateUntil, $dateFrom, $dateUntil, $dateFrom, $dateUntil);
+        if ($processIds) { $scope[] = 'ts.process_id IN (' . implode(',', array_fill(0, count($processIds), '?')) . ')'; array_push($params, ...$processIds); }
+        if ($testIds) { $scope[] = 'ts.instrument_id IN (' . implode(',', array_fill(0, count($testIds), '?')) . ')'; array_push($params, ...$testIds); }
+        $base = implode(' AND ', $scope);
+        $activitySignals = '"tab_hidden","window_blurred","fullscreen_exited","fullscreen_failed","fullscreen_denied","fullscreen_unavailable","inactive_detected","copy_blocked","cut_blocked","paste_blocked","print_blocked","context_menu_blocked","drag_blocked","suspicious_key_printscreen","suspicious_key_print","suspicious_key_save","suspicious_key_copy","suspicious_key_devtools"';
+        $mediaSignals = '"multiple_voice_possible","audio_visual_risk","audio_visual_capture_failed","audio_visual_screen_failed","screen_capture_upload_failed","recording_upload_failed","audio_visual_recorder_failed","audio_visual_recorder_error","audio_visual_start_failed","permission_or_recording_failed","audio_visual_upload_failed","finalize_failed"';
+        $incident = '(EXISTS (SELECT 1 FROM ' . $this->testsSchema . '.test_activity_events ia WHERE ia.session_id = ts.id AND ia.created_at >= ? AND ia.created_at < ? AND ia.event_type IN (' . $activitySignals . ')) OR EXISTS (SELECT 1 FROM ' . $this->testsSchema . '.test_audio_visual_risk_events im WHERE im.session_id = ts.id AND im.created_at >= ? AND im.created_at < ? AND im.event_type IN (' . $mediaSignals . ')) OR EXISTS (SELECT 1 FROM ' . $this->testsSchema . '.test_media_evidence ie WHERE ie.session_id = ts.id AND (ie.status IN ("failed","partial","not_supported","not_consented") OR COALESCE(ie.failure_code, "") <> "")))';
+        $incidentParams = [$dateFrom, $dateUntil, $dateFrom, $dateUntil];
+        $summaryRow = $this->db->fetch(
+            'SELECT COUNT(*) AS assigned_people,
+                    COUNT(DISTINCT ts.user_id) AS distinct_assigned_people,
+                    SUM(' . $incident . ') AS people_with_incidents,
+                    SUM(ts.status IN ("in_progress","completed","expired")) AS attempted_people,
+                    SUM(ts.status = "completed") AS finished_people,
+                    SUM(ts.status = "expired") AS expired_people
+             FROM ' . $this->testsSchema . '.test_sessions ts
+             JOIN ' . $this->testsSchema . '.test_processes p ON p.id = ts.process_id
+             JOIN ' . $this->coreSchema . '.users u ON u.id = ts.user_id
+             WHERE ' . $base,
+            array_merge($incidentParams, $params)
+        );
+        $summary = ['assigned_people' => (int) ($summaryRow['assigned_people'] ?? 0), 'distinct_assigned_people' => (int) ($summaryRow['distinct_assigned_people'] ?? 0), 'attempted_people' => (int) ($summaryRow['attempted_people'] ?? 0), 'finished_people' => (int) ($summaryRow['finished_people'] ?? 0), 'expired_people' => (int) ($summaryRow['expired_people'] ?? 0), 'people_with_incidents' => (int) ($summaryRow['people_with_incidents'] ?? 0), 'review_cases' => 0, 'high_alert_cases' => 0, 'activity_events' => 0, 'media_events' => 0];
+        $trend = [];
+        if ($includeTrend) foreach ($this->db->fetchAll(
+            'SELECT DATE(COALESCE(ts.started_at, ts.created_at)) AS day, COUNT(*) AS total
+             FROM ' . $this->testsSchema . '.test_sessions ts
+             JOIN ' . $this->testsSchema . '.test_processes p ON p.id = ts.process_id
+             JOIN ' . $this->coreSchema . '.users u ON u.id = ts.user_id
+             WHERE ' . $base . ' AND ' . $incident . '
+             GROUP BY DATE(COALESCE(ts.started_at, ts.created_at)) ORDER BY day ASC',
+            array_merge($params, $incidentParams)
+        ) as $point) $trend[(string) $point['day']] = (int) $point['total'];
+        $summary['review_cases'] = $summary['people_with_incidents'];
+        $rows = $this->db->fetchAll(
+            'SELECT ts.process_id, p.name AS process_name, p.code AS process_code,
+                    0 AS form_id, i.name AS form_title, ts.id AS session_id, ts.user_id,
+                    u.rut, u.name AS user_name, u.email AS user_email, NULL AS attempt_id,
+                    ts.status AS attempt_status, ts.started_at AS attempt_started_at,
+                    NULL AS final_score, ts.completed_at, ts.updated_at,
+                    ev.status AS evidence_status, ev.failure_code AS evidence_failure_code
+             FROM ' . $this->testsSchema . '.test_sessions ts
+             JOIN ' . $this->testsSchema . '.test_processes p ON p.id = ts.process_id
+             JOIN ' . $this->testsSchema . '.test_instruments i ON i.id = ts.instrument_id
+             JOIN ' . $this->coreSchema . '.users u ON u.id = ts.user_id
+             LEFT JOIN ' . $this->testsSchema . '.test_media_evidence ev ON ev.id = (SELECT MAX(ev0.id) FROM ' . $this->testsSchema . '.test_media_evidence ev0 WHERE ev0.session_id = ts.id)
+             WHERE ' . $base . ' AND ' . $incident . '
+             ORDER BY ts.updated_at DESC, p.name ASC, u.name ASC
+             LIMIT ' . max(1, $limit) . ' OFFSET ' . max(0, $offset),
+            array_merge($params, $incidentParams)
+        );
+        $sessionIds = array_values(array_filter(array_map(static fn(array $row): int => (int) ($row['session_id'] ?? 0), $rows)));
+        $activityDetails = [];
+        $mediaDetails = [];
+        if ($sessionIds) {
+            $placeholders = implode(',', array_fill(0, count($sessionIds), '?'));
+            foreach ($this->db->fetchAll('SELECT session_id, COUNT(*) AS total_events, GROUP_CONCAT(DISTINCT event_type SEPARATOR ",") AS event_types FROM ' . $this->testsSchema . '.test_activity_events WHERE session_id IN (' . $placeholders . ') AND created_at >= ? AND created_at < ? AND event_type IN (' . $activitySignals . ') GROUP BY session_id', array_merge($sessionIds, [$dateFrom, $dateUntil])) as $detail) $activityDetails[(int) $detail['session_id']] = $detail;
+            foreach ($this->db->fetchAll('SELECT session_id, COUNT(*) AS total_events, GROUP_CONCAT(DISTINCT event_type SEPARATOR ",") AS risk_types FROM ' . $this->testsSchema . '.test_audio_visual_risk_events WHERE session_id IN (' . $placeholders . ') AND created_at >= ? AND created_at < ? AND event_type IN (' . $mediaSignals . ') GROUP BY session_id', array_merge($sessionIds, [$dateFrom, $dateUntil])) as $detail) $mediaDetails[(int) $detail['session_id']] = $detail;
+        }
+        foreach ($rows as &$row) {
+            $technicalFailure = in_array((string) ($row['evidence_status'] ?? ''), ['failed', 'partial', 'not_supported', 'not_consented'], true) || (string) ($row['evidence_failure_code'] ?? '') !== '';
+            $sessionId = (int) ($row['session_id'] ?? 0);
+            $activity = $activityDetails[$sessionId] ?? [];
+            $media = $mediaDetails[$sessionId] ?? [];
+            $row['event_types'] = (string) ($activity['event_types'] ?? '');
+            $row['risk_types'] = (string) ($media['risk_types'] ?? '');
+            $row['incident_total'] = (int) ($activity['total_events'] ?? 0) + (int) ($media['total_events'] ?? 0) + ($technicalFailure ? 1 : 0);
+            $row['alert_level'] = 'review';
+            $row['signal_types'] = array_values(array_unique(array_filter(array_merge(explode(',', (string) ($row['event_types'] ?? '')), explode(',', (string) ($row['risk_types'] ?? '')), $technicalFailure ? ['evidence_' . ($row['evidence_status'] ?: 'failure')] : []))));
+        }
+        unset($row);
+        return ['summary' => $summary, 'rows' => $rows, 'analysis' => ['trend' => $trend]];
     }
 
     public function integrityFilterOptions(?int $companyId = null, string $domain = 'both'): array

@@ -91,9 +91,41 @@ final class TestMediaEvidenceModel
         ', [$sessionId]);
     }
 
+    public function riskCountForSession(int $sessionId): int
+    {
+        $row = $this->db->fetch('SELECT COUNT(*) AS total FROM test_audio_visual_risk_events WHERE session_id = ?', [$sessionId]);
+        return (int) ($row['total'] ?? 0);
+    }
+
+    public function risksForSessionPage(int $sessionId, int $page, int $perPage = 10): array
+    {
+        $perPage = max(1, min(50, $perPage));
+        $page = max(1, $page);
+        return $this->db->fetchAll(
+            'SELECT event_type, created_at, severity FROM test_audio_visual_risk_events WHERE session_id = ? ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?',
+            [$sessionId, $perPage, ($page - 1) * $perPage]
+        );
+    }
+
     public function screenCapturesForSession(int $sessionId): array
     {
         return $this->db->fetchAll('SELECT * FROM test_screen_captures WHERE session_id=? ORDER BY evidence_id ASC, capture_number ASC', [$sessionId]);
+    }
+
+    public function screenCaptureCountForSession(int $sessionId): int
+    {
+        $row = $this->db->fetch('SELECT COUNT(*) AS total FROM test_screen_captures WHERE session_id = ?', [$sessionId]);
+        return (int) ($row['total'] ?? 0);
+    }
+
+    public function screenCapturesForSessionPage(int $sessionId, int $page, int $perPage = 10): array
+    {
+        $perPage = max(1, min(50, $perPage));
+        $page = max(1, $page);
+        return $this->db->fetchAll(
+            'SELECT id, evidence_id, capture_source, capture_number, captured_at FROM test_screen_captures WHERE session_id = ? ORDER BY evidence_id ASC, capture_number ASC, id ASC LIMIT ? OFFSET ?',
+            [$sessionId, $perPage, ($page - 1) * $perPage]
+        );
     }
 
     public function uploadScreenCapture(int $sessionId, int $userId, int $evidenceId, string $source, int $captureNumber, array $file, ?int $itemId, ?int $blockNumber, string $eventType): array
