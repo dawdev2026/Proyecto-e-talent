@@ -3,4 +3,11 @@ DirectoryIndex router.php
 RewriteEngine On
 
 RewriteRule ^router\.php$ - [L]
+
+# Servir directamente los recursos estaticos existentes. Las imagenes de
+# branding no deben pasar por router.php ni ser interpretadas como rutas PHP.
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+
 RewriteRule ^.*$ router.php [L]
