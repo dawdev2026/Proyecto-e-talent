@@ -1180,16 +1180,21 @@ final class TestController extends Controller
                 return;
             }
             if ((string) ($session['status'] ?? '') === 'assigned' && !has_permission('manage_tests')) {
-                $proofKey = 'test:' . $id;
-                $proof = $_SESSION['assessment_face_authorizations'][$proofKey] ?? null;
-                if (!is_array($proof) || (int) ($proof['user_id'] ?? 0) !== $userId
-                    || (int) ($proof['company_id'] ?? 0) !== (int) (current_user()['company_id'] ?? 0)
-                    || (string) ($proof['activity_type'] ?? '') !== 'test_session'
-                    || (int) ($proof['activity_id'] ?? 0) !== $id
-                    || (int) ($proof['issued_at'] ?? 0) > time()
-                    || (time() - (int) ($proof['issued_at'] ?? 0)) > 900) {
-                    $this->jsonResponse(['ok' => false, 'message' => 'Debes verificar tu identidad facial antes de iniciar.'], 403); return;
+                $requirements = ProcessPrerequisiteService::requirements($session);
+                if ($requirements['facial_required']) {
+                    $proofKey = 'test:' . $id;
+                    $proof = $_SESSION['assessment_face_authorizations'][$proofKey] ?? null;
+                    if (!is_array($proof) || (int) ($proof['user_id'] ?? 0) !== $userId
+                        || (int) ($proof['company_id'] ?? 0) !== (int) (current_user()['company_id'] ?? 0)
+                        || (string) ($proof['activity_type'] ?? '') !== 'test_session'
+                        || (int) ($proof['activity_id'] ?? 0) !== $id
+                        || (int) ($proof['issued_at'] ?? 0) > time()
+                        || (time() - (int) ($proof['issued_at'] ?? 0)) > 900) {
+                        $this->jsonResponse(['ok' => false, 'message' => 'Debes verificar tu identidad facial antes de iniciar.'], 403); return;
+                    }
                 }
+            }
+            if ((string) ($session['status'] ?? '') === 'assigned' && !has_permission('manage_tests')) {
                 $availability = $this->sessions->availabilityForSession($session);
                 if (empty($availability['allowed'])) {
                     $this->jsonResponse(['ok' => false, 'message' => (string) ($availability['message'] ?? 'El proceso ya no está disponible.')], 409);
@@ -1199,7 +1204,15 @@ final class TestController extends Controller
                 $componentReview = $companyId > 0 ? (new ComponentValidationModel())->latestForUser($userId, $companyId) : null;
                 $facialStatus = $companyId > 0 ? (new FacialRecognitionModel())->enrollmentStatusForUser($userId, $companyId) : null;
                 if (!ProcessPrerequisiteService::isReady($session, (string) ($componentReview['outcome'] ?? '') === 'passed', $facialStatus === 'active')) {
-                    $this->jsonResponse(['ok' => false, 'message' => 'No se cumplen los requisitos de componentes o enrolamiento del proceso.'], 409);
+                    $missing = ProcessPrerequisiteService::missingLabels(
+                        $session,
+                        (string) ($componentReview['outcome'] ?? '') === 'passed',
+                        $facialStatus === 'active'
+                    );
+                    $this->jsonResponse([
+                        'ok' => false,
+                        'message' => 'Antes de iniciar debes ' . implode(' y ', $missing) . '.',
+                    ], 409);
                     return;
                 }
             }
@@ -1542,6 +1555,7 @@ final class TestController extends Controller
     public function result(): void
     {
         require_auth();
+        $isDrawer = !empty($_GET['drawer']);
 
         $id = request_secure_id('test_session');
         $isOwnSession = false;
@@ -1569,8 +1583,39 @@ final class TestController extends Controller
             $this->mediaEvidence->auditAdminAccess($id, (int) (current_user()['id'] ?? 0), 'result_viewed');
         }
 
+        $drawerFragment = (string) ($_GET['drawer_fragment'] ?? '');
+        if ($isDrawer && !$isOwnSession && has_result_access() && in_array($drawerFragment, ['activity', 'media', 'captures'], true)) {
+            $perPage = 10;
+            $activityPage = max(1, (int) ($_GET['activity_page'] ?? 1));
+            $mediaPage = max(1, (int) ($_GET['media_page'] ?? 1));
+            $capturesPage = max(1, (int) ($_GET['captures_page'] ?? 1));
+            $fragmentData = [
+                'session' => $session,
+                'activityPage' => $activityPage,
+                'mediaPage' => $mediaPage,
+                'capturesPage' => $capturesPage,
+                'drawerPerPage' => $perPage,
+            ];
+            if ($drawerFragment === 'activity') {
+                $fragmentData['activityEvents'] = $this->sessions->activityForSessionPage($id, $activityPage, $perPage);
+                $fragmentData['activityTotal'] = $this->sessions->activityCountForSession($id);
+                $this->render('tests/result_drawer_activity', $fragmentData, null);
+                return;
+            }
+            if ($drawerFragment === 'media') {
+                $fragmentData['audioVisualRisks'] = $this->mediaEvidence->risksForSessionPage($id, $mediaPage, $perPage);
+                $fragmentData['audioVisualRiskTotal'] = $this->mediaEvidence->riskCountForSession($id);
+                $this->render('tests/result_drawer_media', $fragmentData, null);
+                return;
+            }
+            $fragmentData['screenCaptures'] = $this->mediaEvidence->screenCapturesForSessionPage($id, $capturesPage, $perPage);
+            $fragmentData['screenCaptureTotal'] = $this->mediaEvidence->screenCaptureCountForSession($id);
+            $this->render('tests/result_drawer_captures', $fragmentData, null);
+            return;
+        }
+
         $summary = $this->sessions->summaryForSession($id);
-        if (!$summary && $session['status'] === 'expired') {
+        if (!$summary && $session['status'] === 'expired' && !$isDrawer) {
             $summary = $this->sessions->complete($id, [], 'expired');
             $session = $this->sessions->findForUser($id, (int) current_user()['id']);
             if (!$session && has_result_access()) {
@@ -1578,7 +1623,38 @@ final class TestController extends Controller
             }
         }
 
-        $this->render('tests/result', [
+        $activityEvents = [];
+        $mediaEvidence = null;
+        $mediaEvidences = [];
+        $audioVisualRisks = [];
+        $screenCaptures = [];
+        $drawerData = [];
+        if ($isDrawer && has_result_access() && !$isOwnSession) {
+            $perPage = 10;
+            $activityPage = max(1, (int) ($_GET['activity_page'] ?? 1));
+            $mediaPage = max(1, (int) ($_GET['media_page'] ?? 1));
+            $capturesPage = max(1, (int) ($_GET['captures_page'] ?? 1));
+            $activityEvents = $this->sessions->activityForSessionPage($id, $activityPage, $perPage);
+            $audioVisualRisks = $this->mediaEvidence->risksForSessionPage($id, $mediaPage, $perPage);
+            $screenCaptures = $this->mediaEvidence->screenCapturesForSessionPage($id, $capturesPage, $perPage);
+            $drawerData = [
+                'activityTotal' => $this->sessions->activityCountForSession($id),
+                'activityPage' => $activityPage,
+                'audioVisualRiskTotal' => $this->mediaEvidence->riskCountForSession($id),
+                'mediaPage' => $mediaPage,
+                'screenCaptureTotal' => $this->mediaEvidence->screenCaptureCountForSession($id),
+                'capturesPage' => $capturesPage,
+                'drawerPerPage' => $perPage,
+            ];
+        } else {
+            $activityEvents = has_result_access() ? $this->sessions->activityForSession($id) : [];
+            $mediaEvidence = has_result_access() && !$isOwnSession ? $this->mediaEvidence->evidenceForSession($id) : null;
+            $mediaEvidences = has_result_access() && !$isOwnSession ? $this->mediaEvidence->evidencesForSession($id) : [];
+            $audioVisualRisks = has_result_access() && !$isOwnSession ? $this->mediaEvidence->risksForSession($id) : [];
+            $screenCaptures = has_result_access() && !$isOwnSession ? $this->mediaEvidence->screenCapturesForSession($id) : [];
+        }
+
+        $resultData = array_merge([
             'title' => 'Resultado evaluacion | e-talent',
             'currentPage' => has_result_access() ? 'tests' : 'my-tests',
             'session' => $session,
@@ -1586,12 +1662,14 @@ final class TestController extends Controller
             'riasecResult' => $this->riasecRecommendations->buildForSession($session, $summary),
             'resultContext' => $this->sessions->resultContext($id),
             'answeredItems' => $this->sessions->resultAnswerItemsForSession($id),
-            'activityEvents' => has_result_access() ? $this->sessions->activityForSession($id) : [],
-            'mediaEvidence' => has_result_access() && !$isOwnSession ? $this->mediaEvidence->evidenceForSession($id) : null,
-            'mediaEvidences' => has_result_access() && !$isOwnSession ? $this->mediaEvidence->evidencesForSession($id) : [],
-            'audioVisualRisks' => has_result_access() && !$isOwnSession ? $this->mediaEvidence->risksForSession($id) : [],
-            'screenCaptures' => has_result_access() && !$isOwnSession ? $this->mediaEvidence->screenCapturesForSession($id) : [],
-        ]);
+            'activityEvents' => $activityEvents,
+            'mediaEvidence' => $mediaEvidence,
+            'mediaEvidences' => $mediaEvidences,
+            'audioVisualRisks' => $audioVisualRisks,
+            'screenCaptures' => $screenCaptures,
+        ], $drawerData);
+
+        $this->render($isDrawer ? 'tests/result_drawer' : 'tests/result', $resultData, $isDrawer ? null : 'app');
     }
 
     public function userResults(): void

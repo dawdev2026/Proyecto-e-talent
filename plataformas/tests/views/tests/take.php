@@ -237,7 +237,8 @@ if (!function_exists('test_choice_marker')) {
             data-expired-message="<?= e($evaluationMessages['expired_message']) ?>"
         >
         <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>">
-        <?php if ($assessmentEntryFlow): ?>
+        <?php if ($assessmentEntryFlow && $assessmentNeedsActivation): ?>
+            <div data-assessment-preparation-chrome>
             <header class="assessment-preparation-heading">
                 <p class="dashboard-kicker mb-2">Preparación de actividad</p>
                 <h1 class="h2 fw-bold mb-2" id="assessmentPreparationTitle">Antes de comenzar el test</h1>
@@ -252,6 +253,7 @@ if (!function_exists('test_choice_marker')) {
                 <input type="hidden" name="face_liveness" value="0">
             <?php endif; ?>
             <?php include PLATAFORMAS_PATH . '/core/views/partials/assessment_stepper.php'; ?>
+            </div>
         <?php endif; ?>
         <?php if ($assessmentNeedsActivation): ?>
             <section class="supervised-gate assessment-preparation-page" data-assessment-wizard aria-labelledby="assessmentPreparationTitle">

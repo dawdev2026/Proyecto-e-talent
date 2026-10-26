@@ -1103,6 +1103,30 @@ final class TestSessionModel
         ', [$sessionId]);
     }
 
+    public function activityCountForSession(int $sessionId): int
+    {
+        if (!$this->hasActivityEventsTable()) {
+            return 0;
+        }
+
+        $row = $this->db->fetch('SELECT COUNT(*) AS total FROM test_activity_events WHERE session_id = ?', [$sessionId]);
+        return (int) ($row['total'] ?? 0);
+    }
+
+    public function activityForSessionPage(int $sessionId, int $page, int $perPage = 10): array
+    {
+        if (!$this->hasActivityEventsTable()) {
+            return [];
+        }
+
+        $perPage = max(1, min(50, $perPage));
+        $page = max(1, $page);
+        return $this->db->fetchAll(
+            'SELECT event_type, created_at, ip_address FROM test_activity_events WHERE session_id = ? ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?',
+            [$sessionId, $perPage, ($page - 1) * $perPage]
+        );
+    }
+
     public function saveAnswersForItems(int $sessionId, array $answers, array $items): void
     {
         if (!$items) {
