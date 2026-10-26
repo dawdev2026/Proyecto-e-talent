@@ -45,6 +45,14 @@ INSERT INTO platform_settings (setting_key, setting_value) VALUES
     ('app_font_url', 'https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap')
 ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value);
 
+-- Branding institucional de Carabineros (empresa 5).
+INSERT INTO company_branding (company_id, setting_key, setting_value) VALUES
+    (5, 'login_title', 'Carabineros'),
+    (5, 'login_logo_path', 'uploads/branding/company/5/logo_20260930110420_576e36.png'),
+    (5, 'login_background_path', 'uploads/branding/company/5/background_20260930111416_0b73bd.png'),
+    (5, 'topbar_name', 'Carabineros')
+ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value);
+
 -- El dominio raíz resuelve la identidad visual de la empresa 4 y sus valores
 -- sobrescriben los globales; mantener ambos niveles alineados evita divergencias.
 INSERT INTO company_branding (company_id, setting_key, setting_value) VALUES
